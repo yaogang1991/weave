@@ -14,7 +14,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -84,7 +84,7 @@ async def cmd_plan(args):
     # Save plan with deterministic filename
     plans_dir = Path("./data/plans")
     plans_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     plan_file = plans_dir / f"plan_{timestamp}_{uuid.uuid4().hex[:8]}.json"
 
     plan_data = _serialize_dag(dag)
@@ -103,8 +103,8 @@ async def cmd_plan(args):
     return dag
 
 
-async def cmd_execute(args):
-    """Execute a saved plan (DAG)."""
+async def cmd_execute(args, dag: DAG | None = None):
+    """Execute a saved plan (DAG). Accepts DAG directly to avoid re-serialization."""
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
@@ -114,19 +114,20 @@ async def cmd_execute(args):
     session_id = str(uuid.uuid4())
     store.create_session(session_id, "harness_run")
 
-    # Load DAG
-    with open(args.plan_file, "r") as f:
-        plan_data = json.load(f)
+    # Load DAG from file if not provided directly
+    if dag is None:
+        with open(args.plan_file, "r") as f:
+            plan_data = json.load(f)
 
-    dag = DAG(reasoning=plan_data.get("reasoning", ""))
-    for node_def in plan_data["nodes"]:
-        dag.add_node(DAGNode(
-            id=node_def["id"],
-            agent_type=node_def["agent_type"],
-            task_description=node_def["task"],
-        ))
-    for edge_def in plan_data.get("edges", []):
-        dag.add_edge(edge_def["from"], edge_def["to"])
+        dag = DAG(reasoning=plan_data.get("reasoning", ""))
+        for node_def in plan_data["nodes"]:
+            dag.add_node(DAGNode(
+                id=node_def["id"],
+                agent_type=node_def["agent_type"],
+                task_description=node_def["task"],
+            ))
+        for edge_def in plan_data.get("edges", []):
+            dag.add_edge(edge_def["from"], edge_def["to"])
 
     # Create guardrails (default: accept_edits for v2.0)
     policy = GuardrailPolicy(
@@ -186,20 +187,14 @@ async def cmd_run(args):
     # Plan
     dag = await cmd_plan(args)
 
-    # Save to temp file with full DAG data (including reasoning)
-    tmp_file = Path("./data/plans/_tmp_plan.json")
-    tmp_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(tmp_file, "w") as f:
-        json.dump(_serialize_dag(dag), f, indent=2, default=str)
-
-    # Create args for execute
+    # Pass DAG directly to avoid serialization round-trip
     exec_args = argparse.Namespace(
-        plan_file=str(tmp_file),
+        plan_file="",  # not used when dag is provided
         project=args.project,
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
     )
-    return await cmd_execute(exec_args)
+    return await cmd_execute(exec_args, dag=dag)
 
 
 def main():

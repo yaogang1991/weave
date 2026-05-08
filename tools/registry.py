@@ -15,7 +15,7 @@ from core.models import ToolResult
 # Maximum file size to read/search (10 MB)
 _MAX_FILE_SIZE = 10 * 1024 * 1024
 
-# File extensions that are typically binary and should be skipped by grep
+# File extensions that are typically binary
 _BINARY_EXTENSIONS = frozenset({
     ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe",
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".webp", ".tiff",
@@ -51,14 +51,8 @@ class ToolRegistry:
                 "type": "object",
                 "properties": {
                     "file_path": {"type": "string", "description": "Path to file"},
-                    "offset": {
-                        "type": "integer",
-                        "description": "Start line number (0-based, default 0)",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Max lines to return (default 2000)",
-                    },
+                    "offset": {"type": "integer", "description": "Start line (0-based, default 0)"},
+                    "limit": {"type": "integer", "description": "Max lines (default 2000)"},
                 },
                 "required": ["file_path"],
             },
@@ -123,9 +117,7 @@ class ToolRegistry:
 
         self.register("grep", self._tool_grep, {
             "name": "grep",
-            "description": (
-                "Search for text in files. Skips binary files and files > 10 MB."
-            ),
+            "description": "Search for text in files. Skips binary and large files.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -151,7 +143,7 @@ class ToolRegistry:
         })
 
     def register(self, name: str, handler: Callable, schema: dict):
-        """Register or replace a tool. Schema is keyed by name to prevent duplicates."""
+        """Register or replace a tool. Schema keyed by name prevents duplicates."""
         self._tools[name] = handler
         self._schemas[name] = schema
 
@@ -213,7 +205,6 @@ class ToolRegistry:
             selected = lines[offset:offset + limit]
             content = "".join(selected)
 
-            # Indicate truncation if not reading the full file
             if offset + limit < total_lines:
                 content += f"\n... ({total_lines - offset - limit} more lines, use offset/limit to read further)"
 
@@ -244,7 +235,6 @@ class ToolRegistry:
             if idx == -1:
                 return ToolResult(tool_call_id="", success=False, error="old_string not found in file")
 
-            # Report line number of the replacement for better feedback
             line_num = content[:idx].count("\n") + 1
             content = content[:idx] + new_string + content[idx + len(old_string):]
             path.write_text(content)
@@ -299,17 +289,27 @@ class ToolRegistry:
                 if not file_path.is_file():
                     continue
 
-                # Skip binary files by extension
+                # Fast reject by extension
                 if file_path.suffix.lower() in _BINARY_EXTENSIONS:
                     skipped_binary += 1
                     continue
 
-                # Skip files that are too large
+                # Size check
                 try:
                     if file_path.stat().st_size > _MAX_FILE_SIZE:
                         skipped_large += 1
                         continue
                 except OSError:
+                    continue
+
+                # Content-based binary detection: check first 8KB for null bytes
+                try:
+                    with open(file_path, "rb") as f:
+                        chunk = f.read(8192)
+                        if b"\x00" in chunk:
+                            skipped_binary += 1
+                            continue
+                except Exception:
                     continue
 
                 try:
@@ -322,7 +322,6 @@ class ToolRegistry:
                         ]
                         matches.extend(lines)
                 except (UnicodeDecodeError, UnicodeError):
-                    # Not a text file, skip silently
                     skipped_binary += 1
                     continue
                 except Exception:

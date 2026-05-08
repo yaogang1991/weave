@@ -8,7 +8,7 @@ Inspired by Anthropic's Session design:
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
@@ -28,12 +28,12 @@ class SessionStore:
     def create_session(self, session_id: str, workflow_name: str) -> SessionState:
         state = SessionState(
             session_id=session_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             status="created",
         )
         self.emit_event(session_id, EventType.SESSION_START, {
             "workflow": workflow_name,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
         return state
 

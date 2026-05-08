@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
 from core.models_v2 import (
@@ -43,14 +43,6 @@ class DAGExecutionEngine:
         failure_handler: Callable[[DAG, str, str], Coroutine[Any, Any, FailureDecision]],
         max_parallel: int = 5,
     ):
-        """
-        Args:
-            agent_executor: Async function that executes a single agent task.
-                Signature: async def executor(node, input_artifacts) -> result_dict
-            failure_handler: Async function called when a node fails.
-                Signature: async def handler(dag, failed_node_id, error) -> FailureDecision
-            max_parallel: Max concurrent agent executions
-        """
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
         self.max_parallel = max_parallel
@@ -68,60 +60,62 @@ class DAGExecutionEngine:
             except Exception:
                 pass  # Don't let event handlers break execution
 
+    def _skip_remaining(self, dag: DAG, levels: list[list[str]], from_level: int) -> None:
+        """Mark all pending nodes from from_level onward as SKIPPED."""
+        for remaining_level in levels[from_level:]:
+            for nid in remaining_level:
+                if dag.nodes[nid].status == NodeStatus.PENDING:
+                    dag.nodes[nid].status = NodeStatus.SKIPPED
+
     async def execute(self, dag: DAG) -> DAG:
         """
         Execute the full DAG.
 
         Returns the executed DAG with all nodes' status and results populated.
         """
-        # Compute execution levels via topological sort
         try:
             levels = dag.topological_levels()
         except ValueError as e:
             raise ValueError(f"Invalid DAG: {e}")
 
         for level_idx, level in enumerate(levels):
-            # Execute all nodes in this level in parallel
             semaphore = asyncio.Semaphore(self.max_parallel)
 
-            async def run_with_limit(node_id: str) -> None:
-                async with semaphore:
-                    await self._execute_single_node(dag, node_id)
+            async def run_with_limit(
+                node_id: str, sem: asyncio.Semaphore, dag_ref: DAG,
+            ) -> None:
+                async with sem:
+                    await self._execute_single_node(dag_ref, node_id)
 
-            # Run all nodes in this level
-            tasks = [run_with_limit(nid) for nid in level]
+            tasks = [run_with_limit(nid, semaphore, dag) for nid in level]
             await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Check if any critical failure occurred
             failed_in_level = [
                 nid for nid in level
                 if dag.nodes[nid].status == NodeStatus.FAILED
             ]
 
             if failed_in_level:
-                # Ask orchestrator how to proceed
                 for failed_id in failed_in_level:
                     decision = await self.failure_handler(
                         dag, failed_id, dag.nodes[failed_id].error
                     )
 
                     if decision.action == "abort":
-                        # Mark remaining nodes as skipped
-                        for remaining_level in levels[level_idx + 1:]:
-                            for nid in remaining_level:
-                                if dag.nodes[nid].status == NodeStatus.PENDING:
-                                    dag.nodes[nid].status = NodeStatus.SKIPPED
+                        self._skip_remaining(dag, levels, level_idx + 1)
                         return dag
 
                     elif decision.action == "retry":
                         await self._execute_single_node(dag, failed_id)
+                        # If retry did not resolve the failure, abort to keep state consistent
+                        if dag.nodes[failed_id].status == NodeStatus.FAILED:
+                            self._skip_remaining(dag, levels, level_idx + 1)
+                            return dag
 
                     elif decision.action == "skip":
                         dag.nodes[failed_id].status = NodeStatus.SKIPPED
 
                     elif decision.action == "replan":
-                        # Replanning is handled at orchestrator level
-                        # Just return current state, orchestrator will create new DAG
                         return dag
 
         return dag
@@ -133,11 +127,10 @@ class DAGExecutionEngine:
         if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
             return
 
-        # Gather input artifacts from dependency nodes
         input_artifacts = self._collect_input_artifacts(dag, node_id)
 
         node.status = NodeStatus.RUNNING
-        node.started_at = datetime.utcnow()
+        node.started_at = datetime.now(timezone.utc)
 
         await self._emit(ExecutionEvent(
             node_id=node_id,
@@ -146,11 +139,10 @@ class DAGExecutionEngine:
         ))
 
         try:
-            # Execute the agent
             result = await self.agent_executor(node, input_artifacts)
 
             node.status = NodeStatus.SUCCESS
-            node.completed_at = datetime.utcnow()
+            node.completed_at = datetime.now(timezone.utc)
             node.result = result
             node.output_artifacts = result.get("artifacts", [])
 
@@ -171,12 +163,11 @@ class DAGExecutionEngine:
                     event_type="retrying",
                     details={"attempt": node.retry_count, "error": str(e)},
                 ))
-                # Retry after short delay
                 await asyncio.sleep(1)
                 await self._execute_single_node(dag, node_id)
             else:
                 node.status = NodeStatus.FAILED
-                node.completed_at = datetime.utcnow()
+                node.completed_at = datetime.now(timezone.utc)
 
                 await self._emit(ExecutionEvent(
                     node_id=node_id,

@@ -34,7 +34,7 @@ from session.store import SessionStore
 class IntelligentOrchestrator:
     """
     Orchestrator Agent: Plans DAG, monitors execution, adapts to failures.
-
+    
     This is itself an LLM-driven agent, not a hardcoded state machine.
     It queries the AgentRegistry to discover available workers,
     then uses LLM reasoning to decompose tasks and build execution DAGs.
@@ -69,7 +69,7 @@ Return a JSON object with this exact structure:
     }},
     {{
       "id": "impl",
-      "agent_type": "generator",
+      "agent_type": "generator", 
       "task": "Implement the planned feature following project conventions..."
     }},
     {{
@@ -150,7 +150,7 @@ Choose "retry" if:
     async def plan(self, requirement: str, project_context: dict | None = None) -> DAG:
         """
         Generate an execution DAG from user requirements.
-
+        
         This is the core planning method. It:
         1. Discovers available agents from registry
         2. Builds a dynamic planning prompt
@@ -175,6 +175,7 @@ Choose "retry" if:
             {"role": "user", "content": user_prompt},
         ]
 
+        # Get tools schema for the orchestrator (no tools needed for planning)
         response = self.llm.call(messages, tools=[])
 
         # Step 4: Parse and validate the plan
@@ -198,7 +199,7 @@ Choose "retry" if:
     async def adapt_to_failure(self, dag: DAG, failed_node_id: str, error: str = "") -> FailureDecision:
         """
         Handle a failed node by asking the orchestrator LLM to decide.
-
+        
         This is the adaptive part - the orchestrator reasons about the failure
         and decides the best course of action, rather than using hardcoded rules.
         """

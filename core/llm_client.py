@@ -101,8 +101,6 @@ class LLMClient:
                 anthropic_messages.append({"role": "assistant", "content": content_blocks})
 
             elif msg.get("role") == "tool":
-                # Accumulate tool results; they will be flushed when we hit
-                # a non-tool message or end of iteration.
                 pending_tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": msg["tool_call_id"],
