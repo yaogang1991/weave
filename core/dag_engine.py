@@ -15,7 +15,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
-from core.models_v2 import (
+from core.models import (
     DAG,
     DAGNode,
     NodeStatus,

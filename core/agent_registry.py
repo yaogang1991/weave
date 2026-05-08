@@ -16,7 +16,7 @@ from typing import Callable
 
 import yaml
 
-from core.models_v2 import AgentCapability
+from core.models import AgentCapability
 
 
 class AgentRegistry:

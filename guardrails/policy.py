@@ -90,7 +90,7 @@ class Guardrails:
         Execute a tool call through the guardrail system.
 
         Checks permissions before delegating to the tool registry.
-        This is the single entry point that v2.0 agents should use.
+        This is the single entry point that agents should use.
         """
         allowed, reason = self.evaluate(tool_name, arguments)
         if not allowed:

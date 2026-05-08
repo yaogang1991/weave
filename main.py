@@ -6,6 +6,8 @@ Usage:
     python main.py plan "Build a REST API for user authentication"
     python main.py execute ./data/plans/plan_xxx.json
     python main.py run "Add OAuth2 support" --project ./my-project
+    python main.py viz                    # Launch visualizer dashboard
+    python main.py run "Build API" --viz  # Run with live visualization
 """
 
 import argparse
@@ -14,6 +16,7 @@ import json
 import os
 import sys
 import uuid
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from core.config import HarnessConfig, LLMConfig
 from core.agent_registry import AgentRegistry
-from core.models_v2 import DAG, DAGNode
+from core.models import DAG, DAGNode
 from core.dag_engine import DAGExecutionEngine
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from agent.agent_pool import AgentPool
@@ -129,7 +132,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         for edge_def in plan_data.get("edges", []):
             dag.add_edge(edge_def["from"], edge_def["to"])
 
-    # Create guardrails (default: accept_edits for v2.0)
+    # Create guardrails (default: accept_edits)
     policy = GuardrailPolicy(
         mode=PermissionMode.ACCEPT_EDITS,
         auto_approve_read=True,
@@ -157,7 +160,39 @@ async def cmd_execute(args, dag: DAG | None = None):
         max_parallel=args.max_parallel,
     )
 
-    # Progress callback
+    # ── Visualization setup ──────────────────────────────────
+    bridge = None
+    server_task = None
+    cli_renderer = None
+
+    if args.viz or args.visualize:
+        from visualizer.cli_renderer import CLIDAGRenderer
+
+        # CLI renderer (always enabled when --viz or --visualize)
+        cli_renderer = CLIDAGRenderer()
+        engine.on_event(cli_renderer.handle_event)
+        cli_renderer.render_dag(dag)
+
+        if args.visualize:
+            from visualizer.event_bridge import WebSocketEventBridge
+            import uvicorn
+            from visualizer.server import app as viz_app
+
+            bridge = WebSocketEventBridge()
+            engine.on_event(bridge.handle_event)
+
+            # Start web server in background
+            server_cfg = uvicorn.Config(viz_app, host="0.0.0.0", port=8080, log_level="warning")
+            server = uvicorn.Server(server_cfg)
+            server_task = asyncio.create_task(server.serve())
+            await asyncio.sleep(0.5)  # Let server start
+
+            if not args.no_browser:
+                webbrowser.open("http://127.0.0.1:8080")
+
+        await bridge.broadcast_session_start(session_id, _serialize_dag(dag)) if bridge else None
+
+    # Default console progress
     async def on_event(event):
         print(f"  [{event.event_type.upper()}] {event.node_id}: {event.details}")
 
@@ -179,6 +214,23 @@ async def cmd_execute(args, dag: DAG | None = None):
     print(f"  Skipped: {summary['skipped']}")
     print(f"  Session ID: {session_id}")
 
+    # Broadcast completion to visualization clients
+    if bridge:
+        await bridge.broadcast_session_end(session_id, summary)
+
+    # CLI renderer final summary
+    if cli_renderer:
+        cli_renderer.render_summary(result_dag)
+
+    # Keep server alive briefly so clients can see final state
+    if server_task and not server_task.done():
+        await asyncio.sleep(2)
+        server_task.cancel()
+        try:
+            await server_task
+        except asyncio.CancelledError:
+            pass
+
     return result_dag
 
 
@@ -193,8 +245,28 @@ async def cmd_run(args):
         project=args.project,
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
+        viz=args.viz,
+        visualize=args.visualize,
+        no_browser=args.no_browser,
     )
     return await cmd_execute(exec_args, dag=dag)
+
+
+async def cmd_viz(args):
+    """Launch the visualizer web server."""
+    from visualizer.server import run_server
+
+    host = args.host
+    port = args.port
+
+    print(f"🚀 Starting Harness Visualizer at http://{host}:{port}")
+    print("Press Ctrl+C to stop")
+
+    if not args.no_browser:
+        await asyncio.sleep(1)
+        webbrowser.open(f"http://{host}:{port}")
+
+    await run_server(host=host, port=port)
 
 
 def main():
@@ -212,8 +284,12 @@ Examples:
   # Plan + Execute in one step
   python main.py run "Add OAuth2 support" --project ./my-project
 
-  # Use project-specific agents
-  python main.py run "Design UI" --project ./my-project
+  # Run with live visualization
+  python main.py run "Build API" --viz
+  python main.py run "Build API" --visualize --no-browser
+
+  # Launch standalone visualizer
+  python main.py viz --port 8080
         """,
     )
 
@@ -244,12 +320,25 @@ Examples:
     # execute command
     exec_parser = subparsers.add_parser("execute", help="Execute a saved plan")
     exec_parser.add_argument("plan_file", help="Path to plan JSON file")
+    exec_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
+    exec_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
+    exec_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     exec_parser.set_defaults(func=cmd_execute)
 
     # run command (plan + execute)
     run_parser = subparsers.add_parser("run", help="Plan and execute in one step")
     run_parser.add_argument("requirement", help="User requirement")
+    run_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
+    run_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
+    run_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     run_parser.set_defaults(func=cmd_run)
+
+    # viz command (standalone server)
+    viz_parser = subparsers.add_parser("viz", help="Launch visualizer dashboard")
+    viz_parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0)")
+    viz_parser.add_argument("--port", type=int, default=8080, help="Server port (default: 8080)")
+    viz_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    viz_parser.set_defaults(func=cmd_viz)
 
     args = parser.parse_args()
 
@@ -257,10 +346,11 @@ Examples:
         parser.print_help()
         sys.exit(1)
 
-    # Ensure API key
-    if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY or OPENAI_API_KEY must be set")
-        sys.exit(1)
+    # Ensure API key (skip for viz command which doesn't need LLM)
+    if args.command != "viz":
+        if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("OPENAI_API_KEY"):
+            print("Error: ANTHROPIC_API_KEY or OPENAI_API_KEY must be set")
+            sys.exit(1)
 
     asyncio.run(args.func(args))
 

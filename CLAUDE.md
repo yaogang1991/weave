@@ -53,16 +53,17 @@ Harness Core / Dumb Loop (Agent Worker + Tool Registry + Guardrails)
 Execution Layer (Sandbox, Git, Reporter)
 ```
 
-**v2.0 flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `AgentPool` → failures go back to orchestrator via `adapt_to_failure()`.
+**Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `AgentPool` → failures go back to orchestrator via `adapt_to_failure()`.
 
 **Key module responsibilities**:
-- `core/models_v2.py` — DAG, DAGNode, AgentCapability, HandoffArtifact data models
+- `core/models.py` — All data models: DAG, DAGNode, AgentCapability, HandoffArtifact, events, session state, guardrails
 - `core/config.py` — HarnessConfig, LLMConfig, SandboxConfig
 - `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.harness/agents.yaml`)
 - `core/dag_engine.py` — Topological sort, parallel execution with `asyncio.gather`, failure callback
+- `core/llm_client.py` — Unified LLM client (Anthropic/OpenAI)
 - `orchestrator/intelligent_orchestrator.py` — LLM-driven planning and failure adaptation
 - `agent/agent_pool.py` — Worker instance pool with independent contexts
-- `agent/worker.py` — Single agent LLM call loop (v1.0)
+- `agent/worker.py` — Single agent LLM call loop
 - `tools/registry.py` — Built-in tools (read/write/edit/bash/glob/grep/git) + MCP extension point
 - `guardrails/policy.py` — Four-layer defense: RiskLevel, PermissionMode (plan/default/accept_edits/auto/dont_ask)
 - `session/store.py` — Append-only JSONL event storage, state recovery via replay
@@ -72,18 +73,16 @@ Execution Layer (Sandbox, Git, Reporter)
 
 - **Language**: Docstrings and code comments in English. User-facing docs (README, ARCHITECTURE) in Chinese.
 - **Type annotations**: Use Python 3.10+ syntax (`str | None`, `list[dict[str, Any]]`).
-- **Data models**: All must use `pydantic.BaseModel` with `model_dump()` serialization.
+- **Data models**: All must use `pydantic.BaseModel` with `model_dump()` serialization. Defined in `core/models.py`.
 - **Event naming**: `{domain}.{action}` convention (e.g., `workflow.stage_start`, `agent.tool_use`).
 - **Error handling**: Tools return `ToolResult` wrapper (success/failure), never throw exceptions that break the main loop. DAG engine catches exceptions via `traceback.format_exc()` and writes to node `error` field.
 - **No circular imports**: Modules layered by responsibility (`core/` → `agent/` → `orchestrator/` → `tools/`).
-- **v1/v2 coexistence**: `models.py` + `engine.py` = v1.0 (linear workflow); `models_v2.py` + `dag_engine.py` + `intelligent_orchestrator.py` = v2.0 (DAG). Both kept for compatibility.
 
 ## When Modifying Code
 
 - **Adding a tool**: Register in `tools/registry.py`, add risk level in `guardrails/policy.py` `RISK_MAP`.
 - **Adding a default agent type**: Add to `core/agent_registry.py` `_register_defaults()`, update prompt template in `orchestrator/intelligent_orchestrator.py`.
-- **v1.0 changes**: Check both `models.py` and `orchestrator/engine.py`.
-- **v2.0 changes**: Check `models_v2.py`, `dag_engine.py`, `intelligent_orchestrator.py`, `agent_pool.py` together.
+- **Data model changes**: Edit `core/models.py` — it is the single source of truth for all models.
 - **State is externalized**: All runtime state lives in `./data/events/` (JSONL) and `./data/artifacts/`. Agent context windows are just cache.
 
 ## Runtime Data

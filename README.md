@@ -64,7 +64,7 @@ python main.py execute ./data/plans/plan_xxx.json
 
 ## 工作流编排
 
-Harness 默认使用 **v2.0 智能多 Agent 编排**：由 LLM 动态生成 DAG 执行计划，支持并行执行与失败自适应。
+Harness 采用 **智能多 Agent 编排**：由 LLM 动态生成 DAG 执行计划，支持并行执行与失败自适应。
 
 ```bash
 python main.py run "Add OAuth2 support" --project ./my-project --max-parallel 5

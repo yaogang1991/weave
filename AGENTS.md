@@ -1,6 +1,6 @@
 # Unattended Software Development Harness — Agent Guide
 
-> 本文档供 AI Coding Agent 阅读。如果你对人类用户可见的概览感兴趣，请查看 `README.md`；如果你需要架构细节，请查看 `ARCHITECTURE_V2.md`。
+> 本文档供 AI Coding Agent 阅读。如果你对人类用户可见的概览感兴趣，请查看 `README.md`；如果你需要架构细节，请查看 `ARCHITECTURE.md`。
 
 ---
 
@@ -8,7 +8,7 @@
 
 本项目是一个**自托管的无人看守软件开发工作流 Harness**，基于 [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) 架构理念实现。它通过编排多个 LLM Agent 来自动化完成软件需求分析、设计、编码、测试和交付的全流程。
 
-项目当前以 **v2.0** 为默认入口：基于 LLM 动态生成 DAG 的智能多 Agent 编排（支持并行执行、失败自适应）。v1.0 核心模块保留在代码库中供兼容参考，但不再通过主入口暴露。
+项目采用 LLM 动态生成 DAG 的智能多 Agent 编排架构（支持并行执行、失败自适应）。
 
 ---
 
@@ -33,17 +33,16 @@
 ```
 harness/
 ├── core/                          # 核心模型与引擎
-│   ├── models.py                  # v1.0 Pydantic 模型（Event、SessionState、WorkflowStage 等）
-│   ├── models_v2.py               # v2.0 Pydantic 模型（DAG、DAGNode、AgentCapability、HandoffArtifact 等）
+│   ├── models.py                  # 所有 Pydantic 数据模型（DAG、Event、Session、Guardrail 等）
 │   ├── config.py                  # 配置管理（HarnessConfig、LLMConfig、SandboxConfig、MCPConfig）
 │   ├── agent_registry.py          # Agent 能力注册表（默认 planner/generator/evaluator + 项目自定义）
-│   └── dag_engine.py              # v2.0 DAG 拓扑调度与并行执行引擎
+│   ├── llm_client.py              # 统一 LLM 客户端（Anthropic / OpenAI）
+│   └── dag_engine.py              # DAG 拓扑调度与并行执行引擎
 ├── agent/                         # Agent Worker 层
-│   ├── worker.py                  # v1.0 单 Agent LLM 调用循环（Anthropic / OpenAI）
-│   └── agent_pool.py              # v2.0 Agent 实例池（独立上下文、延迟创建）
+│   ├── worker.py                  # 单 Agent LLM 调用循环
+│   └── agent_pool.py              # Agent 实例池（独立上下文、延迟创建）
 ├── orchestrator/                  # 编排层
-│   ├── engine.py                  # v1.0 线性工作流编排器（Orchestrator）
-│   └── intelligent_orchestrator.py # v2.0 智能编排 Agent（LLM 驱动规划与失败处理）
+│   └── intelligent_orchestrator.py # 智能编排 Agent（LLM 驱动规划与失败处理）
 ├── tools/                         # 工具层
 │   └── registry.py                # 工具注册表（read/write/edit/bash/glob/grep/git + MCP 扩展位）
 ├── guardrails/                    # 安全与权限
@@ -57,14 +56,10 @@ harness/
 ├── projects/                      # 项目自定义 Agent 示例
 │   └── example/
 │       └── agents.yaml            # 自定义 Agent 配置样例（ui_designer/db_admin/security_auditor）
-├── workflows/                     # v1.0 工作流定义
-│   ├── software_dev.yaml          # 完整软件开发流程（6 个 Stage）
-│   ├── quick_feature.yaml         # 快速功能实现（2 个 Stage）
-│   └── code_review.yaml           # 仅代码审查（1 个 Stage）
-├── main.py                        # 默认 CLI 入口（v2.0 智能编排）
+├── main.py                        # CLI 入口
 ├── requirements.txt               # 依赖列表
 ├── README.md                      # 面向人类的项目说明（中文）
-└── ARCHITECTURE_V2.md             # v2.0 架构设计文档（中文）
+└── ARCHITECTURE.md                # 架构设计文档（中文）
 ```
 
 ---
@@ -107,7 +102,7 @@ python main.py run "..." --max-parallel 5
 
 ### 项目自定义 Agent
 
-在项目根目录创建 `.harness/agents.yaml`，v2.0 编排器会自动加载：
+在项目根目录创建 `.harness/agents.yaml`，编排器会自动加载：
 
 ```yaml
 agents:
@@ -127,7 +122,7 @@ agents:
 4. **事件命名**：遵循 Anthropic 的 `{domain}.{action}` 约定，如 `workflow.stage_start`、`agent.tool_use`。
 5. **文件组织**：
    - 按职责分层（`core/`, `agent/`, `orchestrator/`, `tools/` 等），禁止循环导入。
-   - v1 与 v2 模型共存，`models.py` 保留兼容，`models_v2.py` 供新架构使用。
+   - 所有数据模型统一在 `core/models.py`。
    - 入口文件 `main.py` 通过 `sys.path.insert(0, str(Path(__file__).parent))` 自引用项目根目录。
 6. **错误处理**：
    - 工具层返回 `ToolResult` 封装成功/失败，避免抛异常中断主循环。
@@ -171,7 +166,7 @@ Guardrails（`guardrails/policy.py`）实现四层防御：
 - `auto`：基于 RiskLevel 自动审批低风险操作
 - `dont_ask`：仅允许预授权工具列表中的工具
 
-当前 v1.0 默认使用 `ACCEPT_EDITS` 模式（见 `orchestrator/engine.py`）。
+当前默认使用 `ACCEPT_EDITS` 模式（见 `main.py`）。
 
 ---
 
@@ -179,7 +174,7 @@ Guardrails（`guardrails/policy.py`）实现四层防御：
 
 1. **Artifact-Centric**：所有状态外化到事件日志（`./data/events/*.jsonl`）和文件产物（`./data/artifacts/`），Agent 的上下文窗口只是缓存。
 2. **Append-Only**：SessionStore 是追加式 JSONL，不允许修改历史事件。状态通过重放事件重建。
-3. **Context Isolation（v2.0）**：每个 Worker Agent 拥有独立上下文，任务之间不共享消息历史，交接通过 `HandoffArtifact` 完成。
+3. **Context Isolation**：每个 Worker Agent 拥有独立上下文，任务之间不共享消息历史，交接通过 `HandoffArtifact` 完成。
 4. **DAG 并行约束**：同层节点通过 `asyncio.gather` 并行执行，`max_parallel` 由信号量控制（默认 3~5）。
 5. **默认三 Agent**：`planner`（架构师）、`generator`（工程师）、`evaluator`（QA）为出厂设置，不可注销。项目可通过 `.harness/agents.yaml` 扩展。
 6. **Checkpoint**：`session/store.py` 支持通过复制事件日志创建命名检查点，但当前未在编排层自动触发（配置中预留 `checkpoint_interval`）。
@@ -193,7 +188,7 @@ Guardrails（`guardrails/policy.py`）实现四层防御：
   - `./data/events/` — Session 事件日志（JSONL）
   - `./data/artifacts/` — 各 Session 的产物文件
   - `./data/reports/` — Markdown 报告
-  - `./data/plans/` — v2.0 生成的 DAG 计划（JSON）
+  - `./data/plans/` — 生成的 DAG 计划（JSON）
 - 如需生产部署，建议：
   - 将 `data/` 挂载到持久化卷。
   - 为 Sandbox 启用 Docker 运行时（当前配置中 `SandboxConfig.runtime` 默认 `"docker"`，但 `tools/registry.py` 中的 `bash` 工具当前直接调用 `subprocess.run`）。
@@ -202,8 +197,8 @@ Guardrails（`guardrails/policy.py`）实现四层防御：
 
 ## 对 Agent 的提示
 
-- 修改 v1.0 相关代码时，注意同时检查 `models.py` 和 `orchestrator/engine.py`。
-- 修改 v2.0 相关代码时，注意 `models_v2.py`、`dag_engine.py`、`intelligent_orchestrator.py` 和 `agent_pool.py` 的联动。
+- 修改数据模型时，编辑 `core/models.py`（唯一的模型源文件）。
+- 修改编排相关代码时，注意 `dag_engine.py`、`intelligent_orchestrator.py` 和 `agent_pool.py` 的联动。
 - 如需新增工具，在 `tools/registry.py` 中注册，并在 `guardrails/policy.py` 的 `RISK_MAP` 中标注风险等级。
 - 如需新增默认 Agent 类型，在 `core/agent_registry.py` 的 `_register_defaults()` 中添加，并同步更新 `orchestrator/intelligent_orchestrator.py` 的 prompt 模板中的规划规则。
-- 本项目文档以**中文**为主（`README.md`、`ARCHITECTURE_V2.md`），但代码注释和文档字符串以**英文**为主。修改代码时保持这一惯例：文档字符串用英文，面向用户的消息/日志可保留中文或英文。
+- 本项目文档以**中文**为主（`README.md`、`ARCHITECTURE.md`），但代码注释和文档字符串以**英文**为主。修改代码时保持这一惯例：文档字符串用英文，面向用户的消息/日志可保留中文或英文。

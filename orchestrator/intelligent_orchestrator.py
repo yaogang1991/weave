@@ -17,7 +17,7 @@ import json
 import re
 from typing import Any
 
-from core.models_v2 import (
+from core.models import (
     DAG,
     DAGNode,
     DAGEdge,

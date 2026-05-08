@@ -14,7 +14,7 @@ import asyncio
 from typing import Any
 
 from core.models import AgentMessage
-from core.models_v2 import DAGNode, HandoffArtifact, AgentCapability
+from core.models import DAGNode, HandoffArtifact, AgentCapability
 from core.config import LLMConfig
 from core.agent_registry import AgentRegistry
 from session.store import SessionStore
@@ -159,6 +159,16 @@ Execute using your available tools. Produce clear, verifiable output.
     async def _run_with_tools(self, prompt: str, session_id: str) -> dict[str, Any]:
         """Run agent loop and collect results via AgentWorker."""
 
+        # AgentWorker expects a tool_executor with execute(name, arguments) -> ToolResult
+        # WorkerAgent.execute() is the *task* interface, so we wrap _execute_tool.
+        class _ToolExecutor:
+            def __init__(self, agent: WorkerAgent):
+                self._agent = agent
+            def execute(self, name: str, arguments: dict):
+                return self._agent._execute_tool(name, arguments)
+
+        tool_executor = _ToolExecutor(self)
+
         def _run_sync() -> list[AgentMessage]:
             return list(
                 self.worker.run(
@@ -166,7 +176,7 @@ Execute using your available tools. Produce clear, verifiable output.
                     system_prompt=self.system_prompt,
                     user_message=prompt,
                     tools=self.tools,
-                    tool_executor=self,
+                    tool_executor=tool_executor,
                     max_iterations=self.max_iterations,
                 )
             )
