@@ -89,18 +89,6 @@ class AgentMessage(BaseModel):
     tool_call_id: str | None = None
 
 
-class SessionState(BaseModel):
-    """Recoverable session state derived from event log."""
-    session_id: str
-    created_at: datetime
-    status: Literal["created", "running", "idle", "error", "completed"] = "created"
-    current_stage: str | None = None
-    stages_completed: list[str] = Field(default_factory=list)
-    artifacts: dict[str, str] = Field(default_factory=dict)  # artifact_name -> file_path
-    context_window: list[AgentMessage] = Field(default_factory=list)
-    metrics: SessionMetrics = Field(default_factory=lambda: SessionMetrics())
-
-
 class SessionMetrics(BaseModel):
     """Runtime metrics for a session."""
     total_events: int = 0
@@ -110,6 +98,18 @@ class SessionMetrics(BaseModel):
     total_duration_ms: int = 0
     stage_durations: dict[str, int] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+
+
+class SessionState(BaseModel):
+    """Recoverable session state derived from event log."""
+    session_id: str
+    created_at: datetime
+    status: Literal["created", "running", "idle", "error", "completed"] = "created"
+    current_stage: str | None = None
+    stages_completed: list[str] = Field(default_factory=list)
+    artifacts: dict[str, str] = Field(default_factory=dict)  # artifact_name -> file_path
+    context_window: list[AgentMessage] = Field(default_factory=list)
+    metrics: SessionMetrics = Field(default_factory=SessionMetrics)
 
 
 class WorkflowStage(BaseModel):

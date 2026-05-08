@@ -14,7 +14,7 @@ and agent assignment, but it does NOT execute tasks itself.
 from __future__ import annotations
 
 import json
-import os
+import re
 from typing import Any
 
 from core.models_v2 import (
@@ -27,7 +27,7 @@ from core.models_v2 import (
 )
 from core.agent_registry import AgentRegistry
 from core.config import LLMConfig
-from agent.worker import AgentWorker
+from core.llm_client import LLMClient
 from session.store import SessionStore
 
 
@@ -145,7 +145,7 @@ Choose "retry" if:
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
-        self.agent = AgentWorker(llm_config, session_store)
+        self.llm = LLMClient(llm_config)
 
     async def plan(self, requirement: str, project_context: dict | None = None) -> DAG:
         """
@@ -176,7 +176,7 @@ Choose "retry" if:
         ]
 
         # Get tools schema for the orchestrator (no tools needed for planning)
-        response = self.agent._call_llm(messages, tools=[])
+        response = self.llm.call(messages, tools=[])
 
         # Step 4: Parse and validate the plan
         plan_data = self._extract_json(response.get("content", ""))
@@ -228,7 +228,7 @@ Choose "retry" if:
             {"role": "user", "content": f"Handle failure of node {failed_node_id}"},
         ]
 
-        response = self.agent._call_llm(messages, tools=[])
+        response = self.llm.call(messages, tools=[])
 
         try:
             decision_data = self._extract_json(response.get("content", ""))
@@ -257,15 +257,33 @@ Choose "retry" if:
         return dag
 
     def _extract_json(self, text: str) -> dict:
-        """Extract JSON from LLM response (handles markdown code blocks)."""
-        text = text.strip()
-        
-        # Try to find JSON in code block
-        if "```json" in text:
-            json_str = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            json_str = text.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = text
+        """
+        Extract JSON from LLM response (handles markdown code blocks).
 
-        return json.loads(json_str)
+        Strategy: fenced code block → brace-matching for raw JSON.
+        """
+        text = text.strip()
+
+        # Strategy 1: fenced JSON code block
+        match = re.search(r"```(?:json)?\s*\n(.*?)```", text, re.DOTALL)
+        if match:
+            return json.loads(match.group(1).strip())
+
+        # Strategy 2: find the first top-level JSON object via brace matching
+        brace_depth = 0
+        start = None
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if brace_depth == 0:
+                    start = i
+                brace_depth += 1
+            elif ch == '}':
+                brace_depth -= 1
+                if brace_depth == 0 and start is not None:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        start = None
+                        continue
+
+        raise ValueError(f"No valid JSON object found in LLM response")
