@@ -3,6 +3,9 @@ Evaluator: automated evaluation and contract verification.
 Inspired by Anthropic's three-agent harness evaluator.
 """
 
+from __future__ import annotations
+
+import re
 import subprocess
 from pathlib import Path
 
@@ -33,25 +36,44 @@ class EvaluatorEngine:
             {"stage": stage_name, "criteria": criteria, "artifact": artifact_path},
         )
 
-        results = {}
+        results: dict[str, bool] = {}
         score = 0.0
-        feedback_parts = []
+        feedback_parts: list[str] = []
+        uncheckable: list[str] = []
 
         for criterion in criteria:
-            passed, msg = self._check_criterion(criterion, artifact_path)
+            passed, msg, auto = self._check_criterion(criterion, artifact_path)
             results[criterion] = passed
             if passed:
                 score += 10.0 / len(criteria)
-            feedback_parts.append(f"{'✅' if passed else '❌'} {criterion}: {msg}")
+            if auto:
+                feedback_parts.append(f"{'PASS' if passed else 'FAIL'} {criterion}: {msg}")
+            else:
+                feedback_parts.append(f"WARN {criterion}: {msg}")
+                uncheckable.append(criterion)
 
-        passed = all(results.values())
+        # A criterion that cannot be automatically verified should NOT
+        # be treated as passed — mark the whole evaluation as incomplete
+        # so the caller knows human review is needed.
+        all_auto_passed = all(results.values())
+        has_uncheckable = len(uncheckable) > 0
+
+        overall_passed = all_auto_passed and not has_uncheckable
+
         feedback = "\n".join(feedback_parts)
+        if has_uncheckable:
+            feedback += (
+                f"\n\nWARNING: {len(uncheckable)} criterion/criteria could not be "
+                f"automatically verified and require manual review: "
+                f"{', '.join(uncheckable)}"
+            )
 
         result = EvaluationResult(
-            passed=passed,
+            passed=overall_passed,
             score=round(score, 1),
             criteria_results=results,
             feedback=feedback,
+            suggestions=uncheckable,
         )
 
         self.session_store.emit_event(
@@ -62,29 +84,45 @@ class EvaluatorEngine:
 
         return result
 
-    def _check_criterion(self, criterion: str, artifact_path: str) -> tuple[bool, str]:
-        """Check a single success criterion."""
+    def _check_criterion(self, criterion: str, artifact_path: str) -> tuple[bool, str, bool]:
+        """
+        Check a single success criterion.
+
+        Returns:
+            (passed, message, was_auto_checked)
+            was_auto_checked=False means this criterion could not be verified
+            and should be flagged for manual review.
+        """
         criterion_lower = criterion.lower()
         path = Path(artifact_path)
 
         if "test" in criterion_lower and "pass" in criterion_lower:
-            return self._run_tests(path)
+            passed, msg = self._run_tests(path)
+            return passed, msg, True
 
         if "coverage" in criterion_lower:
             target = self._extract_percentage(criterion_lower) or 80
-            return self._check_coverage(path, target)
+            passed, msg = self._check_coverage(path, target)
+            return passed, msg, True
 
         if "lint" in criterion_lower or "clean" in criterion_lower:
-            return self._run_lint(path)
+            passed, msg = self._run_lint(path)
+            return passed, msg, True
 
         if "file" in criterion_lower and "exist" in criterion_lower:
-            return self._check_files_exist(criterion_lower, path)
+            passed, msg = self._check_files_exist(criterion_lower, path)
+            return passed, msg, True
 
         if "no_critical" in criterion_lower or "no bug" in criterion_lower:
-            return self._check_no_critical_issues(path)
+            passed, msg = self._check_no_critical_issues(path)
+            return passed, msg, True
 
-        # Default: assume passed if we can't evaluate
-        return True, f"Criterion '{criterion}' not automatically checkable, manual review needed"
+        # Unrecognized criterion — do NOT assume passed
+        return False, (
+            f"Criterion '{criterion}' is not automatically checkable. "
+            f"Supported patterns: 'tests pass', 'coverage', 'lint clean', "
+            f"'file exist', 'no_critical'"
+        ), False
 
     def _run_tests(self, path: Path) -> tuple[bool, str]:
         try:
@@ -109,7 +147,6 @@ class EvaluatorEngine:
                 text=True,
                 timeout=120,
             )
-            # Parse coverage output
             for line in result.stdout.split("\n"):
                 if "TOTAL" in line:
                     parts = line.split()
@@ -136,7 +173,6 @@ class EvaluatorEngine:
             passed = result.returncode == 0
             return passed, "Lint clean" if passed else f"Lint issues:\n{result.stdout[:500]}"
         except FileNotFoundError:
-            # Try ruff if flake8 not available
             try:
                 result = subprocess.run(
                     ["ruff", "check", str(path)],
@@ -147,13 +183,11 @@ class EvaluatorEngine:
                 passed = result.returncode == 0
                 return passed, "Ruff clean" if passed else f"Ruff issues:\n{result.stdout[:500]}"
             except FileNotFoundError:
-                return True, "No linter available, skipping"
+                return False, "No linter available (install flake8 or ruff)"
         except Exception as e:
             return False, f"Lint error: {e}"
 
     def _check_files_exist(self, criterion: str, path: Path) -> tuple[bool, str]:
-        # Parse patterns from criterion like "files_exist: main.py, README.md"
-        import re
         match = re.search(r"[:\s]+(.+)", criterion)
         if match:
             files = [f.strip() for f in match.group(1).split(",")]
@@ -163,7 +197,6 @@ class EvaluatorEngine:
         return True, "No specific files listed"
 
     def _check_no_critical_issues(self, path: Path) -> tuple[bool, str]:
-        # Simple heuristic: check for TODO/FIXME/XXX markers
         try:
             content = path.read_text(errors="ignore")
             issues = []
@@ -176,7 +209,6 @@ class EvaluatorEngine:
             return True, "Could not check"
 
     def _extract_percentage(self, text: str) -> int | None:
-        import re
         match = re.search(r'(\d+)%', text)
         if match:
             return int(match.group(1))

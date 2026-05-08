@@ -4,6 +4,7 @@ Agent Pool: Manages multiple independent Agent instances.
 Each Worker Agent gets:
 - Independent LLM context (no shared context window)
 - Isolated tool registry (subset of tools based on agent type)
+- Guardrails enforcement on every tool call
 - Independent session tracking within the global session
 """
 
@@ -19,15 +20,17 @@ from core.agent_registry import AgentRegistry
 from session.store import SessionStore
 from agent.worker import AgentWorker
 from tools.registry import ToolRegistry
+from guardrails.policy import Guardrails
 
 
 class WorkerAgent:
     """
     A single Worker Agent instance with isolated context.
-    
+
     This wraps AgentWorker with:
     - Agent-type-specific system prompt
     - Context isolation (reset between tasks)
+    - Guardrails enforcement on tool calls
     - Artifact collection
     """
 
@@ -99,24 +102,34 @@ Evaluate against:
         llm_config: LLMConfig,
         session_store: SessionStore,
         tool_registry: ToolRegistry,
+        guardrails: Guardrails | None = None,
+        max_iterations: int = 50,
     ):
         self.capability = capability
         self.llm_config = llm_config
         self.session_store = session_store
         self.tool_registry = tool_registry
-        
+        self.guardrails = guardrails
+        self.max_iterations = max_iterations
+
         # Build agent-specific system prompt
         system_prompt = capability.system_prompt or self.SYSTEM_PROMPTS.get(
             capability.id,
             f"You are the {capability.name} agent. {capability.description}"
         )
-        
+
         self.worker = AgentWorker(llm_config, session_store)
         self.system_prompt = system_prompt
-        
+
         # Filter tools by agent type
         allowed = self.TOOL_ALLOWLIST.get(capability.id, {"read", "glob", "grep"})
         self.tools = [s for s in tool_registry.schemas if s["name"] in allowed]
+
+    def _execute_tool(self, name: str, arguments: dict):
+        """Execute a tool through guardrails if available, otherwise directly."""
+        if self.guardrails:
+            return self.guardrails.guarded_execute(name, arguments)
+        return self.tool_registry.execute(name, arguments)
 
     async def execute(
         self,
@@ -126,13 +139,13 @@ Evaluate against:
     ) -> dict[str, Any]:
         """
         Execute this agent's task with isolated context.
-        
+
         Context isolation: Each execution starts fresh - previous
         executions do not pollute the context window.
         """
         # Build context from input artifacts
         artifact_context = self._format_artifacts(input_artifacts)
-        
+
         full_prompt = f"""{artifact_context}
 
 Your task: {task}
@@ -153,8 +166,8 @@ Execute using your available tools. Produce clear, verifiable output.
                     system_prompt=self.system_prompt,
                     user_message=prompt,
                     tools=self.tools,
-                    tool_executor=self.tool_registry,
-                    max_iterations=8,
+                    tool_executor=self,
+                    max_iterations=self.max_iterations,
                 )
             )
 
@@ -185,7 +198,7 @@ Execute using your available tools. Produce clear, verifiable output.
         """Format input artifacts as context for the agent."""
         if not artifacts:
             return ""
-        
+
         parts = ["## Input from previous agents:"]
         for artifact in artifacts:
             parts.append(f"\n### From {artifact.from_agent}:")
@@ -198,7 +211,7 @@ Execute using your available tools. Produce clear, verifiable output.
 class AgentPool:
     """
     Pool of Worker Agent instances.
-    
+
     Creates agent instances on demand based on AgentRegistry capabilities.
     Each instance is independent with isolated context.
     """
@@ -209,11 +222,15 @@ class AgentPool:
         session_store: SessionStore,
         agent_registry: AgentRegistry,
         tool_registry: ToolRegistry | None = None,
+        guardrails: Guardrails | None = None,
+        max_iterations: int = 50,
     ):
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
         self.tool_registry = tool_registry or ToolRegistry()
+        self.guardrails = guardrails
+        self.max_iterations = max_iterations
         self._instances: dict[str, WorkerAgent] = {}
 
     def get_or_create(self, agent_type: str) -> WorkerAgent:
@@ -222,26 +239,28 @@ class AgentPool:
             capability = self.agent_registry.get(agent_type)
             if not capability:
                 raise ValueError(f"Unknown agent type: {agent_type}")
-            
+
             self._instances[agent_type] = WorkerAgent(
                 capability=capability,
                 llm_config=self.llm_config,
                 session_store=self.session_store,
                 tool_registry=self.tool_registry,
+                guardrails=self.guardrails,
+                max_iterations=self.max_iterations,
             )
-        
+
         return self._instances[agent_type]
 
     def get_executor(self, session_id: str):
         """
         Return a callable that the DAG engine can use to execute nodes.
-        
+
         Signature: async def executor(node, artifacts) -> result_dict
         """
         async def _executor(node: DAGNode, artifacts: list[HandoffArtifact]) -> dict:
             worker = self.get_or_create(node.agent_type)
             return await worker.execute(node.task_description, artifacts, session_id)
-        
+
         return _executor
 
     def reset_context(self, agent_type: str) -> None:

@@ -14,7 +14,7 @@ and agent assignment, but it does NOT execute tasks itself.
 from __future__ import annotations
 
 import json
-import os
+import re
 from typing import Any
 
 from core.models_v2 import (
@@ -27,14 +27,14 @@ from core.models_v2 import (
 )
 from core.agent_registry import AgentRegistry
 from core.config import LLMConfig
-from agent.worker import AgentWorker
+from core.llm_client import LLMClient
 from session.store import SessionStore
 
 
 class IntelligentOrchestrator:
     """
     Orchestrator Agent: Plans DAG, monitors execution, adapts to failures.
-    
+
     This is itself an LLM-driven agent, not a hardcoded state machine.
     It queries the AgentRegistry to discover available workers,
     then uses LLM reasoning to decompose tasks and build execution DAGs.
@@ -69,7 +69,7 @@ Return a JSON object with this exact structure:
     }},
     {{
       "id": "impl",
-      "agent_type": "generator", 
+      "agent_type": "generator",
       "task": "Implement the planned feature following project conventions..."
     }},
     {{
@@ -145,12 +145,12 @@ Choose "retry" if:
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
-        self.agent = AgentWorker(llm_config, session_store)
+        self.llm = LLMClient(llm_config)
 
     async def plan(self, requirement: str, project_context: dict | None = None) -> DAG:
         """
         Generate an execution DAG from user requirements.
-        
+
         This is the core planning method. It:
         1. Discovers available agents from registry
         2. Builds a dynamic planning prompt
@@ -175,8 +175,7 @@ Choose "retry" if:
             {"role": "user", "content": user_prompt},
         ]
 
-        # Get tools schema for the orchestrator (no tools needed for planning)
-        response = self.agent._call_llm(messages, tools=[])
+        response = self.llm.call(messages, tools=[])
 
         # Step 4: Parse and validate the plan
         plan_data = self._extract_json(response.get("content", ""))
@@ -199,7 +198,7 @@ Choose "retry" if:
     async def adapt_to_failure(self, dag: DAG, failed_node_id: str, error: str = "") -> FailureDecision:
         """
         Handle a failed node by asking the orchestrator LLM to decide.
-        
+
         This is the adaptive part - the orchestrator reasons about the failure
         and decides the best course of action, rather than using hardcoded rules.
         """
@@ -228,7 +227,7 @@ Choose "retry" if:
             {"role": "user", "content": f"Handle failure of node {failed_node_id}"},
         ]
 
-        response = self.agent._call_llm(messages, tools=[])
+        response = self.llm.call(messages, tools=[])
 
         try:
             decision_data = self._extract_json(response.get("content", ""))
@@ -257,15 +256,43 @@ Choose "retry" if:
         return dag
 
     def _extract_json(self, text: str) -> dict:
-        """Extract JSON from LLM response (handles markdown code blocks)."""
-        text = text.strip()
-        
-        # Try to find JSON in code block
-        if "```json" in text:
-            json_str = text.split("```json")[1].split("```")[0].strip()
-        elif "```" in text:
-            json_str = text.split("```")[1].split("```")[0].strip()
-        else:
-            json_str = text
+        """
+        Extract JSON from LLM response (handles markdown code blocks).
 
-        return json.loads(json_str)
+        Uses regex-based extraction with brace matching to handle edge cases
+        like nested code blocks or multiple code blocks in the response.
+        """
+        text = text.strip()
+
+        # Strategy 1: Try to find JSON inside ```json ... ``` blocks
+        json_block_match = re.search(r"```json\s*\n(.*?)```", text, re.DOTALL)
+        if json_block_match:
+            return json.loads(json_block_match.group(1).strip())
+
+        # Strategy 2: Try to find JSON inside generic ``` ... ``` blocks
+        generic_block_match = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
+        if generic_block_match:
+            candidate = generic_block_match.group(1).strip()
+            if candidate.startswith("{") or candidate.startswith("["):
+                return json.loads(candidate)
+
+        # Strategy 3: Find the first top-level JSON object using brace matching
+        # This handles cases where the LLM outputs raw JSON without code blocks
+        brace_depth = 0
+        start = None
+        for i, ch in enumerate(text):
+            if ch == '{':
+                if brace_depth == 0:
+                    start = i
+                brace_depth += 1
+            elif ch == '}':
+                brace_depth -= 1
+                if brace_depth == 0 and start is not None:
+                    candidate = text[start:i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        start = None
+                        continue
+
+        raise json.JSONDecodeError("No valid JSON object found in LLM response", text, 0)
