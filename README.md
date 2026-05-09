@@ -73,10 +73,63 @@ python main.py cancel job_abc123
 | `status <job_id>` | View task status |
 | `list [--status STATUS]` | List tasks |
 | `cancel <job_id>` | Cancel a task |
-| `worker [--concurrency N]` | Start Worker |
+| `worker [--concurrency N] [--non-interactive]` | Start Worker |
 | `recover` | Manually recover orphaned tasks |
+| `tickets [--status STATUS] [--job JOB_ID]` | List approval tickets |
+| `approve <ticket_id> [--reason ...]` | Approve ticket |
+| `reject <ticket_id> [--reason ...]` | Reject ticket |
 | `plan "<requirement>"` | Generate execution plan (no execution) |
 | `run "<requirement>"` | One-command plan + execute |
+
+### Approval Workflow (High-Risk Operations)
+
+When task execution reaches high-risk operations (such as `bash` commands), the system creates approval tickets:
+
+```bash
+# View pending tickets
+python main.py tickets
+# -> {"tickets": [{"id": "ticket_abc123", "tool_name": "bash", "status": "pending", ...}], "count": 1}
+
+# Approve ticket (task continues execution)
+python main.py approve ticket_abc123 --reason "Safe command, reviewed"
+
+# Reject ticket (task enters failure/retry)
+python main.py reject ticket_abc123 --reason "Too risky"
+```
+
+### Unattended Mode
+
+Fully automatic execution without human intervention:
+
+```bash
+# Method 1: Environment variable
+export HARNESS_NON_INTERACTIVE=true
+python main.py worker --concurrency 1
+
+# Method 2: Command-line parameter
+python main.py worker --concurrency 1 --non-interactive
+```
+
+In unattended mode:
+- Low risk (read/glob) auto-passes
+- Medium risk (write/edit) auto-passes
+- High risk (bash) auto-creates pending ticket, does not block process
+- Tickets auto-expire after timeout, tasks are handled by failure policy (retry or dead-letter)
+
+### Common Combinations
+
+```bash
+# Terminal 1: Start worker (unattended)
+python main.py worker --non-interactive
+
+# Terminal 2: Submit task
+python main.py submit "Build a REST API for user auth"
+
+# Terminal 3: Monitor status
+python main.py list --status queued
+python main.py list --status running
+python main.py tickets --status pending
+```
 
 ### Personal Mode Features
 
