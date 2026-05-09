@@ -291,6 +291,19 @@ class ApprovalRepository:
                 f"Cannot approve ticket {ticket_id}: status is {ticket.status.value}, "
                 f"expected {TicketStatus.PENDING.value}"
             )
+        # Reject expired tickets even if still in PENDING status
+        now = _utc_now()
+        if ticket.expires_at is not None and ticket.expires_at < now:
+            ticket.status = TicketStatus.EXPIRED
+            ticket.decided_at = now
+            ticket.decided_by = "timeout"
+            ticket.reason = "Ticket expired (timeout)"
+            ticket.updated_at = now
+            self._persist_ticket(ticket)
+            raise ValueError(
+                f"Cannot approve ticket {ticket_id}: ticket expired at "
+                f"{ticket.expires_at.isoformat()}"
+            )
         ticket.status = TicketStatus.APPROVED
         ticket.decided_at = _utc_now()
         ticket.decided_by = decided_by
@@ -317,6 +330,19 @@ class ApprovalRepository:
             raise ValueError(
                 f"Cannot reject ticket {ticket_id}: status is {ticket.status.value}, "
                 f"expected {TicketStatus.PENDING.value}"
+            )
+        # Reject expired tickets even if still in PENDING status
+        now = _utc_now()
+        if ticket.expires_at is not None and ticket.expires_at < now:
+            ticket.status = TicketStatus.EXPIRED
+            ticket.decided_at = now
+            ticket.decided_by = "timeout"
+            ticket.reason = "Ticket expired (timeout)"
+            ticket.updated_at = now
+            self._persist_ticket(ticket)
+            raise ValueError(
+                f"Cannot reject ticket {ticket_id}: ticket expired at "
+                f"{ticket.expires_at.isoformat()}"
             )
         ticket.status = TicketStatus.REJECTED
         ticket.decided_at = _utc_now()

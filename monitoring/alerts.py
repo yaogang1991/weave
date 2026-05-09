@@ -1,12 +1,14 @@
 """
 最小可用告警系统。
 
-支持五类告警规则：
+支持七类告警规则：
 1. 连续失败 >= N
 2. 任务时长 > 阈值
 3. dead_letter 新增
 4. 审批堆积 (pending_approvals)
 5. 审批超时激增 (approval_timeout_spike)
+6. 节点被 watchdog 杀死 (node_unhealthy_killed)
+7. 心跳丢失激增 (heartbeat_miss_spike)
 
 支持 webhook 通知，webhook 不可用时降级控制台告警。
 告警失败不中断主流程。
@@ -37,7 +39,8 @@ class AlertRule:
 
     name: str
     rule_type: str  # "consecutive_failures", "duration_threshold", "dead_letter",
-    # "pending_approvals", "approval_timeout_spike"
+    # "pending_approvals", "approval_timeout_spike",
+    # "node_unhealthy_killed", "heartbeat_miss_spike"
     threshold: float  # 阈值
     enabled: bool = True
     webhook_url: str = ""  # 可选的 webhook URL（覆盖全局）
@@ -121,14 +124,14 @@ class AlertManager:
             return self._check_duration_threshold(rule)
         if rule.rule_type == "dead_letter":
             return self._check_dead_letter(rule)
-        if rule.rule_type == "node_unhealthy_killed":
-            return self._check_node_unhealthy_killed(rule)
-        if rule.rule_type == "heartbeat_miss_spike":
-            return self._check_heartbeat_miss_spike(rule)
         if rule.rule_type == "pending_approvals":
             return self._check_pending_approvals(rule)
         if rule.rule_type == "approval_timeout_spike":
             return self._check_approval_timeout_spike(rule)
+        if rule.rule_type == "node_unhealthy_killed":
+            return self._check_node_unhealthy_killed(rule)
+        if rule.rule_type == "heartbeat_miss_spike":
+            return self._check_heartbeat_miss_spike(rule)
         return None
 
     def _check_consecutive_failures(
@@ -192,33 +195,6 @@ class AlertManager:
             )
         return None
 
-    def _check_node_unhealthy_killed(
-        self, rule: AlertRule
-    ) -> AlertEvent | None:
-        """检查是否有节点被 watchdog 杀死。"""
-        # 检查最近的 failed 节点中 error 包含 watchdog 的
-        jobs = self.job_repository.list_jobs()
-        killed_count = 0
-        for job in jobs:
-            if job.error_category == "watchdog":
-                killed_count += 1
-
-        if killed_count >= rule.threshold:
-            return AlertEvent(
-                rule_name=rule.name,
-                severity="critical",
-                message=f"{killed_count} 个节点被 watchdog 杀死（阈值: {rule.threshold}）",
-                details={"killed_count": killed_count, "threshold": rule.threshold},
-            )
-        return None
-
-    def _check_heartbeat_miss_spike(
-        self, rule: AlertRule
-    ) -> AlertEvent | None:
-        """检查心跳丢失激增。"""
-        # 实现从 metrics 中检查
-        return None  # Placeholder - implement if metrics support
-
     def _check_pending_approvals(
         self, rule: AlertRule
     ) -> AlertEvent | None:
@@ -274,6 +250,32 @@ class AlertManager:
                 },
             )
         return None
+
+    def _check_node_unhealthy_killed(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查是否有节点被 watchdog 杀死。"""
+        jobs = self.job_repository.list_jobs()
+        killed_count = 0
+        for job in jobs:
+            if job.error_category == "watchdog":
+                killed_count += 1
+
+        if killed_count >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical",
+                message=f"{killed_count} 个节点被 watchdog 杀死（阈值: {rule.threshold}）",
+                details={"killed_count": killed_count, "threshold": rule.threshold},
+            )
+        return None
+
+    def _check_heartbeat_miss_spike(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查心跳丢失激增。"""
+        # 实现从 metrics 中检查
+        return None  # Placeholder - implement if metrics support
 
     # ------------------------------------------------------------------
     # Sending
@@ -398,16 +400,6 @@ def create_default_alerts(
 
     manager.add_rule(
         AlertRule(
-            name="node_unhealthy_killed",
-            rule_type="node_unhealthy_killed",
-            threshold=1,
-            enabled=True,
-        )
-    )
-
-    # 审批规则
-    manager.add_rule(
-        AlertRule(
             name="pending_approvals_over_threshold",
             rule_type="pending_approvals",
             threshold=3,
@@ -420,6 +412,15 @@ def create_default_alerts(
             name="approval_timeout_spike",
             rule_type="approval_timeout_spike",
             threshold=2,
+            enabled=True,
+        )
+    )
+
+    manager.add_rule(
+        AlertRule(
+            name="node_unhealthy_killed",
+            rule_type="node_unhealthy_killed",
+            threshold=1,
             enabled=True,
         )
     )

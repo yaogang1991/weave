@@ -434,7 +434,7 @@ class DAGExecutionEngine:
     ) -> dict[str, Any]:
         """Execute a node while periodically refreshing heartbeat."""
         task = asyncio.create_task(self.agent_executor(node, input_artifacts))
-        heartbeat_interval = max(1.0, self.heartbeat_interval_sec)
+        heartbeat_interval = self.heartbeat_interval_sec
 
         while not task.done():
             try:

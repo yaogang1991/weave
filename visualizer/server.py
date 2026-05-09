@@ -27,7 +27,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel as PydanticModel
 
 from visualizer.event_bridge import WebSocketEventBridge
 from session.store import SessionStore
@@ -40,6 +41,13 @@ from control_plane.approval import ApprovalRepository
 
 app = FastAPI(title="Harness Visualizer", version="2.0")
 bridge = WebSocketEventBridge()
+
+
+# ── Request body models ──────────────────────────────────────────────
+
+
+class RejectRequest(PydanticModel):
+    reason: str = ""
 
 # Static files
 static_path = Path(__file__).parent / "static"
@@ -225,7 +233,12 @@ async def console_page():
 async def api_list_jobs(status: str | None = None):
     """List jobs with optional status filter."""
     repo = JobRepository()
-    job_status = JobStatus(status) if status else None
+    job_status = None
+    if status:
+        try:
+            job_status = JobStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     jobs = repo.list_jobs(status=job_status)
     return {
         "jobs": [
@@ -347,7 +360,12 @@ async def api_recover():
 async def api_list_tickets(status: str | None = None, job_id: str | None = None):
     """List approval tickets."""
     repo = ApprovalRepository()
-    ticket_status = TicketStatus(status) if status else None
+    ticket_status = None
+    if status:
+        try:
+            ticket_status = TicketStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     tickets = repo.list_tickets(status=ticket_status, job_id=job_id)
     return {
         "tickets": [
@@ -376,18 +394,18 @@ async def api_approve_ticket(ticket_id: str, reason: str = ""):
         ticket = repo.approve_ticket(ticket_id, reason=reason)
         return {"ticket_id": ticket.id, "status": ticket.status.value, "message": "Approved"}
     except ValueError as e:
-        return {"error": str(e)}, 400
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/tickets/{ticket_id}/reject")
-async def api_reject_ticket(ticket_id: str, reason: str = ""):
+async def api_reject_ticket(ticket_id: str, body: RejectRequest):
     """Reject a ticket."""
     repo = ApprovalRepository()
     try:
-        ticket = repo.reject_ticket(ticket_id, reason=reason)
+        ticket = repo.reject_ticket(ticket_id, reason=body.reason)
         return {"ticket_id": ticket.id, "status": ticket.status.value, "message": "Rejected"}
     except ValueError as e:
-        return {"error": str(e)}, 400
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/metrics")
@@ -403,8 +421,8 @@ async def api_metrics():
 async def api_alerts():
     """Get active alerts."""
     job_repo = JobRepository()
-    from monitoring.alerts import AlertManager
-    manager = AlertManager(job_repo)
+    from monitoring.alerts import AlertManager, create_default_alerts
+    manager = create_default_alerts(job_repo)
     return {"alerts": [a.__dict__ for a in manager.check_all()]}
 
 

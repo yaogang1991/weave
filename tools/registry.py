@@ -197,8 +197,6 @@ class ToolRegistry:
                 duration_ms=int((time.time() - start) * 1000),
             )
 
-
-
     def _validate_bash_command(self, command: str) -> str | None:
         """Validate bash command against conservative deny patterns."""
         denied_patterns = [
@@ -213,7 +211,6 @@ class ToolRegistry:
             if pattern in normalized:
                 return pattern
         return None
-
 
     def _resolve_safe_cwd(self, requested_cwd: str | None = None) -> Path:
         """Resolve and validate cwd within project root."""

@@ -193,19 +193,27 @@ class RunService:
         # Create Run record
         run = self.repository.create_run(job_id, session_id)
         work_dir: Path | None = None
-        project_root = Path(job.project_path).resolve() if job.project_path else Path.cwd().resolve()
-        from backend.lifecycle import BackendManager
-        backend_manager = BackendManager(
-            default_backend=self.default_backend,
-            repo_root=str(project_root),
-            base_path=self.backend_base_path,
-        )
 
         # Resolve timeout
         timeout: int = job.metadata.get("run_timeout_sec", 600)
 
         try:
-            work_dir = backend_manager.setup(job_id=job.id, run_id=run.id)
+            # M2.2: Build BackendManager per-job so repo_root matches project_path
+            project_root = Path(job.project_path).resolve() if job.project_path else Path.cwd().resolve()
+            from backend.lifecycle import BackendManager
+            from core.config import HarnessConfig
+            harness_config = HarnessConfig.from_env()
+            backend_manager = BackendManager(
+                default_backend=self.default_backend,
+                repo_root=str(project_root),
+                base_path=self.backend_base_path,
+                risk_backend_map=harness_config.risk_backend_map,
+            )
+            work_dir = backend_manager.setup(
+                job_id=job.id,
+                run_id=run.id,
+                risk_level=job.metadata.get("risk_level"),
+            )
 
             # --- Non-interactive: expire old approval tickets ---
             if self.non_interactive and self.approval_repo is not None:
@@ -578,8 +586,8 @@ class RunService:
         """
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
-        project_path = job.project_path or str(work_dir)
-        project_context = {"project_path": project_path}
+        project_path = job.project_path or (str(work_dir) if work_dir else None)
+        project_context = {"project_path": project_path} if project_path else None
         dag = await orchestrator.plan(
             requirement=job.requirement,
             project_context=project_context,
