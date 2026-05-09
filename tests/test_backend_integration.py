@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.lifecycle import BackendManager
-from backend.base import BackendType
+from backend.base import WorkspaceIsolation
 
 
 # ============================================================================
@@ -268,7 +268,7 @@ class TestBackendManagerLifecycle:
     def test_manager_full_lifecycle_local(self, tmp_path):
         """BackendManager with local backend: setup -> cleanup."""
         manager = BackendManager(
-            default_backend="local", base_path=str(tmp_path)
+            workspace="local", base_path=str(tmp_path)
         )
         job_id = "job-1"
         run_id = "run-1"
@@ -286,7 +286,7 @@ class TestBackendManagerLifecycle:
     def test_manager_preserve_on_failure(self, tmp_path):
         """BackendManager: setup -> preserve on failure."""
         manager = BackendManager(
-            default_backend="local", base_path=str(tmp_path)
+            workspace="local", base_path=str(tmp_path)
         )
         job_id = "job-1"
         run_id = "run-1"
@@ -336,7 +336,7 @@ class TestBackendManagerLifecycle:
     def test_manager_fallback_worktree_to_local(self, tmp_path):
         """When worktree is unavailable, should fall back to local."""
         manager = BackendManager(
-            default_backend="worktree", base_path=str(tmp_path)
+            workspace="worktree", base_path=str(tmp_path)
         )
 
         with patch.object(
@@ -353,7 +353,7 @@ class TestBackendManagerLifecycle:
     def test_manager_multiple_runs(self, tmp_path):
         """Multiple runs should be tracked independently."""
         manager = BackendManager(
-            default_backend="local", base_path=str(tmp_path)
+            workspace="local", base_path=str(tmp_path)
         )
 
         dir1 = manager.setup("job-1", "run-1")
@@ -378,16 +378,16 @@ class TestBackendManagerLifecycle:
         assert "run-3" in manager.get_active_runs()
 
     def test_manager_explicit_backend_override(self, tmp_path):
-        """Explicit backend_type should override default and risk."""
+        """Explicit workspace_type should override default and risk."""
         manager = BackendManager(
-            default_backend="worktree", base_path=str(tmp_path)
+            workspace="worktree", base_path=str(tmp_path)
         )
 
         # Explicitly request local despite default being worktree
         work_dir = manager.setup(
             "job-1",
             "run-1",
-            backend_type="local",
+            workspace_type="local",
             risk_level="critical",
         )
 
@@ -457,7 +457,7 @@ class TestWorktreeIsolation:
     def test_backend_manager_job_isolation(self, tmp_path):
         """BackendManager should maintain isolation between jobs."""
         manager = BackendManager(
-            default_backend="local", base_path=str(tmp_path)
+            workspace="local", base_path=str(tmp_path)
         )
 
         dir1 = manager.setup("job-A", "run-1")

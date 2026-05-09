@@ -50,10 +50,16 @@ class HarnessConfig(BaseModel):
     max_context_tokens: int = 100000  # token threshold for context truncation
     log_level: str = "INFO"
 
-    # M2.2: Backend configuration
-    default_backend: str = Field(
+    # M2.2: Isolation dimensions (replaces old BackendType)
+    workspace_isolation: str = Field(
         default_factory=lambda: os.getenv(
-            "HARNESS_DEFAULT_BACKEND", "local"
+            "HARNESS_WORKSPACE_ISOLATION",
+            os.getenv("HARNESS_DEFAULT_BACKEND", "local"),  # legacy fallback
+        )
+    )
+    execution_sandbox: str = Field(
+        default_factory=lambda: os.getenv(
+            "HARNESS_EXECUTION_SANDBOX", "local"
         )
     )
     backend_base_path: str = Field(
@@ -61,13 +67,14 @@ class HarnessConfig(BaseModel):
             "HARNESS_BACKEND_BASE_PATH", "./data/backends"
         )
     )
-    risk_backend_map: dict[str, str] = Field(
+    workspace_isolation_by_risk: dict[str, str] = Field(
         default_factory=lambda: {
-            "low": os.getenv("HARNESS_BACKEND_LOW", "local"),
-            "medium": os.getenv("HARNESS_BACKEND_MEDIUM", "local"),
-            "high": os.getenv("HARNESS_BACKEND_HIGH", "worktree"),
+            "low": os.getenv("HARNESS_WORKSPACE_LOW", os.getenv("HARNESS_BACKEND_LOW", "local")),
+            "medium": os.getenv("HARNESS_WORKSPACE_MEDIUM", os.getenv("HARNESS_BACKEND_MEDIUM", "local")),
+            "high": os.getenv("HARNESS_WORKSPACE_HIGH", os.getenv("HARNESS_BACKEND_HIGH", "worktree")),
             "critical": os.getenv(
-                "HARNESS_BACKEND_CRITICAL", "worktree"
+                "HARNESS_WORKSPACE_CRITICAL",
+                os.getenv("HARNESS_BACKEND_CRITICAL", "worktree"),
             ),
         }
     )

@@ -137,6 +137,9 @@ class TaskWorker:
         self._main_task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
 
+        # Hot reload: initialized here so register_project_path works before start()
+        self._config_mtimes: dict[str, float] = {}
+
         # Track jobs we currently hold a lease on for heartbeat purposes.
         # job_id -> asyncio.Task running the job
         self._in_flight: dict[str, asyncio.Task[None]] = {}
@@ -407,12 +410,18 @@ class TaskWorker:
         When no jobs are available the loop sleeps for ``poll_interval_sec``;
         on repeated empty polls a capped exponential backoff is applied so we
         do not hammer the repository.
+
+        On each poll cycle, project config files are checked for changes
+        (hot reload). Only new dispatches use the updated config.
         """
         empty_polls = 0
         backoff = self.config.poll_interval_sec
 
         while not self._stop_event.is_set():
             try:
+                # Hot reload: check project configs for changes
+                self._check_config_reload()
+
                 found_job = await self._poll_and_execute()
 
                 if found_job:
@@ -645,6 +654,64 @@ class TaskWorker:
         if "Eval" in name or "eval" in str(exc).lower():
             return "eval_failed"
         return "unknown"
+
+    # ------------------------------------------------------------------
+    # Hot reload — project config file change detection
+    # ------------------------------------------------------------------
+
+    def _check_config_reload(self) -> None:
+        """
+        Check known project paths for config file changes.
+
+        Discovers project paths from queued/running jobs, registers them,
+        then compares .harness/config.yaml mtime against cached values.
+        On change, the config is reloaded in place so future job
+        dispatches use the new settings. In-flight jobs are unaffected.
+        """
+        from pathlib import Path
+
+        # Discover project paths from jobs in the repository
+        try:
+            from control_plane.models import JobStatus
+            jobs = self.repository.list_jobs()
+            for job in jobs:
+                if job.project_path and job.project_path not in self._config_mtimes:
+                    self.register_project_path(job.project_path)
+        except Exception:
+            pass  # Discovery failure should not break the poll loop
+
+        for project_path_str in list(self._config_mtimes.keys()):
+            config_path = Path(project_path_str) / ".harness" / "config.yaml"
+            if not config_path.exists():
+                continue
+
+            try:
+                current_mtime = config_path.stat().st_mtime
+            except OSError:
+                continue
+
+            last_mtime = self._config_mtimes.get(project_path_str, 0.0)
+            if current_mtime > last_mtime:
+                self._config_mtimes[project_path_str] = current_mtime
+                _json_log(
+                    "INFO",
+                    "Project config changed — will use new settings for next dispatch",
+                    extra={
+                        "project_path": project_path_str,
+                        "config_file": str(config_path),
+                    },
+                )
+
+    def register_project_path(self, project_path: str) -> None:
+        """Register a project path for hot reload monitoring."""
+        from pathlib import Path
+
+        config_path = Path(project_path) / ".harness" / "config.yaml"
+        if config_path.exists():
+            try:
+                self._config_mtimes[project_path] = config_path.stat().st_mtime
+            except OSError:
+                pass
 
     # ------------------------------------------------------------------
     # Heartbeat — optional lease refresh

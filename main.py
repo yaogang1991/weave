@@ -309,7 +309,7 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     return RunService(
         repository=repository,
         llm_config=harness_config.llm,
-        default_backend=harness_config.default_backend,
+        default_backend=harness_config.workspace_isolation,
         backend_base_path=harness_config.backend_base_path,
         approval_repo=approval_repo,
         non_interactive=non_interactive,

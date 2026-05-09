@@ -1,8 +1,22 @@
 """
 Execution Backend abstract interface.
 
-All execution backends (local/worktree/docker) must implement this interface.
-BackendManager manages different backends' lifecycles through this interface.
+Two orthogonal dimensions of isolation:
+
+1. **Workspace isolation** (WorkspaceIsolation) — how files are managed:
+   - LOCAL: work directly in a directory
+   - WORKTREE: isolate via git worktree per job/run
+
+2. **Execution sandbox** (ExecutionSandbox) — where processes run:
+   - LOCAL: host process (current default)
+   - DOCKER: container isolation (M3+)
+
+These are composable: you can have WORKTREE + DOCKER (git worktree inside
+a container) or LOCAL + LOCAL (current default). The previous BackendType
+enum conflated these into a single choice, which was architecturally wrong.
+
+All workspace backends must implement the ExecutionBackend interface.
+Sandbox providers implement the SandboxProvider interface separately.
 """
 
 from __future__ import annotations
@@ -13,15 +27,21 @@ from pathlib import Path
 from typing import Any
 
 
-class BackendType(str, Enum):
-    LOCAL = "local"  # Execute directly in main repo (current behavior)
-    WORKTREE = "worktree"  # Execute in isolated git worktree
-    DOCKER = "docker"  # Execute in Docker container (reserved)
+class WorkspaceIsolation(str, Enum):
+    """How files are isolated between jobs."""
+    LOCAL = "local"        # Work directly in a directory
+    WORKTREE = "worktree"  # Isolate via git worktree
+
+
+class ExecutionSandbox(str, Enum):
+    """Where agent processes run."""
+    LOCAL = "local"    # Host process
+    DOCKER = "docker"  # Docker container (M3+)
 
 
 class ExecutionBackend(abc.ABC):
     """
-    Abstract base class for execution backends.
+    Abstract base class for workspace isolation backends.
 
     Lifecycle:
     1. setup() -- Prepare execution environment
@@ -31,7 +51,7 @@ class ExecutionBackend(abc.ABC):
     All methods are synchronous (filesystem operations, no I/O waiting).
     """
 
-    backend_type: BackendType
+    workspace_type: WorkspaceIsolation
 
     def __init__(
         self,

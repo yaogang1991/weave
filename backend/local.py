@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from backend.base import ExecutionBackend, BackendType
+from backend.base import ExecutionBackend, WorkspaceIsolation
 
 
 class LocalBackend(ExecutionBackend):
@@ -16,7 +16,7 @@ class LocalBackend(ExecutionBackend):
     Used for low-risk, fast execution scenarios.
     """
 
-    backend_type = BackendType.LOCAL
+    workspace_type = WorkspaceIsolation.LOCAL
 
     def setup(self, job_id: str, run_id: str) -> Path:
         """Return main repo root directory as working directory."""
