@@ -59,10 +59,9 @@ class DAGExecutionEngine:
         heartbeat_interval_sec: float = 5.0,
         heartbeat_miss_threshold: int = 3,
         enable_watchdog: bool = True,
-        # Configurable backoff parameters
-        backoff_base: float = 1.0,
-        max_backoff: float = 300.0,
-        backoff_multiplier: float = 2.0,
+        # M3.2: Memory integration
+        memory_manager: Any | None = None,
+        session_id: str | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -77,13 +76,12 @@ class DAGExecutionEngine:
         self.heartbeat_interval_sec = heartbeat_interval_sec
         self.heartbeat_miss_threshold = heartbeat_miss_threshold
         self.enable_watchdog = enable_watchdog
-        # Configurable backoff
-        self._backoff_base = backoff_base
-        self._max_backoff = max_backoff
-        self._backoff_multiplier = backoff_multiplier
         self._watchdog_task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}  # M2.0: Tasks for cancellation
+        # M3.2: Memory integration
+        self.memory_manager = memory_manager
+        self._session_id = session_id
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -93,7 +91,10 @@ class DAGExecutionEngine:
         """Emit execution event to all handlers."""
         for handler in self.event_handlers:
             try:
-                await handler(event)
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(event)
+                else:
+                    handler(event)
             except Exception as exc:
                 # Don't let event handlers break execution, but keep traceability.
                 logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
@@ -263,18 +264,6 @@ class DAGExecutionEngine:
                             dag, failed_id, dag.nodes[failed_id].error,
                         )
 
-                        # Emit failure decision event for audit trail
-                        await self._emit(ExecutionEvent(
-                            node_id=failed_id,
-                            event_type="failure_decision",
-                            details={
-                                "action": decision.action,
-                                "reasoning": decision.reasoning,
-                                "error": dag.nodes[failed_id].error[:200],
-                                "health_status": dag.nodes[failed_id].health_status.value,
-                            },
-                        ))
-
                         if decision.action == "abort":
                             self._skip_remaining(dag, levels, level_idx + 1)
                             return dag
@@ -284,6 +273,9 @@ class DAGExecutionEngine:
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
                             if backoff > 0:
                                 await asyncio.sleep(backoff)
+                            # Reset status so _execute_single_node will actually run
+                            dag.nodes[failed_id].status = NodeStatus.RETRYING
+                            dag.nodes[failed_id].error = ""
                             await self._execute_single_node(dag, failed_id)
                             if dag.nodes[failed_id].status == NodeStatus.FAILED:
                                 self._skip_remaining(dag, levels, level_idx + 1)
@@ -333,8 +325,8 @@ class DAGExecutionEngine:
 
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""
-        delay = self._backoff_base * (self._backoff_multiplier ** retry_count)
-        return min(delay, self._max_backoff)
+        # Base exponential backoff with a hard cap at 60s.
+        return min(2 ** retry_count, 60.0)
 
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
         """Execute a single DAG node with retry logic."""
@@ -505,6 +497,25 @@ class DAGExecutionEngine:
                     },
                 )
                 artifacts.append(artifact)
+
+                # M3.2: Share relevant memories from upstream agent
+                if (
+                    self.memory_manager
+                    and self._session_id
+                    and dep_node.agent_type != dag.nodes[node_id].agent_type
+                ):
+                    try:
+                        from memory.sharing import MemorySharing
+                        sharing = MemorySharing(self.memory_manager)
+                        sharing.share_with_downstream(
+                            from_agent=dep_node.agent_type,
+                            to_agent=dag.nodes[node_id].agent_type,
+                            session_id=self._session_id,
+                            dag=dag,
+                            node_id=node_id,
+                        )
+                    except Exception as e:
+                        logger.debug("Memory sharing failed: %s", e)
 
         # Include evaluation feedback from previous attempt (retry scenario)
         node = dag.nodes[node_id]

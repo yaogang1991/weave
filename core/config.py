@@ -128,6 +128,20 @@ class ModelRoutingConfig(BaseModel):
         )
 
 
+class MemoryConfig(BaseModel):
+    """Configuration for the M3.2 Agent Memory system."""
+    enabled: bool = True
+    base_path: str = Field(
+        default_factory=lambda: os.getenv("HARNESS_MEMORY_PATH", "./data/memory")
+    )
+    max_entries_per_agent: int = 500
+    max_content_length: int = 1000      # Characters per entry
+    default_ttl_days: int = 90          # Default expiry for entries
+    retrieval_limit: int = 10           # Max memories injected per prompt
+    decay_half_life_days: float = 30.0  # Relevance score decay rate
+    auto_store: bool = True             # Automatically store learnings after task
+
+
 class HarnessConfig(BaseModel):
     model_config = ConfigDict(validate_default=True)
 
@@ -192,6 +206,9 @@ class HarnessConfig(BaseModel):
     # M3.1: Multi-model routing
     model_routing: ModelRoutingConfig = Field(default_factory=ModelRoutingConfig)
 
+    # M3.2: Agent Memory
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r") as f:
@@ -222,4 +239,14 @@ class HarnessConfig(BaseModel):
             approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
             cleanup_policy=os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
             model_routing=ModelRoutingConfig.from_env(),
+            memory=MemoryConfig(
+                enabled=os.getenv("HARNESS_MEMORY_ENABLED", "true").lower()
+                not in ("false", "0", "no"),
+                base_path=os.getenv("HARNESS_MEMORY_PATH", "./data/memory"),
+                max_entries_per_agent=int(os.getenv("HARNESS_MEMORY_MAX_ENTRIES", "500")),
+                max_content_length=int(os.getenv("HARNESS_MEMORY_MAX_LENGTH", "1000")),
+                default_ttl_days=int(os.getenv("HARNESS_MEMORY_TTL_DAYS", "90")),
+                retrieval_limit=int(os.getenv("HARNESS_MEMORY_RETRIEVAL_LIMIT", "10")),
+                decay_half_life_days=float(os.getenv("HARNESS_MEMORY_DECAY_DAYS", "30")),
+            ),
         )

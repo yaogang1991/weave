@@ -49,6 +49,14 @@ bridge = WebSocketEventBridge()
 class RejectRequest(PydanticModel):
     reason: str = ""
 
+
+class MemoryAddRequest(PydanticModel):
+    content: str
+    memory_type: str = "fact"
+    scope: str = "global"
+    agent_type: str = "shared"
+    keywords: list[str] = []
+
 # Static files
 static_path = Path(__file__).parent / "static"
 if static_path.exists():
@@ -450,6 +458,113 @@ async def api_alerts():
     from monitoring.alerts import AlertManager, create_default_alerts
     manager = create_default_alerts(job_repo, approval_repo)
     return {"alerts": [a.__dict__ for a in manager.check_all()]}
+
+
+# ── Memory API (M3.2) ───────────────────────────────────────────────
+
+
+def _get_memory_manager():
+    """Create a MemoryManager from config."""
+    from memory.manager import MemoryManager
+    config = HarnessConfig.from_env()
+    return MemoryManager(config.memory)
+
+
+@app.get("/api/memory")
+async def api_list_memory(
+    agent_type: str | None = None,
+    scope: str | None = None,
+    memory_type: str | None = None,
+    limit: int = 50,
+):
+    """List memory entries with optional filters."""
+    from core.models import MemoryScope, MemoryType
+    manager = _get_memory_manager()
+    scope_enum = MemoryScope(scope) if scope else None
+    type_enum = MemoryType(memory_type) if memory_type else None
+
+    entries = manager.store.list_entries(
+        scope=scope_enum,
+        agent_type=agent_type,
+        memory_type=type_enum,
+    )[:limit]
+    return {
+        "entries": [
+            {
+                "id": e.id,
+                "agent_type": e.agent_type,
+                "scope": e.scope.value,
+                "type": e.memory_type.value,
+                "content": e.content,
+                "keywords": e.keywords,
+                "relevance_score": e.relevance_score,
+                "access_count": e.access_count,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+        "count": len(entries),
+    }
+
+
+@app.get("/api/memory/search")
+async def api_search_memory(query: str, limit: int = 10):
+    """Search memory entries by keyword."""
+    manager = _get_memory_manager()
+    entries = manager.store.search(query=query, limit=limit)
+    return {
+        "entries": [
+            {
+                "id": e.id,
+                "agent_type": e.agent_type,
+                "scope": e.scope.value,
+                "type": e.memory_type.value,
+                "content": e.content,
+                "keywords": e.keywords,
+                "relevance_score": e.relevance_score,
+            }
+            for e in entries
+        ],
+        "count": len(entries),
+    }
+
+
+@app.get("/api/memory/stats")
+async def api_memory_stats():
+    """Get memory system statistics."""
+    manager = _get_memory_manager()
+    return manager.get_stats()
+
+
+@app.post("/api/memory")
+async def api_add_memory(body: MemoryAddRequest):
+    """Add a manual memory entry."""
+    from core.models import MemoryScope, MemoryType
+    manager = _get_memory_manager()
+    entry = manager.store_learning(
+        agent_type=body.agent_type,
+        content=body.content,
+        memory_type=MemoryType(body.memory_type),
+        scope=MemoryScope(body.scope),
+        keywords=body.keywords if body.keywords else None,
+    )
+    return {"id": entry.id, "message": "Memory entry added"}
+
+
+@app.delete("/api/memory/{memory_id}")
+async def api_delete_memory(memory_id: str):
+    """Delete a specific memory entry."""
+    manager = _get_memory_manager()
+    if not manager.store.delete(memory_id):
+        raise HTTPException(status_code=404, detail="Memory entry not found")
+    return {"id": memory_id, "message": "Deleted"}
+
+
+@app.post("/api/memory/cleanup")
+async def api_memory_cleanup():
+    """Run memory maintenance (expire, prune, recompute)."""
+    manager = _get_memory_manager()
+    return manager.run_maintenance()
 
 
 # ── Integration helpers ──────────────────────────────────────────────
