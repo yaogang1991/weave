@@ -252,14 +252,17 @@ class RunService:
                 timeout=timeout,
             )
 
-            # --- Hook: after_run (non-fatal) ---
+            # --- Hook: after_run (non-fatal, wrap to prevent launch errors from failing the run) ---
             if project_config.hooks.after_run:
-                await backend_manager.execute_hook(
-                    "after_run",
-                    project_config.hooks.after_run,
-                    work_dir,
-                    timeout=project_config.hooks.timeout_sec,
-                )
+                try:
+                    await backend_manager.execute_hook(
+                        "after_run",
+                        project_config.hooks.after_run,
+                        work_dir,
+                        timeout=project_config.hooks.timeout_sec,
+                    )
+                except Exception:
+                    pass  # after_run failure is logged and ignored
 
             # --- Summarize ---
             orchestrator = self._create_orchestrator(store)
@@ -746,6 +749,9 @@ class RunService:
         registry = AgentRegistry()
         tool_registry = ToolRegistry(base_cwd=str(work_dir) if work_dir is not None else None)
 
+        # Apply project runtime limits to max_iterations
+        effective_max_iterations = rc.max_turns if runtime_config is not None else self.max_iterations
+
         # Build guardrails policy, layering project config on top of defaults
         if getattr(self, "policy", None) is not None:
             policy = self.policy
@@ -753,7 +759,7 @@ class RunService:
             policy = GuardrailPolicy(
                 mode=PermissionMode(gc.approval_policy),
                 auto_approve_read=True,
-                max_iterations=self.max_iterations,
+                max_iterations=effective_max_iterations,
                 denied_commands=gc.denied_commands,
             )
 
