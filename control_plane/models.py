@@ -49,9 +49,46 @@ class RunStatus(str, Enum):
     TIMED_OUT = "timed_out"
 
 
+class TicketStatus(str, Enum):
+    """Lifecycle states of an Approval Ticket."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
 # =============================================================================
 # Data models
 # =============================================================================
+
+
+class Ticket(BaseModel):
+    """An approval ticket for a tool invocation requiring human review."""
+
+    id: str
+    job_id: str
+    tool_name: str
+    status: TicketStatus = TicketStatus.PENDING
+    risk_level: str = "medium"   # low / medium / high / critical
+    args_preview: str = ""       # truncated preview of tool arguments
+    reason: str = ""             # human-provided reason for approve/reject
+    requested_at: datetime
+    expires_at: datetime | None = None
+    resolved_at: datetime | None = None
+
+    @field_validator("status", mode="before")
+    @classmethod
+    def _reject_invalid_ticket_status(cls, v: Any) -> Any:
+        if isinstance(v, str) and v not in {m.value for m in TicketStatus}:
+            raise ValueError(f"Invalid TicketStatus: {v!r}")
+        return v
+
+    def is_expired(self) -> bool:
+        """Return True if the ticket has passed its expiry time."""
+        if self.expires_at is None:
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
 
 
 class RetryPolicy(BaseModel):
@@ -102,7 +139,7 @@ class Job(BaseModel):
     @field_validator("error_category")
     @classmethod
     def _valid_error_category(cls, v: str) -> str:
-        allowed = {"", "timeout", "eval_failed", "tool_blocked", "unknown"}
+        allowed = {"", "timeout", "eval_failed", "tool_blocked", "unknown", "watchdog"}
         if v not in allowed:
             raise ValueError(f"Invalid error_category: {v!r}")
         return v

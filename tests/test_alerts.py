@@ -484,8 +484,8 @@ class TestDefaultFactory:
         manager = create_default_alerts(repo, webhook_url="http://example.com")
         assert isinstance(manager, AlertManager)
         assert manager.webhook_url == "http://example.com"
-        # 3 original rules + 2 approval rules = 5
-        assert len(manager.rules) == 5
+        # 3 original rules + 2 approval rules + 1 node_unhealthy_killed = 6
+        assert len(manager.rules) == 6
 
     def test_default_rules_are_enabled(self, repo: JobRepository):
         manager = create_default_alerts(repo)
@@ -779,8 +779,8 @@ class TestDefaultFactoryWithApprovals:
         )
         assert isinstance(manager, AlertManager)
         assert manager.webhook_url == "http://example.com"
-        # 3 original + 2 approval rules = 5
-        assert len(manager.rules) == 5
+        # 3 original + 2 approval + 1 node_unhealthy_killed = 6
+        assert len(manager.rules) == 6
 
     def test_default_rules_are_enabled(
         self,
@@ -806,5 +806,5 @@ class TestDefaultFactoryWithApprovals:
     ):
         manager = create_default_alerts(repo, webhook_url="http://example.com")
         assert isinstance(manager, AlertManager)
-        assert len(manager.rules) == 5
+        assert len(manager.rules) == 6
         assert manager.approval_repository is None

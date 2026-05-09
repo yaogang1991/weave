@@ -37,11 +37,26 @@ class ToolRegistry:
     MCP tools: dynamically loaded from MCP servers
     """
 
-    def __init__(self, sandbox_runner=None):
+    def __init__(self, sandbox_runner=None, base_cwd: str | None = None):
         self._tools: dict[str, Callable] = {}
         self._schemas: dict[str, dict] = {}
         self.sandbox_runner = sandbox_runner
+        self.base_cwd = Path(base_cwd).resolve() if base_cwd else None
         self._register_builtin_tools()
+
+    def _resolve_path(self, file_path: str) -> Path:
+        """Resolve path relative to configured base working directory.
+
+        When base_cwd is set, enforces containment: resolved path must
+        stay under base_cwd to prevent escape from the backend workspace.
+        """
+        path = Path(file_path)
+        if self.base_cwd is None:
+            return path if path.is_absolute() else path.resolve()
+        resolved = (self.base_cwd / path).resolve()
+        if not (resolved == self.base_cwd or self.base_cwd in resolved.parents):
+            raise ValueError(f"Path escapes workspace: {file_path}")
+        return resolved
 
     def _register_builtin_tools(self):
         self.register("read", self._tool_read, {
@@ -189,8 +204,6 @@ class ToolRegistry:
                 duration_ms=int((time.time() - start) * 1000),
             )
 
-
-
     def _validate_bash_command(self, command: str) -> str | None:
         """Validate bash command against conservative deny patterns."""
         denied_patterns = [
@@ -206,11 +219,15 @@ class ToolRegistry:
                 return pattern
         return None
 
-
     def _resolve_safe_cwd(self, requested_cwd: str | None = None) -> Path:
         """Resolve and validate cwd within project root."""
-        project_root = Path.cwd().resolve()
-        target = (Path(requested_cwd).expanduser().resolve() if requested_cwd else project_root)
+        project_root = self.base_cwd.resolve() if self.base_cwd else Path.cwd().resolve()
+        if requested_cwd:
+            # Resolve relative paths against project_root, not process cwd
+            req = Path(requested_cwd).expanduser()
+            target = (project_root / req).resolve() if not req.is_absolute() else req.resolve()
+        else:
+            target = project_root
         if target != project_root and project_root not in target.parents:
             raise ValueError(f"cwd outside project root is not allowed: {target}")
         return target
@@ -223,7 +240,7 @@ class ToolRegistry:
 
     def _tool_read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ToolResult:
         try:
-            path = Path(file_path)
+            path = self._resolve_path(file_path)
             if not path.exists():
                 return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")
 
@@ -252,7 +269,7 @@ class ToolRegistry:
 
     def _tool_write(self, file_path: str, content: str) -> ToolResult:
         try:
-            path = Path(file_path)
+            path = self._resolve_path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w") as f:
                 f.write(content)
@@ -262,7 +279,7 @@ class ToolRegistry:
 
     def _tool_edit(self, file_path: str, old_string: str, new_string: str) -> ToolResult:
         try:
-            path = Path(file_path)
+            path = self._resolve_path(file_path)
             if not path.exists():
                 return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")
 
@@ -317,7 +334,7 @@ class ToolRegistry:
 
     def _tool_glob(self, pattern: str, path: str = ".", max_results: int = _MAX_GLOB_RESULTS) -> ToolResult:
         try:
-            base = Path(path)
+            base = self._resolve_path(path)
             matches: list[Path] = []
             for match in base.rglob(pattern):
                 if self._should_skip_path(match):
@@ -335,7 +352,7 @@ class ToolRegistry:
 
     def _tool_grep(self, pattern: str, path: str = ".", file_pattern: str = "*", max_results: int = _MAX_GREP_MATCH_LINES) -> ToolResult:
         try:
-            base = Path(path)
+            base = self._resolve_path(path)
             matches = []
             skipped_binary = 0
             skipped_large = 0
@@ -405,6 +422,7 @@ class ToolRegistry:
                 capture_output=True,
                 text=True,
                 timeout=60,
+                cwd=str(self.base_cwd) if self.base_cwd else None,
             )
             output = result.stdout
             if result.stderr:

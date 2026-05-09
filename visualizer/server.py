@@ -25,17 +25,29 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel as PydanticModel
 
 from visualizer.event_bridge import WebSocketEventBridge
 from session.store import SessionStore
 from core.config import HarnessConfig
 
+from control_plane.models import JobStatus
+from control_plane.repository import JobRepository
+from control_plane.approval import ApprovalRepository, TicketStatus
+
 
 app = FastAPI(title="Harness Visualizer", version="2.0")
 bridge = WebSocketEventBridge()
+
+
+# ── Request body models ──────────────────────────────────────────────
+
+
+class RejectRequest(PydanticModel):
+    reason: str = ""
 
 # Static files
 static_path = Path(__file__).parent / "static"
@@ -204,6 +216,240 @@ def _list_plans() -> list[dict]:
             continue
     
     return plans
+
+
+# ── Web Console ──────────────────────────────────────────────────────
+
+@app.get("/console", response_class=HTMLResponse)
+async def console_page():
+    """Serve the Web Console (Jobs/Runs/Tickets/Alerts)."""
+    console_file = static_path / "console.html"
+    if console_file.exists():
+        return HTMLResponse(content=console_file.read_text(), status_code=200)
+    return HTMLResponse(content="<h1>Harness Console</h1><p>Console not built yet.</p>")
+
+
+@app.get("/api/jobs")
+async def api_list_jobs(status: str | None = None):
+    """List jobs with optional status filter."""
+    repo = JobRepository()
+    job_status = None
+    if status:
+        try:
+            job_status = JobStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+    jobs = repo.list_jobs(status=job_status)
+    return {
+        "jobs": [
+            {
+                "id": j.id,
+                "requirement": j.requirement,
+                "status": j.status.value,
+                "attempt": j.attempt,
+                "last_error": j.last_error,
+                "error_category": j.error_category,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "updated_at": j.updated_at.isoformat() if j.updated_at else None,
+            }
+            for j in sorted(jobs, key=lambda x: x.created_at or datetime.min, reverse=True)
+        ],
+        "count": len(jobs),
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+async def api_get_job(job_id: str):
+    """Get job details with runs."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    runs = repo.list_runs_by_job(job_id)
+    return {
+        "job": {
+            "id": job.id,
+            "requirement": job.requirement,
+            "status": job.status.value,
+            "attempt": job.attempt,
+            "last_error": job.last_error,
+            "error_category": job.error_category,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        },
+        "runs": [
+            {
+                "id": r.id,
+                "status": r.status.value,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            }
+            for r in runs
+        ],
+    }
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def api_cancel_job(job_id: str):
+    """Cancel a job."""
+    repo = JobRepository()
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.CANCELED)
+        # Cancel any in-flight run task
+        from control_plane.service import RunService
+        # Access the global running tasks map if available
+        # (workers register tasks via RunService._running_tasks)
+        return {"job_id": job.id, "status": job.status.value, "message": "Job canceled"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/jobs/{job_id}/retry")
+async def api_retry_job(job_id: str):
+    """Retry a failed/dead_letter job."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in (JobStatus.FAILED, JobStatus.DEAD_LETTER):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry job in status {job.status.value}",
+        )
+
+    job.status = JobStatus.QUEUED
+    job.attempt = 0
+    job.last_error = ""
+    job.error_category = ""
+    job.lease_owner = None
+    job.lease_expires_at = None
+    job.updated_at = datetime.now(timezone.utc)
+    repo.update_job(job)
+    return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
+
+
+@app.post("/api/recover")
+async def api_recover():
+    """Recover orphaned jobs."""
+    repo = JobRepository()
+    orphaned = repo.recover_orphan_jobs()
+    recovered = []
+    for job in orphaned:
+        # Update associated run records
+        runs = repo.list_runs_by_job(job.id)
+        from control_plane.models import RunStatus
+        for r in runs:
+            if r.status == RunStatus.RUNNING:
+                r.status = RunStatus.ABORTED
+                r.completed_at = datetime.now(timezone.utc)
+                r.dag_result = {"error": "recovered", "reason": "Orphaned job recovered"}
+                repo._persist_run(r)
+
+        if job.status == JobStatus.LEASED:
+            recovered.append(repo.transition_job_status(
+                job.id,
+                JobStatus.QUEUED,
+                error="Recovered orphaned leased job",
+                error_category="timeout",
+            ))
+        elif job.status == JobStatus.RUNNING:
+            failed_job = repo.transition_job_status(
+                job.id,
+                JobStatus.FAILED,
+                error="Recovered orphaned running job",
+                error_category="timeout",
+            )
+            # Respect retry limits: only requeue if attempts remain
+            if failed_job.attempt < failed_job.retry_policy.max_attempts:
+                recovered.append(repo.transition_job_status(
+                    failed_job.id,
+                    JobStatus.QUEUED,
+                    error="Recovered orphaned running job",
+                    error_category="timeout",
+                ))
+            else:
+                recovered.append(repo.transition_job_status(
+                    failed_job.id,
+                    JobStatus.DEAD_LETTER,
+                    error="Recovered orphaned running job (retries exhausted)",
+                    error_category="timeout",
+                ))
+    return {
+        "recovered_count": len(recovered),
+        "recovered_jobs": [{"id": j.id, "status": j.status.value} for j in recovered],
+    }
+
+
+@app.get("/api/tickets")
+async def api_list_tickets(status: str | None = None, job_id: str | None = None):
+    """List approval tickets."""
+    repo = ApprovalRepository()
+    ticket_status = None
+    if status:
+        try:
+            ticket_status = TicketStatus(status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+    tickets = repo.list_tickets(status=ticket_status, job_id=job_id)
+    return {
+        "tickets": [
+            {
+                "id": t.id,
+                "job_id": t.job_id,
+                "tool_name": t.tool_name,
+                "status": t.status.value,
+                "risk_level": t.risk_level,
+                "args_preview": t.args_preview,
+                "requested_at": t.requested_at.isoformat() if t.requested_at else None,
+                "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+            }
+            for t in sorted(tickets, key=lambda x: x.requested_at or datetime.min, reverse=True)
+        ],
+        "count": len(tickets),
+        "stats": repo.get_stats(),
+    }
+
+
+@app.post("/api/tickets/{ticket_id}/approve")
+async def api_approve_ticket(ticket_id: str, reason: str = ""):
+    """Approve a ticket."""
+    repo = ApprovalRepository()
+    try:
+        ticket = repo.approve_ticket(ticket_id, reason=reason)
+        return {"ticket_id": ticket.id, "status": ticket.status.value, "message": "Approved"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/tickets/{ticket_id}/reject")
+async def api_reject_ticket(ticket_id: str, body: RejectRequest):
+    """Reject a ticket."""
+    repo = ApprovalRepository()
+    try:
+        ticket = repo.reject_ticket(ticket_id, reason=body.reason)
+        return {"ticket_id": ticket.id, "status": ticket.status.value, "message": "Rejected"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/metrics")
+async def api_metrics():
+    """Get system metrics."""
+    job_repo = JobRepository()
+    from monitoring.metrics import MetricsCollector
+    collector = MetricsCollector(job_repo)
+    return collector.collect()
+
+
+@app.get("/api/alerts")
+async def api_alerts():
+    """Get active alerts."""
+    job_repo = JobRepository()
+    approval_repo = ApprovalRepository()
+    from monitoring.alerts import AlertManager, create_default_alerts
+    manager = create_default_alerts(job_repo, approval_repo)
+    return {"alerts": [a.__dict__ for a in manager.check_all()]}
 
 
 # ── Integration helpers ──────────────────────────────────────────────

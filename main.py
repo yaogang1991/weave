@@ -309,6 +309,8 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     return RunService(
         repository=repository,
         llm_config=harness_config.llm,
+        default_backend=harness_config.default_backend,
+        backend_base_path=harness_config.backend_base_path,
         approval_repo=approval_repo,
         non_interactive=non_interactive,
         approval_timeout_sec=harness_config.approval_timeout_sec,
@@ -456,6 +458,14 @@ async def cmd_recover(args):
         "message": f"Recovered {len(recovered)} orphan jobs",
     }
     print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_console(args):
+    """Launch the Web Console (FastAPI server)."""
+    from visualizer.server import run_server
+    print(f"Harness Console: http://{args.host}:{args.port}/console")
+    print(f"Visualizer: http://{args.host}:{args.port}/")
+    await run_server(host=args.host, port=args.port)
 
 
 # =============================================================================
@@ -674,6 +684,12 @@ Examples:
     recover_parser = subparsers.add_parser("recover", help="Recover orphaned jobs after restart")
     recover_parser.set_defaults(func=cmd_recover)
 
+    # console command
+    console_parser = subparsers.add_parser("console", help="Launch Web Console")
+    console_parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
+    console_parser.add_argument("--port", type=int, default=8080, help="Port to listen")
+    console_parser.set_defaults(func=cmd_console)
+
     # ------------------------------------------------------------------
     # Approval ticket commands
     # ------------------------------------------------------------------
@@ -704,7 +720,7 @@ Examples:
         sys.exit(1)
 
     # Ensure API key (skip for commands that don't need LLM)
-    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "tickets", "approve", "reject"}
+    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject"}
     if args.command not in _NO_API_KEY_COMMANDS:
         if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN") and not os.getenv("OPENAI_API_KEY"):
             sys.stderr.write(json.dumps({
