@@ -33,6 +33,10 @@ from visualizer.event_bridge import WebSocketEventBridge
 from session.store import SessionStore
 from core.config import HarnessConfig
 
+from control_plane.models import JobStatus, TicketStatus
+from control_plane.repository import JobRepository
+from control_plane.approval import ApprovalRepository
+
 
 app = FastAPI(title="Harness Visualizer", version="2.0")
 bridge = WebSocketEventBridge()
@@ -204,6 +208,179 @@ def _list_plans() -> list[dict]:
             continue
     
     return plans
+
+
+# ── Web Console ──────────────────────────────────────────────────────
+
+@app.get("/console", response_class=HTMLResponse)
+async def console_page():
+    """Serve the Web Console (Jobs/Runs/Tickets/Alerts)."""
+    console_file = static_path / "console.html"
+    if console_file.exists():
+        return HTMLResponse(content=console_file.read_text(), status_code=200)
+    return HTMLResponse(content="<h1>Harness Console</h1><p>Console not built yet.</p>")
+
+
+@app.get("/api/jobs")
+async def api_list_jobs(status: str | None = None):
+    """List jobs with optional status filter."""
+    repo = JobRepository()
+    job_status = JobStatus(status) if status else None
+    jobs = repo.list_jobs(status=job_status)
+    return {
+        "jobs": [
+            {
+                "id": j.id,
+                "requirement": j.requirement,
+                "status": j.status.value,
+                "attempt": j.attempt,
+                "last_error": j.last_error,
+                "error_category": j.error_category,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "updated_at": j.updated_at.isoformat() if j.updated_at else None,
+            }
+            for j in sorted(jobs, key=lambda x: x.created_at or datetime.min, reverse=True)
+        ],
+        "count": len(jobs),
+    }
+
+
+@app.get("/api/jobs/{job_id}")
+async def api_get_job(job_id: str):
+    """Get job details with runs."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        return {"error": "Job not found"}, 404
+
+    runs = repo.list_runs_by_job(job_id)
+    return {
+        "job": {
+            "id": job.id,
+            "requirement": job.requirement,
+            "status": job.status.value,
+            "attempt": job.attempt,
+            "last_error": job.last_error,
+            "error_category": job.error_category,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        },
+        "runs": [
+            {
+                "id": r.id,
+                "status": r.status.value,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            }
+            for r in runs
+        ],
+    }
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def api_cancel_job(job_id: str):
+    """Cancel a job."""
+    repo = JobRepository()
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.CANCELED)
+        return {"job_id": job.id, "status": job.status.value, "message": "Job canceled"}
+    except ValueError as e:
+        return {"error": str(e)}, 400
+
+
+@app.post("/api/jobs/{job_id}/retry")
+async def api_retry_job(job_id: str):
+    """Retry a failed/dead_letter job."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        return {"error": "Job not found"}, 404
+    if job.status not in (JobStatus.FAILED, JobStatus.DEAD_LETTER):
+        return {"error": f"Cannot retry job in status {job.status.value}"}, 400
+
+    job.status = JobStatus.QUEUED
+    job.attempt = 0
+    job.last_error = ""
+    job.error_category = ""
+    job.updated_at = datetime.now(timezone.utc)
+    repo.update_job(job)
+    return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
+
+
+@app.post("/api/recover")
+async def api_recover():
+    """Recover orphaned jobs."""
+    repo = JobRepository()
+    recovered = repo.recover_orphan_jobs()
+    return {
+        "recovered_count": len(recovered),
+        "recovered_jobs": [{"id": j.id, "status": j.status.value} for j in recovered],
+    }
+
+
+@app.get("/api/tickets")
+async def api_list_tickets(status: str | None = None, job_id: str | None = None):
+    """List approval tickets."""
+    repo = ApprovalRepository()
+    ticket_status = TicketStatus(status) if status else None
+    tickets = repo.list_tickets(status=ticket_status, job_id=job_id)
+    return {
+        "tickets": [
+            {
+                "id": t.id,
+                "job_id": t.job_id,
+                "tool_name": t.tool_name,
+                "status": t.status.value,
+                "risk_level": t.risk_level,
+                "args_preview": t.args_preview,
+                "requested_at": t.requested_at.isoformat() if t.requested_at else None,
+                "expires_at": t.expires_at.isoformat() if t.expires_at else None,
+            }
+            for t in sorted(tickets, key=lambda x: x.requested_at or datetime.min, reverse=True)
+        ],
+        "count": len(tickets),
+        "stats": repo.get_stats(),
+    }
+
+
+@app.post("/api/tickets/{ticket_id}/approve")
+async def api_approve_ticket(ticket_id: str, reason: str = ""):
+    """Approve a ticket."""
+    repo = ApprovalRepository()
+    try:
+        ticket = repo.approve_ticket(ticket_id, reason=reason)
+        return {"ticket_id": ticket.id, "status": ticket.status.value, "message": "Approved"}
+    except ValueError as e:
+        return {"error": str(e)}, 400
+
+
+@app.post("/api/tickets/{ticket_id}/reject")
+async def api_reject_ticket(ticket_id: str, reason: str = ""):
+    """Reject a ticket."""
+    repo = ApprovalRepository()
+    try:
+        ticket = repo.reject_ticket(ticket_id, reason=reason)
+        return {"ticket_id": ticket.id, "status": ticket.status.value, "message": "Rejected"}
+    except ValueError as e:
+        return {"error": str(e)}, 400
+
+
+@app.get("/api/metrics")
+async def api_metrics():
+    """Get system metrics."""
+    job_repo = JobRepository()
+    from monitoring.metrics import MetricsCollector
+    collector = MetricsCollector(job_repo)
+    return collector.collect()
+
+
+@app.get("/api/alerts")
+async def api_alerts():
+    """Get active alerts."""
+    job_repo = JobRepository()
+    from monitoring.alerts import AlertManager
+    manager = AlertManager(job_repo)
+    return {"alerts": [a.__dict__ for a in manager.check_all()]}
 
 
 # ── Integration helpers ──────────────────────────────────────────────

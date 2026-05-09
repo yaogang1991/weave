@@ -446,6 +446,14 @@ async def cmd_recover(args):
     print(json.dumps(result, indent=2, default=str))
 
 
+async def cmd_console(args):
+    """Launch the Web Console (FastAPI server)."""
+    from visualizer.server import run_server
+    print(f"Harness Console: http://{args.host}:{args.port}/console")
+    print(f"Visualizer: http://{args.host}:{args.port}/")
+    await run_server(host=args.host, port=args.port)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Harness - Intelligent Multi-Agent Orchestration",
@@ -554,6 +562,12 @@ Examples:
     recover_parser = subparsers.add_parser("recover", help="Recover orphaned jobs after restart")
     recover_parser.set_defaults(func=cmd_recover)
 
+    # console command
+    console_parser = subparsers.add_parser("console", help="Launch Web Console")
+    console_parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
+    console_parser.add_argument("--port", type=int, default=8080, help="Port to listen")
+    console_parser.set_defaults(func=cmd_console)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -561,7 +575,7 @@ Examples:
         sys.exit(1)
 
     # Ensure API key (skip for commands that don't need LLM)
-    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover"}
+    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console"}
     if args.command not in _NO_API_KEY_COMMANDS:
         if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN") and not os.getenv("OPENAI_API_KEY"):
             sys.stderr.write(json.dumps({

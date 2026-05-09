@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Harness Console</title>
+    <style>
+        /* Dark theme variables */
+        :root {
+            --bg-dark: #0f172a;
+            --bg-panel: #1e293b;
+            --bg-card: #334155;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border: #475569;
+            --accent: #6366f1;
+            --status-pending: #9ca3af;
+            --status-running: #3b82f6;
+            --status-success: #22c55e;
+            --status-failed: #ef4444;
+            --status-canceled: #f59e0b;
+            --status-dead-letter: #7c3aed;
+            --ticket-pending: #f59e0b;
+            --ticket-approved: #22c55e;
+            --ticket-rejected: #ef4444;
+            --ticket-expired: #6b7280;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            height: 48px;
+            background: var(--bg-panel);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            gap: 16px;
+        }
+
+        .header h1 { font-size: 16px; font-weight: 600; }
+        .header .nav { display: flex; gap: 4px; margin-left: 24px; }
+
+        .nav-btn {
+            padding: 6px 14px;
+            background: none;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .nav-btn:hover { color: var(--text-primary); background: var(--bg-card); }
+        .nav-btn.active { color: var(--accent); border-color: var(--accent); background: rgba(99,102,241,0.1); }
+
+        /* Main */
+        .main { height: calc(100vh - 48px); overflow-y: auto; padding: 16px; }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        /* Stats cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+        }
+
+        .stat-card .value { font-size: 28px; font-weight: 700; }
+        .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+        /* Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 10px 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .data-table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: middle;
+        }
+
+        .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+        /* Status badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .badge-queued { background: rgba(156,163,175,0.15); color: #9ca3af; }
+        .badge-queued::before { background: #9ca3af; }
+        .badge-running { background: rgba(59,130,246,0.15); color: #60a5fa; }
+        .badge-running::before { background: #3b82f6; animation: pulse 2s infinite; }
+        .badge-succeeded { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .badge-succeeded::before { background: #22c55e; }
+        .badge-failed { background: rgba(239,68,68,0.15); color: #f87171; }
+        .badge-failed::before { background: #ef4444; }
+        .badge-canceled { background: rgba(245,158,11,0.15); color: #fbbf24; }
+        .badge-canceled::before { background: #f59e0b; }
+        .badge-dead_letter { background: rgba(124,58,237,0.15); color: #a78bfa; }
+        .badge-dead_letter::before { background: #7c3aed; }
+
+        .badge-ticket-pending { background: rgba(245,158,11,0.15); color: #fbbf24; }
+        .badge-ticket-approved { background: rgba(34,197,94,0.15); color: #4ade80; }
+        .badge-ticket-rejected { background: rgba(239,68,68,0.15); color: #f87171; }
+        .badge-ticket-expired { background: rgba(107,114,128,0.15); color: #9ca3af; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            transition: all 0.2s;
+        }
+
+        .btn:hover { background: var(--border); }
+        .btn-primary { background: var(--accent); border-color: var(--accent); }
+        .btn-primary:hover { background: #4f46e5; }
+        .btn-danger { background: rgba(239,68,68,0.2); border-color: #ef4444; color: #f87171; }
+        .btn-danger:hover { background: rgba(239,68,68,0.3); }
+        .btn-success { background: rgba(34,197,94,0.2); border-color: #22c55e; color: #4ade80; }
+        .btn-success:hover { background: rgba(34,197,94,0.3); }
+
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Panel */
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .panel-title { font-size: 14px; font-weight: 600; }
+
+        .panel-body { padding: 0; }
+
+        /* Filters */
+        .filter-bar {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .filter-bar select, .filter-bar input {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            font-size: 12px;
+        }
+
+        /* Truncate */
+        .truncate { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .truncate-sm { max-width: 150px; }
+
+        /* Alert items */
+        .alert-item {
+            padding: 12px 16px;
+            border-left: 3px solid var(--status-failed);
+            background: rgba(239,68,68,0.05);
+            margin: 8px;
+            border-radius: 6px;
+        }
+
+        .alert-item.warning { border-left-color: var(--status-canceled); background: rgba(245,158,11,0.05); }
+        .alert-item .alert-title { font-weight: 600; font-size: 13px; }
+        .alert-item .alert-detail { font-size: 12px; color: var(--text-secondary); margin-top: 4px; }
+
+        /* Empty */
+        .empty { text-align: center; padding: 40px; color: var(--text-secondary); }
+
+        /* Refresh indicator */
+        .refresh-info { font-size: 11px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Harness Console</h1>
+        <div class="nav">
+            <button class="nav-btn active" data-page="jobs">Jobs & Runs</button>
+            <button class="nav-btn" data-page="tickets">Approval Tickets</button>
+            <button class="nav-btn" data-page="health">Health & Alerts</button>
+        </div>
+        <div style="flex:1"></div>
+        <span class="refresh-info" id="last-refresh">Loading...</span>
+    </div>
+
+    <div class="main">
+        <!-- Page 1: Jobs & Runs -->
+        <div class="page active" id="page-jobs">
+            <div class="stats-grid" id="jobs-stats"></div>
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">Jobs</span>
+                    <div>
+                        <button class="btn" onclick="recoverOrphans()">Recover Orphans</button>
+                        <button class="btn" onclick="loadJobs()">Refresh</button>
+                    </div>
+                </div>
+                <div class="filter-bar">
+                    <select id="jobs-filter-status" onchange="loadJobs()">
+                        <option value="">All Status</option>
+                        <option value="queued">Queued</option>
+                        <option value="running">Running</option>
+                        <option value="succeeded">Succeeded</option>
+                        <option value="failed">Failed</option>
+                        <option value="canceled">Canceled</option>
+                        <option value="dead_letter">Dead Letter</option>
+                    </select>
+                </div>
+                <div class="panel-body" id="jobs-table-container">
+                    <div class="empty">Loading jobs...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page 2: Approval Tickets -->
+        <div class="page" id="page-tickets">
+            <div class="stats-grid" id="tickets-stats"></div>
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">Approval Tickets</span>
+                    <button class="btn" onclick="loadTickets()">Refresh</button>
+                </div>
+                <div class="filter-bar">
+                    <select id="tickets-filter-status" onchange="loadTickets()">
+                        <option value="">All</option>
+                        <option value="pending">Pending</option>
+                        <option value="approved">Approved</option>
+                        <option value="rejected">Rejected</option>
+                        <option value="expired">Expired</option>
+                    </select>
+                </div>
+                <div class="panel-body" id="tickets-table-container">
+                    <div class="empty">Loading tickets...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page 3: Health & Alerts -->
+        <div class="page" id="page-health">
+            <div class="stats-grid" id="metrics-stats"></div>
+            <div class="panel">
+                <div class="panel-header">
+                    <span class="panel-title">Active Alerts</span>
+                    <button class="btn" onclick="loadHealth()">Refresh</button>
+                </div>
+                <div class="panel-body" id="alerts-container">
+                    <div class="empty">Loading alerts...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Navigation
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('page-' + btn.dataset.page).classList.add('active');
+                if (btn.dataset.page === 'jobs') loadJobs();
+                if (btn.dataset.page === 'tickets') loadTickets();
+                if (btn.dataset.page === 'health') loadHealth();
+            });
+        });
+
+        function updateRefreshTime() {
+            document.getElementById('last-refresh').textContent =
+                'Updated: ' + new Date().toLocaleTimeString();
+        }
+
+        // Jobs
+        async function loadJobs() {
+            const status = document.getElementById('jobs-filter-status').value;
+            const url = status ? `/api/jobs?status=${status}` : '/api/jobs';
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                renderJobs(data.jobs || []);
+                renderJobStats(data.jobs || []);
+                updateRefreshTime();
+            } catch (e) {
+                document.getElementById('jobs-table-container').innerHTML =
+                    `<div class="empty">Error: ${e.message}</div>`;
+            }
+        }
+
+        function renderJobStats(jobs) {
+            const counts = {};
+            jobs.forEach(j => { counts[j.status] = (counts[j.status] || 0) + 1; });
+            const stats = [
+                { label: 'Total', value: jobs.length, color: '#f1f5f9' },
+                { label: 'Running', value: counts.running || 0, color: '#60a5fa' },
+                { label: 'Succeeded', value: counts.succeeded || 0, color: '#4ade80' },
+                { label: 'Failed', value: counts.failed || 0, color: '#f87171' },
+                { label: 'Queued', value: counts.queued || 0, color: '#9ca3af' },
+                { label: 'Dead Letter', value: counts.dead_letter || 0, color: '#a78bfa' },
+            ];
+            document.getElementById('jobs-stats').innerHTML = stats.map(s => `
+                <div class="stat-card">
+                    <div class="value" style="color:${s.color}">${s.value}</div>
+                    <div class="label">${s.label}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderJobs(jobs) {
+            if (jobs.length === 0) {
+                document.getElementById('jobs-table-container').innerHTML =
+                    '<div class="empty">No jobs found</div>';
+                return;
+            }
+
+            const rows = jobs.map(j => `
+                <tr>
+                    <td><code>${j.id.substring(0, 12)}...</code></td>
+                    <td class="truncate" title="${j.requirement}">${j.requirement}</td>
+                    <td><span class="badge badge-${j.status}">${j.status}</span></td>
+                    <td>${j.attempt}</td>
+                    <td class="truncate-sm" title="${j.last_error}">${j.last_error || '-'}</td>
+                    <td>${j.created_at ? new Date(j.created_at).toLocaleString() : '-'}</td>
+                    <td>
+                        ${j.status === 'running' ? `<button class="btn btn-danger" onclick="cancelJob('${j.id}')">Cancel</button>` : ''}
+                        ${(j.status === 'failed' || j.status === 'dead_letter') ? `<button class="btn btn-primary" onclick="retryJob('${j.id}')">Retry</button>` : ''}
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('jobs-table-container').innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr><th>ID</th><th>Requirement</th><th>Status</th><th>Attempt</th><th>Last Error</th><th>Created</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        async function cancelJob(jobId) {
+            if (!confirm(`Cancel job ${jobId.substring(0, 12)}?`)) return;
+            try {
+                const resp = await fetch(`/api/jobs/${jobId}/cancel`, {method: 'POST'});
+                const data = await resp.json();
+                alert(data.message || data.error);
+                loadJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function retryJob(jobId) {
+            if (!confirm(`Retry job ${jobId.substring(0, 12)}?`)) return;
+            try {
+                const resp = await fetch(`/api/jobs/${jobId}/retry`, {method: 'POST'});
+                const data = await resp.json();
+                alert(data.message || data.error);
+                loadJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function recoverOrphans() {
+            try {
+                const resp = await fetch('/api/recover', {method: 'POST'});
+                const data = await resp.json();
+                alert(`Recovered ${data.recovered_count} orphan jobs`);
+                loadJobs();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // Tickets
+        async function loadTickets() {
+            const status = document.getElementById('tickets-filter-status').value;
+            const url = status ? `/api/tickets?status=${status}` : '/api/tickets';
+            try {
+                const resp = await fetch(url);
+                const data = await resp.json();
+                renderTickets(data.tickets || []);
+                renderTicketStats(data.stats || {});
+                updateRefreshTime();
+            } catch (e) {
+                document.getElementById('tickets-table-container').innerHTML =
+                    `<div class="empty">Error: ${e.message}</div>`;
+            }
+        }
+
+        function renderTicketStats(stats) {
+            const s = [
+                { label: 'Pending', value: stats.pending || 0, color: '#fbbf24' },
+                { label: 'Approved', value: stats.approved || 0, color: '#4ade80' },
+                { label: 'Rejected', value: stats.rejected || 0, color: '#f87171' },
+                { label: 'Expired', value: stats.expired || 0, color: '#9ca3af' },
+            ];
+            document.getElementById('tickets-stats').innerHTML = s.map(x => `
+                <div class="stat-card">
+                    <div class="value" style="color:${x.color}">${x.value}</div>
+                    <div class="label">${x.label}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderTickets(tickets) {
+            if (tickets.length === 0) {
+                document.getElementById('tickets-table-container').innerHTML =
+                    '<div class="empty">No tickets found</div>';
+                return;
+            }
+
+            const rows = tickets.map(t => `
+                <tr>
+                    <td><code>${t.id.substring(0, 16)}...</code></td>
+                    <td><code>${t.job_id.substring(0, 12)}...</code></td>
+                    <td><span class="badge badge-ticket-${t.status}">${t.status}</span></td>
+                    <td><span class="badge" style="text-transform:uppercase">${t.risk_level}</span></td>
+                    <td class="truncate-sm">${t.tool_name}: ${t.args_preview}</td>
+                    <td>${t.requested_at ? new Date(t.requested_at).toLocaleString() : '-'}</td>
+                    <td>
+                        ${t.status === 'pending' ? `
+                            <button class="btn btn-success" onclick="approveTicket('${t.id}')">Approve</button>
+                            <button class="btn btn-danger" onclick="rejectTicket('${t.id}')">Reject</button>
+                        ` : '-'}
+                    </td>
+                </tr>
+            `).join('');
+
+            document.getElementById('tickets-table-container').innerHTML = `
+                <table class="data-table">
+                    <thead>
+                        <tr><th>Ticket</th><th>Job</th><th>Status</th><th>Risk</th><th>Command</th><th>Requested</th><th>Actions</th></tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        async function approveTicket(ticketId) {
+            try {
+                const resp = await fetch(`/api/tickets/${ticketId}/approve`, {method: 'POST'});
+                const data = await resp.json();
+                alert(data.message || data.error);
+                loadTickets();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        async function rejectTicket(ticketId) {
+            const reason = prompt('Rejection reason (optional):') || '';
+            try {
+                const resp = await fetch(`/api/tickets/${ticketId}/reject`, {method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({reason})});
+                const data = await resp.json();
+                alert(data.message || data.error);
+                loadTickets();
+            } catch (e) { alert('Error: ' + e.message); }
+        }
+
+        // Health
+        async function loadHealth() {
+            try {
+                const [metricsResp, alertsResp] = await Promise.all([
+                    fetch('/api/metrics'),
+                    fetch('/api/alerts')
+                ]);
+                const metrics = await metricsResp.json();
+                const alerts = await alertsResp.json();
+                renderMetrics(metrics);
+                renderAlerts(alerts.alerts || []);
+                updateRefreshTime();
+            } catch (e) {
+                document.getElementById('alerts-container').innerHTML =
+                    `<div class="empty">Error: ${e.message}</div>`;
+            }
+        }
+
+        function renderMetrics(metrics) {
+            const s = metrics.summary || {};
+            const stats = [
+                { label: 'Total Jobs', value: s.total || 0, color: '#f1f5f9' },
+                { label: 'Success Rate', value: (s.success_rate || 0) + '%', color: '#4ade80' },
+                { label: 'Succeeded', value: s.succeeded || 0, color: '#22c55e' },
+                { label: 'Failed', value: s.failed || 0, color: '#ef4444' },
+            ];
+            document.getElementById('metrics-stats').innerHTML = stats.map(x => `
+                <div class="stat-card">
+                    <div class="value" style="color:${x.color}">${x.value}</div>
+                    <div class="label">${x.label}</div>
+                </div>
+            `).join('');
+        }
+
+        function renderAlerts(alerts) {
+            if (alerts.length === 0) {
+                document.getElementById('alerts-container').innerHTML =
+                    '<div class="empty">No active alerts</div>';
+                return;
+            }
+            document.getElementById('alerts-container').innerHTML = alerts.map(a => `
+                <div class="alert-item ${a.severity === 'warning' ? 'warning' : ''}">
+                    <div class="alert-title">[${a.severity?.toUpperCase() || 'ALERT'}] ${a.rule_name || a.message}</div>
+                    <div class="alert-detail">${a.message || ''} ${a.details ? JSON.stringify(a.details) : ''}</div>
+                </div>
+            `).join('');
+        }
+
+        // Auto refresh
+        setInterval(() => {
+            const activePage = document.querySelector('.page.active').id;
+            if (activePage === 'page-jobs') loadJobs();
+            if (activePage === 'page-tickets') loadTickets();
+            if (activePage === 'page-health') loadHealth();
+        }, 10000);
+
+        // Init
+        loadJobs();
+    </script>
+</body>
+</html>
