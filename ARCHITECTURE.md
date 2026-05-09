@@ -21,8 +21,9 @@
               │
               ▼
     ┌─────────────────────┐
-    │  CLI Control Plane  │  ← M1 新增：submit / status / list / cancel / recover
-    │  (control_plane/)   │     基于文件系统的任务队列 + Worker 消费者
+    │  CLI Control Plane  │  ← M1: submit/status/list/cancel
+    │  (control_plane/)   │     M1.1: tickets/approve/reject
+    │                     │     基于文件系统的任务队列 + Worker 消费者
     └──────────┬──────────┘
                │
                │
@@ -48,6 +49,7 @@
     │  - Topological sort │     Level 1: [generator_ui, generator_api] 并行
     │  - Parallel exec    │     Level 2: [evaluator]
     │  - Failure handling │
+    │  - Watchdog (M2)    │  ← 心跳监控，hang agent 自动处理
     └──────────┬──────────┘
                │
         ┌──────┼──────┐
@@ -58,10 +60,24 @@
     │Agent ││Agent ││Agent │     通过 HandoffArtifact 交接
     └──────┘└──────┘└──────┘
                │
+        ┌──────┼──────┐
+        │      │      │
+        ▼      ▼      ▼
+    ┌──────┐┌──────┐┌──────┐
+    │Local ││Work- ││Docker│  ← M2: 执行后端抽象
+    │      ││tree  ││(stub)│     配置驱动后端选择
+    └──────┘└──────┘└──────┘
+               │
                ▼
     ┌─────────────────────┐
-    │  Monitoring Layer   │  ← M1 新增：指标聚合 + 告警
-    │  (monitoring/)      │     成功率、延迟、Token 用量、失败率告警
+    │  Monitoring Layer   │  ← 指标聚合 + 告警 + 健康监控
+    │  (monitoring/)      │     成功率、延迟、Token 用量、心跳告警
+    └─────────────────────┘
+               │
+               ▼
+    ┌─────────────────────┐
+    │  Web Console        │  ← M2.3: 可视化控制台
+    │  (visualizer/)      │     DAG 实时监控、审批管理、告警面板
     └─────────────────────┘
 ```
 
@@ -128,8 +144,15 @@ Available Worker Agents:
 **执行流程**：
 1. 拓扑排序 → 分层
 2. 同层并行执行（asyncio.gather）
-3. 失败时回调编排 Agent 决策
-4. 返回完整执行结果
+3. Watchdog 后台协程监控节点心跳（M2）
+4. 失败时回调编排 Agent 决策
+5. 返回完整执行结果
+
+**Watchdog 机制（M2）**：
+- 后台协程定期检查运行节点的 `last_heartbeat_at`
+- 阈值: `heartbeat_interval(5s) × miss_threshold(3) ≈ 15s`
+- 心跳丢失 → 标记 UNHEALTHY → 触发失败处理器
+- 超时 → 标记 DEAD → 节点终止
 
 **并发控制**：`max_parallel` 参数限制同时执行的 Agent 数
 
@@ -153,6 +176,52 @@ Available Worker Agents:
 | `DAG` | 完整执行计划 |
 | `HandoffArtifact` | Agent 间结构化交接产物 |
 | `FailureDecision` | 编排 Agent 的失败处理决策 |
+| `NodeHealth` | M2: 节点健康状态枚举（HEALTHY/MISSED/UNHEALTHY/DEAD） |
+
+### 6. Control Plane (`control_plane/`)
+
+**职责**：CLI 控制面，任务生命周期管理
+
+| 组件 | 说明 |
+|------|------|
+| `models.py` | Job/Run 数据模型、状态枚举 |
+| `repository.py` | 持久化存储（原子写入） |
+| `service.py` | 执行服务（submit/run/resume） |
+| `worker.py` | Worker 队列消费者（Lease 机制） |
+| `approval.py` | M1.1: 审批票据系统（ApprovalTicket + ApprovalRepository） |
+
+### 7. Execution Backend (`backend/`)
+
+**职责**：M2 执行环境隔离抽象
+
+| 组件 | 说明 |
+|------|------|
+| `base.py` | ExecutionBackend 抽象接口 |
+| `local.py` | 本地直接执行 |
+| `worktree.py` | Git worktree 隔离（每个 Job 独立分支） |
+| `docker_stub.py` | Docker 后端 stub（M3） |
+| `lifecycle.py` | BackendManager — 配置驱动选择、风险映射、自动降级 |
+
+### 8. Monitoring (`monitoring/`)
+
+**职责**：指标聚合与告警
+
+| 组件 | 说明 |
+|------|------|
+| `metrics.py` | 任务成功率、延迟 P95、重试率、Token 用量、审批维度指标 |
+| `alerts.py` | 连续失败、时长阈值、死信、心跳异常告警 |
+
+### 9. Web Console (`visualizer/`)
+
+**职责**：M2.3 可视化控制台
+
+| 组件 | 说明 |
+|------|------|
+| `server.py` | FastAPI 服务 — WebSocket DAG 监控 + REST API |
+| `cli_renderer.py` | CLI 终端 DAG 渲染 |
+| `event_bridge.py` | 事件桥接（Session 事件 → WebSocket） |
+| `static/index.html` | 主仪表盘 — DAG 可视化、实时事件流 |
+| `static/console.html` | 管理控制台 — Jobs/Runs/Tickets/Alerts |
 
 ---
 
@@ -184,7 +253,44 @@ python main.py execute ./data/plans/plan_abc123.json
 python main.py run "Add OAuth2 support" --project ./my-project
 ```
 
-### 4. 使用项目自定义 Agent
+### 4. Worker 模式（无人值守）
+
+```bash
+# 启动 Worker
+python main.py worker --concurrency 1
+
+# 提交任务
+python main.py submit "Build a REST API for user auth"
+
+# 非交互模式
+python main.py worker --non-interactive
+```
+
+### 5. 审批管理（M1.1）
+
+```bash
+# 查看待审批票据
+python main.py tickets
+
+# 批准
+python main.py approve <ticket_id> --reason "已审查，安全"
+
+# 拒绝
+python main.py reject <ticket_id> --reason "风险过高"
+```
+
+### 6. Web 控制台（M2.3）
+
+```bash
+# 启动 Web 服务
+python main.py viz
+
+# 浏览器访问
+# http://localhost:8765 — 主仪表盘
+# http://localhost:8765/console.html — 管理控制台
+```
+
+### 7. 使用项目自定义 Agent
 
 在项目根目录创建 `.harness/agents.yaml`：
 
@@ -209,37 +315,58 @@ python main.py run "设计登录页面" --project ./my-project
 
 ```
 harness/
-├── control_plane/          <- New: M1 Control Plane
-│   ├── models.py           # Job/Run data models
-│   ├── repository.py       # Persistence storage
-│   ├── service.py          # Execution service
-│   └── worker.py           # Worker queue consumer
-├── monitoring/             <- New: M1 Monitoring
-│   ├── metrics.py          # Metrics aggregation
-│   └── alerts.py           # Alerting system
-├── core/
-│   ├── models.py                    # All data models (DAG/AgentCapability/Event/Session/Guardrail...)
-│   ├── config.py                    # Configuration management
-│   ├── llm_client.py                # Unified LLM client
-│   ├── agent_registry.py            # Agent capability registry
-│   └── dag_engine.py               # DAG execution engine
+├── core/                          # 核心模型与引擎
+│   ├── models.py                  # 所有数据模型（含 NodeHealth 心跳）
+│   ├── config.py                  # 配置管理
+│   ├── agent_registry.py          # Agent 能力注册表
+│   ├── llm_client.py              # 统一 LLM 客户端
+│   └── dag_engine.py              # DAG 引擎（含 Watchdog 协程）
+├── control_plane/                 # M1: CLI 控制面
+│   ├── models.py                  # Job/Run 数据模型
+│   ├── repository.py              # 持久化存储
+│   ├── service.py                 # 执行服务
+│   ├── worker.py                  # Worker 队列消费者
+│   └── approval.py                # M1.1: 审批票据系统
+├── backend/                       # M2: 执行后端
+│   ├── base.py                    # 抽象接口
+│   ├── local.py                   # 本地执行
+│   ├── worktree.py                # Git worktree 隔离
+│   ├── docker_stub.py             # Docker stub（预留）
+│   └── lifecycle.py               # 后端生命周期管理
+├── monitoring/                    # M1: 监控
+│   ├── metrics.py                 # 指标聚合
+│   └── alerts.py                  # 告警系统（含健康告警）
+├── visualizer/                    # M2.3: Web 控制台
+│   ├── server.py                  # FastAPI 服务
+│   ├── cli_renderer.py            # CLI DAG 渲染
+│   ├── event_bridge.py            # WebSocket 事件桥
+│   └── static/
+│       ├── index.html             # 主仪表盘
+│       └── console.html           # 管理控制台
 ├── orchestrator/
-│   └── intelligent_orchestrator.py  # Intelligent orchestration Agent
+│   └── intelligent_orchestrator.py # 智能编排 Agent
 ├── agent/
-│   ├── worker.py                    # Agent Worker (LLM call loop)
-│   └── agent_pool.py               # Agent instance pool
+│   ├── worker.py                  # Agent Worker
+│   └── agent_pool.py              # Agent 实例池
 ├── session/
-│   └── store.py                     # Event storage
+│   └── store.py                   # JSONL 事件存储
 ├── tools/
-│   └── registry.py                  # Tool registry
+│   └── registry.py                # 工具注册表
+├── guardrails/
+│   └── policy.py                  # 安全策略
+├── evaluator/
+│   └── engine.py                  # 评估引擎
+├── reporter/
+│   └── logger.py                  # 报告生成
 ├── projects/
-│   └── example/
-│       └── agents.yaml              # Example: project custom Agent
+│   └── example/agents.yaml        # 自定义 Agent 示例
 ├── docs/
-│   └── m1_personal_spec.md          # M1 specification document
-├── main.py                          # CLI entry point
-├── README.md
-└── ARCHITECTURE.md                  # This document
+│   ├── roadmap.md                 # 里程碑路线图
+│   └── m1_personal_spec.md        # M1 工程规格
+├── tests/                         # 测试套件
+├── main.py                        # CLI 入口
+├── README.md                      # 面向用户的说明（中文）
+└── ARCHITECTURE.md                # 本文档
 ```
 
 ---
@@ -254,17 +381,13 @@ python main.py run "设计登录页面" --project ./my-project
 
 ---
 
+---
+
 ## 七、下一步计划
 
-| 特性 | 说明 |
-|------|------|
-| **MCP 集成** | Agent 通过 MCP 调用外部工具（GitHub、数据库、浏览器） |
-| **多模型路由** | planner 用轻量模型，generator 用强模型，evaluator 用中等模型 |
-| **图编排** | 非线性 DAG（条件分支、循环、动态添加节点） |
-| **执行监控 UI** | Web 界面实时显示 DAG 执行状态 |
-| **Agent 记忆共享** | 跨项目的 Agent 经验积累 |
+详见 `docs/roadmap.md`。
 
 ---
 
-*日期: 2026-05-08*
-*状态: 核心架构完成*
+*日期: 2026-05-10*
+*状态: M2 已完成*
