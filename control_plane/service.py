@@ -120,9 +120,7 @@ class RunService:
         self.approval_timeout_sec = approval_timeout_sec
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
-        # M2.1/M2.2: Backend manager for isolated execution
-        from backend.lifecycle import BackendManager
-
+        # M2.1/M2.2: Isolation configuration
         self.default_backend = default_backend
         self.backend_base_path = backend_base_path
 
@@ -203,13 +201,19 @@ class RunService:
             # M2.2: Build BackendManager per-job so repo_root matches project_path
             project_root = Path(job.project_path).resolve() if job.project_path else Path.cwd().resolve()
             from backend.lifecycle import BackendManager
+            from backend.base import WorkspaceIsolation, ExecutionSandbox
             from core.config import HarnessConfig
+            from core.project_config import ProjectConfig
+
             harness_config = HarnessConfig.from_env()
+            project_config = ProjectConfig.load(job.project_path)
+
             backend_manager = BackendManager(
-                default_backend=self.default_backend,
+                workspace=WorkspaceIsolation(harness_config.workspace_isolation),
+                sandbox=ExecutionSandbox(harness_config.execution_sandbox),
                 repo_root=str(project_root),
                 base_path=self.backend_base_path,
-                risk_backend_map=harness_config.risk_backend_map,
+                workspace_by_risk=harness_config.workspace_isolation_by_risk,
             )
             work_dir = backend_manager.setup(
                 job_id=job.id,
@@ -217,15 +221,42 @@ class RunService:
                 risk_level=job.metadata.get("risk_level"),
             )
 
+            # --- Hook: after_create ---
+            if project_config.hooks.after_create:
+                await backend_manager.execute_hook(
+                    "after_create",
+                    project_config.hooks.after_create,
+                    work_dir,
+                    timeout=project_config.hooks.timeout_sec,
+                )
+
             # --- Non-interactive: expire old approval tickets ---
             if self.non_interactive and self.approval_repo is not None:
                 self.approval_repo.expire_tickets()
 
+            # --- Hook: before_run ---
+            if project_config.hooks.before_run:
+                await backend_manager.execute_hook(
+                    "before_run",
+                    project_config.hooks.before_run,
+                    work_dir,
+                    timeout=project_config.hooks.timeout_sec,
+                )
+
             # --- Core execution (with task-level timeout) ---
             result_dag = await asyncio.wait_for(
-                self._execute_plan_and_run(job, session_id, store, work_dir),
+                self._execute_plan_and_run(job, session_id, store, work_dir, project_config),
                 timeout=timeout,
             )
+
+            # --- Hook: after_run (non-fatal) ---
+            if project_config.hooks.after_run:
+                await backend_manager.execute_hook(
+                    "after_run",
+                    project_config.hooks.after_run,
+                    work_dir,
+                    timeout=project_config.hooks.timeout_sec,
+                )
 
             # --- Summarize ---
             orchestrator = self._create_orchestrator(store)
@@ -235,6 +266,7 @@ class RunService:
                     dag, failed_id, job.requirement,
                 ),
                 work_dir=work_dir,
+                runtime_config=project_config.runtime,
             )
             summary = engine.get_execution_summary(result_dag)
 
@@ -263,7 +295,10 @@ class RunService:
                 run.completed_at = _utc_now()
                 self.repository.update_run(run)
                 if work_dir is not None:
-                    backend_manager.preserve(job.id, run.id, reason="external_status_change")
+                    await self._finalize_backend(
+                        backend_manager, job, run, project_config, work_dir,
+                        success=False, reason="external_status_change",
+                    )
                 return self.repository.get_run(run.id) or run
 
             error_msg = ""
@@ -287,10 +322,10 @@ class RunService:
                     job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
                 )
                 if work_dir is not None:
-                    try:
-                        backend_manager.preserve(job.id, run.id, reason=error_cat or "failed")
-                    except Exception:
-                        pass  # Backend cleanup failure must not mask original error
+                    await self._finalize_backend(
+                        backend_manager, job, run, project_config, work_dir,
+                        success=False, reason=error_cat or "failed",
+                    )
                 job = self.repository.get_job(job_id)
                 assert job is not None
                 # Apply retry policy: FAILED -> QUEUED (retry) or DEAD_LETTER
@@ -302,10 +337,10 @@ class RunService:
                     job_id, job_status, error=error_msg, error_category=error_cat,
                 )
                 if work_dir is not None:
-                    try:
-                        backend_manager.cleanup(job.id, run.id)
-                    except Exception:
-                        pass  # Backend cleanup failure must not mask original error
+                    await self._finalize_backend(
+                        backend_manager, job, run, project_config, work_dir,
+                        success=True,
+                    )
 
         except asyncio.TimeoutError:
             # --- Timeout handling ---
@@ -334,10 +369,10 @@ class RunService:
                 job, error="Job execution timed out", error_category="timeout",
             )
             if work_dir is not None:
-                try:
-                    backend_manager.preserve(job.id, run.id, reason="timeout")
-                except Exception:
-                    pass
+                await self._finalize_backend(
+                    backend_manager, job, run, project_config, work_dir,
+                    success=False, reason="timeout",
+                )
 
         except asyncio.CancelledError:
             run.status = RunStatus.CANCELED
@@ -350,10 +385,10 @@ class RunService:
                     job_id, JobStatus.CANCELED, error="Run canceled", error_category="tool_blocked",
                 )
             if work_dir is not None:
-                try:
-                    backend_manager.preserve(job.id, run.id, reason="canceled")
-                except Exception:
-                    pass
+                await self._finalize_backend(
+                    backend_manager, job, run, project_config, work_dir,
+                    success=False, reason="canceled",
+                )
             return self.repository.get_run(run.id) or run
 
         except Exception as exc:
@@ -384,10 +419,10 @@ class RunService:
                 job, error=error_msg, error_category=error_cat,
             )
             if work_dir is not None:
-                try:
-                    backend_manager.preserve(job.id, run.id, reason=error_cat)
-                except Exception:
-                    pass
+                await self._finalize_backend(
+                    backend_manager, job, run, project_config, work_dir,
+                    success=False, reason=error_cat,
+                )
 
         finally:
             self._running_tasks.pop(job_id, None)
@@ -589,6 +624,40 @@ class RunService:
         }
         print(json.dumps(event), flush=True)
 
+    async def _finalize_backend(
+        self,
+        backend_manager: Any,
+        job: Any,
+        run: Any,
+        project_config: Any,
+        work_dir: Path,
+        success: bool,
+        reason: str = "",
+    ) -> None:
+        """Run before_remove hook + cleanup/preserve in one place."""
+        # Hook: before_remove (non-fatal)
+        if project_config.hooks.before_remove:
+            try:
+                await backend_manager.execute_hook(
+                    "before_remove",
+                    project_config.hooks.before_remove,
+                    work_dir,
+                    timeout=project_config.hooks.timeout_sec,
+                )
+            except Exception:
+                pass  # before_remove failure is logged and ignored
+
+        if success:
+            try:
+                backend_manager.cleanup(job.id, run.id)
+            except Exception:
+                pass
+        else:
+            try:
+                backend_manager.preserve(job.id, run.id, reason=reason)
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -599,6 +668,7 @@ class RunService:
         session_id: str,
         store: SessionStore,
         work_dir: Path,
+        project_config: ProjectConfig | None = None,
     ) -> Any:
         """
         Plan a DAG and execute it.
@@ -608,10 +678,22 @@ class RunService:
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
-        project_context = {"project_path": project_path} if project_path else None
+        project_context: dict[str, Any] = {}
+        if project_path:
+            project_context["project_path"] = project_path
+        # Inject project context from config
+        if project_config and project_config.project_context.language:
+            project_context.update(
+                project_config.project_context.model_dump(exclude_defaults=True)
+            )
+        # Inject attempt context for retries
+        if job.attempt > 0:
+            project_context["attempt"] = job.attempt
+            project_context["is_retry"] = True
+
         dag = await orchestrator.plan(
             requirement=job.requirement,
-            project_context=project_context,
+            project_context=project_context or None,
         )
 
         # 2. Create execution engine (with replan handler) and execute
@@ -621,6 +703,7 @@ class RunService:
                 dag_ref, failed_id, job.requirement,
             ),
             work_dir=work_dir,
+            runtime_config=project_config.runtime if project_config else None,
         )
         result_dag = await engine.execute(dag)
 
@@ -641,8 +724,12 @@ class RunService:
         store: SessionStore,
         replan_handler: Any | None = None,
         work_dir: Path | None = None,
+        runtime_config: Any | None = None,
     ) -> DAGExecutionEngine:
         """Build a DAGExecutionEngine with agent pool, failure handler, and optional replan handler."""
+        from core.project_config import RuntimeConfig
+        rc = runtime_config or RuntimeConfig()
+
         registry = AgentRegistry()
         tool_registry = ToolRegistry(base_cwd=str(work_dir) if work_dir is not None else None)
 
@@ -688,7 +775,10 @@ class RunService:
             agent_executor=pool.get_executor(session_id),
             failure_handler=orchestrator.adapt_to_failure,
             replan_handler=replan_handler,
-            max_parallel=self.max_parallel,
+            max_parallel=rc.max_parallel,
             evaluator=evaluator,
             artifact_path=self.artifact_path,
+            backoff_base=rc.base_backoff_sec,
+            max_backoff=rc.max_backoff_sec,
+            backoff_multiplier=rc.backoff_multiplier,
         )

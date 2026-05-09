@@ -13,7 +13,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from backend.base import ExecutionBackend, BackendType
+from backend.base import ExecutionBackend, WorkspaceIsolation
 
 
 class WorktreeBackend(ExecutionBackend):
@@ -29,7 +29,7 @@ class WorktreeBackend(ExecutionBackend):
     Requirement: git >= 2.15 (supports worktree)
     """
 
-    backend_type = BackendType.WORKTREE
+    workspace_type = WorkspaceIsolation.WORKTREE
 
     def __init__(
         self,

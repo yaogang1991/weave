@@ -1,21 +1,26 @@
-"""Docker backend stub -- for future implementation (M3+)."""
+"""Docker workspace backend stub -- for future implementation (M3+).
+
+Note: Docker as an execution sandbox is now in backend/sandbox.py.
+This file is kept as a stub in case a Docker-based workspace backend
+is needed separately from the sandbox concept.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from backend.base import ExecutionBackend, BackendType
+from backend.base import ExecutionBackend, WorkspaceIsolation
 
 
 class DockerBackend(ExecutionBackend):
     """
-    Docker backend -- reserved for future implementation.
+    Docker workspace backend -- reserved for future implementation.
 
-    M3 plan: Execute agent tasks in Docker containers for full isolation.
+    M3 plan: Create workspace directories inside Docker volumes.
     Currently returns not available as an interface placeholder.
     """
 
-    backend_type = BackendType.DOCKER
+    workspace_type = WorkspaceIsolation.LOCAL  # Placeholder
 
     def setup(self, job_id: str, run_id: str) -> Path:
         raise NotImplementedError(

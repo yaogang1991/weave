@@ -59,6 +59,10 @@ class DAGExecutionEngine:
         heartbeat_interval_sec: float = 5.0,
         heartbeat_miss_threshold: int = 3,
         enable_watchdog: bool = True,
+        # Configurable backoff parameters
+        backoff_base: float = 1.0,
+        max_backoff: float = 300.0,
+        backoff_multiplier: float = 2.0,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -73,6 +77,10 @@ class DAGExecutionEngine:
         self.heartbeat_interval_sec = heartbeat_interval_sec
         self.heartbeat_miss_threshold = heartbeat_miss_threshold
         self.enable_watchdog = enable_watchdog
+        # Configurable backoff
+        self._backoff_base = backoff_base
+        self._max_backoff = max_backoff
+        self._backoff_multiplier = backoff_multiplier
         self._watchdog_task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}  # M2.0: Tasks for cancellation
@@ -313,8 +321,8 @@ class DAGExecutionEngine:
 
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""
-        # Base exponential backoff with a hard cap at 60s.
-        return min(2 ** retry_count, 60.0)
+        delay = self._backoff_base * (self._backoff_multiplier ** retry_count)
+        return min(delay, self._max_backoff)
 
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
         """Execute a single DAG node with retry logic."""
