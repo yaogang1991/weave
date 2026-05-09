@@ -1,9 +1,23 @@
 # Harness M1 Personal Edition — Engineering Specification
 
-> **Version:** 1.0.0
-> **Status:** Draft
+---
+**版本:** M1.1
+**状态:** 已发布
+**日期:** 2026-05-09
+---
+
+> **Version:** 1.1.0
+> **Status:** Published
 > **Target:** Single-user, self-hosted, CLI-driven multi-agent software development harness
 > **Motto:** *"I can throw tasks in, the system runs to completion or recovers from failure; I only confirm high-risk actions when necessary."*
+
+## 状态标签说明
+
+| 标签 | 含义 |
+|------|------|
+| [IMPLEMENTED] | 代码已实现，有测试覆盖 |
+| [PARTIAL] | 核心实现完成，边界情况待完善 |
+| [PLANNED] | 仅在规划阶段，代码未落地 |*
 
 ---
 
@@ -24,16 +38,27 @@
 
 | # | Feature | Description | Priority |
 |---|---------|-------------|----------|
-| 1 | **Single-user operation** | One human user submits tasks via CLI; no authentication or authorization layers beyond OS permissions. The entire system runs on the user's local machine. | P0 |
-| 2 | **CLI control plane** | Commands: `submit`, `status`, `list`, `cancel`, `worker`. All interactions are terminal-based. Output is structured JSON Lines for scriptability. | P0 |
-| 3 | **Worker queue execution** | A local worker process polls a job queue (filesystem-backed), leases jobs, executes DAG nodes via Agent Pool, and reports results. Supports concurrency control. | P0 |
-| 4 | **Reliability primitives** | Per-node timeout (default 120s), retry with exponential backoff (max 3 attempts per node), dead-letter queue for permanently failed jobs, graceful degradation on LLM API transient errors. | P0 |
-| 5 | **Replan closed loop** | When a DAG node fails after exhausting retries, the Orchestrator Agent can decide to `replan` — generating a new DAG to route around the failure. The new plan becomes a new Job that references the original. | P0 |
-| 6 | **Personal-mode guardrails** | Four-layer defense: (1) tool risk classification, (2) permission mode (`plan`/`default`/`accept_edits`/`auto`/`dont_ask`), (3) denied command/tool lists, (4) iteration/error limits. High-risk actions (bash, network) require explicit human confirmation in `default` mode. | P0 |
-| 7 | **Basic metrics & alerting** | Event-sourced metrics: task throughput, success/failure rates, average node duration, LLM token usage, tool call histograms. Alerting via CLI (`--alert` flag on `status`/`list`) and exit codes. | P1 |
-| 8 | **Restart recovery** | On process restart, the worker scans existing event logs (JSONL) to reconstruct Job/Run states and resumes interrupted jobs from the last successfully completed DAG level. No in-memory state is authoritative. | P0 |
-| 9 | **Append-only event store** | All state changes are persisted as immutable events in JSONL files. Session state is derived by replaying events. Checkpoints are file copies. | P0 |
-| 10 | **Local file-based persistence** | All durable state lives on the local filesystem under `./data/`: `./data/events/`, `./data/artifacts/`, `./data/plans/`, `./data/queue/`. No external database. | P0 |
+| 1 | **Single-user operation** [IMPLEMENTED] | One human user submits tasks via CLI; no authentication or authorization layers beyond OS permissions. The entire system runs on the user's local machine. | P0 |
+| 2 | **CLI control plane** [IMPLEMENTED] | Commands: `submit`, `status`, `list`, `cancel`, `worker`, `tickets`, `approve`, `reject`. All interactions are terminal-based. Output is structured JSON Lines for scriptability. | P0 |
+| 3 | **Worker queue execution** [IMPLEMENTED] | A local worker process polls a job queue (filesystem-backed), leases jobs, executes DAG nodes via Agent Pool, and reports results. Supports concurrency control. | P0 |
+| 4 | **Reliability primitives** [IMPLEMENTED] | Per-node timeout (default 120s), retry with exponential backoff (max 3 attempts per node), dead-letter queue for permanently failed jobs, graceful degradation on LLM API transient errors. | P0 |
+| 5 | **Replan closed loop** [IMPLEMENTED] | When a DAG node fails after exhausting retries, the Orchestrator Agent can decide to `replan` — generating a new DAG to route around the failure. The new plan becomes a new Job that references the original. | P0 |
+| 6a | **Tool risk classification** [IMPLEMENTED] | Four-layer defense: (1) tool risk classification (LOW/MEDIUM/HIGH/CRITICAL), (2) permission mode (`plan`/`default`/`accept_edits`/`auto`/`dont_ask`), (3) denied command/tool lists, (4) iteration/error limits. | P0 |
+| 6b | **Interactive confirmation (stdin)** [IMPLEMENTED] | `PersonalGuardrails.request_confirmation()` reads stdin for HIGH/CRITICAL risk actions. Works in interactive terminal sessions. | P0 |
+| 6c | **Approval ticket system** [IMPLEMENTED] — M1.1 | Persistent pending/approved/rejected/expired ticket flow replaces stdin blocking for unattended operation. `ApprovalTicket` + `ApprovalRepository` with atomic writes. | P0 |
+| 6d | **Non-interactive auto-pending** [IMPLEMENTED] — M1.1 | `HARNESS_NON_INTERACTIVE=true` or `--non-interactive`: HIGH risk actions automatically create pending tickets without blocking stdin. | P0 |
+| 6e | **Whitelist auto-approval** [IMPLEMENTED] | Command prefix and regex whitelist patterns; whitelisted commands bypass confirmation even for HIGH risk. | P0 |
+| 6f | **Unified 3-state guardrail entry** [IMPLEMENTED] — M1.1 | Single `check_and_execute()` returns `allowed|blocked|pending_approval(ticket_id)`. No dual-path divergence. | P0 |
+| 6g | **Multi-tenancy guardrails** [PLANNED] | Per-user/team policy isolation. Not needed for single-user M1. | M2 |
+| 7 | **Basic metrics & alerting** [IMPLEMENTED] | Event-sourced metrics: task throughput, success/failure rates, average node duration, LLM token usage, tool call histograms. Alerting via CLI (`--alert` flag on `status`/`list`) and exit codes. | P1 |
+| 8 | **Restart recovery** [IMPLEMENTED] | On process restart, the worker scans existing event logs (JSONL) to reconstruct Job/Run states and resumes interrupted jobs from the last successfully completed DAG level. No in-memory state is authoritative. | P0 |
+| 9 | **Append-only event store** [IMPLEMENTED] | All state changes are persisted as immutable events in JSONL files. Session state is derived by replaying events. Checkpoints are file copies. | P0 |
+| 10 | **Local file-based persistence** [IMPLEMENTED] | All durable state lives on the local filesystem under `./data/`: `./data/events/`, `./data/artifacts/`, `./data/plans/`, `./data/queue/`. No external database. | P0 |
+| 11 | **Approval ticket system** [IMPLEMENTED] — M1.1 | Pending/approved/rejected/expired four-state approval flow for high-risk tool calls. Persistent JSON-backed storage with atomic writes. | P0 |
+| 12 | **Non-interactive mode** [IMPLEMENTED] — M1.1 | Worker runs without stdin blocking; high-risk actions create pending approval tickets instead of interactive prompts. | P0 |
+| 13 | **Approval CLI toolchain** [IMPLEMENTED] — M1.1 | `tickets`, `approve`, `reject` commands for managing approval tickets via CLI. | P0 |
+| 14 | **Approval recovery enhancement** [IMPLEMENTED] — M1.1 | Worker restart scans pending tickets and re-processes them; expired tickets auto-transition to `expired`. | P0 |
+| 15 | **Approval dimension metrics** [IMPLEMENTED] — M1.1 | Ticket counts by status (pending/approved/rejected/expired) exposed via `tickets` command `--stats`. | P1 |
 
 ### 1.2 Out of Scope
 
@@ -106,29 +131,30 @@ QUEUED --lease--> LEASED --start--> RUNNING --success--> SUCCEEDED
                                         DEAD_LETTER
 ```
 
-| From | To | Trigger | Guard |
-|------|----|---------|-------|
-| `QUEUED` | `LEASED` | Worker acquires lease | Lease file must not exist |
-| `LEASED` | `RUNNING` | Worker calls `engine.execute(dag)` | — |
-| `LEASED` | `QUEUED` | Lease timeout (default 60s) | No progress event written |
-| `RUNNING` | `SUCCEEDED` | All DAG nodes `SUCCESS` | `failed == 0 && skipped == 0` |
-| `RUNNING` | `FAILED` | Orchestrator returns `action=abort` OR node fails after max_retries | — |
-| `RUNNING` | `CANCELED` | User calls `cancel <job_id>` | Signal sent to worker |
-| `QUEUED` | `CANCELED` | User calls `cancel <job_id>` | — |
-| `LEASED` | `CANCELED` | User calls `cancel <job_id>` | — |
-| `FAILED` | `DEAD_LETTER` | Failure count >= `max_attempts` | — |
+| From | To | Trigger | Guard | Status |
+|------|----|---------|-------|--------|
+| `QUEUED` | `LEASED` | Worker acquires lease | Lease file must not exist | [IMPLEMENTED] |
+| `LEASED` | `RUNNING` | Worker calls `engine.execute(dag)` | — | [IMPLEMENTED] |
+| `LEASED` | `QUEUED` | Lease timeout (default 60s) | No progress event written | [IMPLEMENTED] |
+| `RUNNING` | `SUCCEEDED` | All DAG nodes `SUCCESS` | `failed == 0 && skipped == 0` | [IMPLEMENTED] |
+| `RUNNING` | `FAILED` | Orchestrator returns `action=abort` OR node fails after max_retries | — | [IMPLEMENTED] |
+| `RUNNING` | `CANCELED` | User calls `cancel <job_id>` | Signal sent to worker | [IMPLEMENTED] |
+| `QUEUED` | `CANCELED` | User calls `cancel <job_id>` | — | [IMPLEMENTED] |
+| `LEASED` | `CANCELED` | User calls `cancel <job_id>` | — | [IMPLEMENTED] |
+| `FAILED` | `DEAD_LETTER` | Failure count >= `max_attempts` | — | [IMPLEMENTED] |
+| `FAILED` | `QUEUED` | Retry after failure | attempt < max_attempts | [IMPLEMENTED] |
 
 #### 2.2.3 Job Illegal Transitions
 
-| Attempted Transition | Behavior |
-|---------------------|----------|
-| `SUCCEEDED` → any | Rejected with `E1002` — "Terminal state cannot transition" |
-| `FAILED` → any except `DEAD_LETTER` | Rejected with `E1002` — "Terminal state cannot transition" |
-| `CANCELED` → any | Rejected with `E1002` — "Terminal state cannot transition" |
-| `DEAD_LETTER` → any | Rejected with `E1002` — "Dead letter jobs require manual resolution" |
-| `RUNNING` → `QUEUED` | Rejected with `E1002` — "Cannot return to queued from running" |
-| `LEASED` → `SUCCEEDED` | Rejected with `E1002` — "Must pass through running" |
-| `QUEUED` → `RUNNING` | Rejected with `E1002` — "Must pass through leased" |
+| Attempted Transition | Behavior | Status |
+|---------------------|----------|--------|
+| `SUCCEEDED` → any | Rejected with `E1002` — "Terminal state cannot transition" | [IMPLEMENTED] |
+| `FAILED` → any except `DEAD_LETTER` | Rejected with `E1002` — "Terminal state cannot transition" | [IMPLEMENTED] |
+| `CANCELED` → any | Rejected with `E1002` — "Terminal state cannot transition" | [IMPLEMENTED] |
+| `DEAD_LETTER` → any | Rejected with `E1002` — "Dead letter jobs require manual resolution" | [IMPLEMENTED] |
+| `RUNNING` → `QUEUED` | Rejected with `E1002` — "Cannot return to queued from running" | [IMPLEMENTED] |
+| `LEASED` → `SUCCEEDED` | Rejected with `E1002` — "Must pass through running" | [IMPLEMENTED] |
+| `QUEUED` → `RUNNING` | Rejected with `E1002` — "Must pass through leased" | [IMPLEMENTED] |
 
 ---
 
@@ -165,20 +191,20 @@ RUNNING --+---------+-- node fail(abort) ----> ABORTED
           +-- timeout -----------------------> TIMED_OUT
 ```
 
-| From | To | Trigger | Guard |
-|------|----|---------|-------|
-| `RUNNING` | `SUCCEEDED` | `engine.execute()` returns with `failed==0` | — |
-| `RUNNING` | `ABORTED` | Orchestrator returns `action=abort` | — |
-| `RUNNING` | `FAILED` | Node exhausts retries, orchestrator does NOT abort | — |
-| `RUNNING` | `TIMED_OUT` | Wall-clock time since Run start > `--timeout` | Timeout fired |
+| From | To | Trigger | Guard | Status |
+|------|----|---------|-------|--------|
+| `RUNNING` | `SUCCEEDED` | `engine.execute()` returns with `failed==0` | — | [IMPLEMENTED] |
+| `RUNNING` | `ABORTED` | Orchestrator returns `action=abort` | — | [IMPLEMENTED] |
+| `RUNNING` | `FAILED` | Node exhausts retries, orchestrator does NOT abort | — | [IMPLEMENTED] |
+| `RUNNING` | `TIMED_OUT` | Wall-clock time since Run start > `--timeout` | Timeout fired | [IMPLEMENTED] |
 
 #### 2.3.3 Run Illegal Transitions
 
-| Attempted Transition | Behavior |
-|---------------------|----------|
-| Any terminal → any | Rejected with `E1002` |
-| `SUCCEEDED` → `FAILED` / `ABORTED` / `TIMED_OUT` | Impossible by construction (engine returns definitively) |
-| `TIMED_OUT` → any | Terminal — cannot revive a timed-out run. A new Run must be created. |
+| Attempted Transition | Behavior | Status |
+|---------------------|----------|--------|
+| Any terminal → any | Rejected with `E1002` | [IMPLEMENTED] |
+| `SUCCEEDED` → `FAILED` / `ABORTED` / `TIMED_OUT` | Impossible by construction (engine returns definitively) | [IMPLEMENTED] |
+| `TIMED_OUT` → any | Terminal — cannot revive a timed-out run. A new Run must be created. | [IMPLEMENTED] |
 
 ---
 
@@ -266,7 +292,7 @@ The Orchestrator's `FailureDecision.action` directly drives Run-level state tran
 
 ### 3.1 Command Reference
 
-#### 3.1.1 `submit` — Submit a new task
+#### 3.1.1 `submit` — Submit a new task [IMPLEMENTED]
 
 ```
 Usage: harness submit "<requirement>" [OPTIONS]
@@ -293,7 +319,7 @@ Examples:
   harness submit "Add OAuth2 support" --project ./my-project --timeout 1200 --max-attempts 5
 ```
 
-#### 3.1.2 `status` — Query job status
+#### 3.1.2 `status` — Query job status [IMPLEMENTED]
 
 ```
 Usage: harness status <job_id> [OPTIONS]
@@ -332,7 +358,7 @@ Examples:
   harness status abc123-def456 --detail --events
 ```
 
-#### 3.1.3 `list` — List jobs
+#### 3.1.3 `list` — List jobs [IMPLEMENTED]
 
 ```
 Usage: harness list [OPTIONS]
@@ -359,7 +385,7 @@ Examples:
   harness list --status failed --since 2024-01-01T00:00:00Z
 ```
 
-#### 3.1.4 `cancel` — Cancel a job
+#### 3.1.4 `cancel` — Cancel a job [IMPLEMENTED]
 
 ```
 Usage: harness cancel <job_id> [OPTIONS]
@@ -387,7 +413,7 @@ Examples:
   harness cancel abc123-def456 --reason "Changed requirements"
 ```
 
-#### 3.1.5 `worker` — Start a worker process
+#### 3.1.5 `worker` — Start a worker process [IMPLEMENTED]
 
 ```
 Usage: harness worker [OPTIONS]
@@ -420,7 +446,7 @@ Examples:
   harness worker --single --recover
 ```
 
-#### 3.1.6 `retry` — Retry a failed/dead-letter job
+#### 3.1.6 `retry` — Retry a failed/dead-letter job [IMPLEMENTED]
 
 ```
 Usage: harness retry <job_id> [OPTIONS]
@@ -440,6 +466,67 @@ Output (JSON):
 Examples:
   harness retry abc123-def456
   harness retry abc123-def456 --reset-attempts
+```
+
+#### 3.1.7 `tickets` — List approval tickets [IMPLEMENTED] — M1.1
+
+```
+Usage: harness tickets [OPTIONS]
+
+List approval tickets with optional filtering.
+
+Options:
+  --status STATUS      Filter by status: pending|approved|rejected|expired
+  --job JOB_ID         Filter by associated job ID
+
+Output (JSON):
+  {
+    "tickets": [...],
+    "count": 3,
+    "stats": {"pending": 1, "approved": 1, "rejected": 0, "expired": 1}
+  }
+```
+
+#### 3.1.8 `approve` — Approve a pending ticket [IMPLEMENTED] — M1.1
+
+```
+Usage: harness approve <ticket_id> [OPTIONS]
+
+Approve a pending approval ticket, allowing the blocked tool call to proceed.
+
+Arguments:
+  ticket_id            ID of the approval ticket
+
+Options:
+  --reason TEXT        Approval reason (logged)
+
+Output (JSON):
+  {"ticket_id": "...", "status": "approved", "previous_status": "pending", "message": "Ticket approved"}
+
+Exit codes:
+  0  — Ticket successfully approved
+  1  — Ticket not found (E3001) or not in pending state (E3002)
+```
+
+#### 3.1.9 `reject` — Reject a pending ticket [IMPLEMENTED] — M1.1
+
+```
+Usage: harness reject <ticket_id> [OPTIONS]
+
+Reject a pending approval ticket, causing the blocked tool call to fail.
+
+Arguments:
+  ticket_id            ID of the approval ticket
+
+Options:
+  --reason TEXT        Rejection reason (logged)
+
+Output (JSON):
+  {"ticket_id": "...", "status": "rejected", "previous_status": "pending", "message": "Ticket rejected"}
+
+Exit codes:
+  0  — Ticket successfully rejected
+  1  — Ticket not found (E3001) or not in pending state (E3003)
 ```
 
 ---
@@ -526,6 +613,9 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 | `E3001` | `InvalidConfig` | Configuration file is missing or malformed |
 | `E3002` | `GuardrailBlocked` | Tool call blocked by guardrail policy |
 | `E3003` | `HumanApprovalRequired` | High-risk action requires human confirmation (default mode) |
+| `E3001` | `TicketNotFound` | Approval ticket does not exist |
+| `E3002` | `ApproveFailed` | Cannot approve ticket (not pending or already decided) |
+| `E3003` | `RejectFailed` | Cannot reject ticket (not pending or already decided) |
 | `E3004` | `PermissionDenied` | Tool/command explicitly denied by policy |
 | `E3005` | `IterationLimitExceeded` | Agent exceeded max_iterations guardrail |
 | `E3006` | `ContextWindowExceeded` | Agent context exceeded max_context_tokens |
@@ -578,8 +668,8 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A1.1 | Submit 20 jobs with varying requirements | All 20 jobs reach a terminal state within 4 hours |
-| A1.2 | No job remains stuck in `QUEUED`, `LEASED`, or `RUNNING` | `harness list --status running` returns empty 30 min after last submission |
+| A1.1 | Submit 20 jobs with varying requirements | All 20 jobs reach a terminal state within 4 hours | [IMPLEMENTED] |
+| A1.2 | No job remains stuck in `QUEUED`, `LEASED`, or `RUNNING` | `harness list --status running` returns empty 30 min after last submission | [IMPLEMENTED] |
 | A1.3 | Worker operates without restart | Single `harness worker` process handles all 20 jobs |
 | A1.4 | No manual `cancel` or `retry` needed | Zero user commands issued between submit and final status check |
 
@@ -592,10 +682,10 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A2.1 | Query all jobs after batch completion | `harness list --status queued,leased,running` returns empty |
-| A2.2 | Verify terminal state distribution | Count of (succeeded + failed + canceled + dead_letter) == total submitted |
-| A2.3 | Verify no state oscillation | Each job's event log contains exactly one terminal state event |
-| A2.4 | Dead letter enforcement | Jobs failing 3 times appear in `./data/queue/dead/` with complete history |
+| A2.1 | Query all jobs after batch completion | `harness list --status queued,leased,running` returns empty | [IMPLEMENTED] |
+| A2.2 | Verify terminal state distribution | Count of (succeeded + failed + canceled + dead_letter) == total submitted | [IMPLEMENTED] |
+| A2.3 | Verify no state oscillation | Each job's event log contains exactly one terminal state event | [IMPLEMENTED] |
+| A2.4 | Dead letter enforcement | Jobs failing 3 times appear in `./data/queue/dead/` with complete history | [IMPLEMENTED] |
 
 ---
 
@@ -604,11 +694,11 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A3.1 | Submit a task that triggers replan (e.g., agent type mismatch) | Orchestrator emits `action=replan` decision |
-| A3.2 | Verify new job creation | A new job appears in queue with `parent_job_id` referencing original |
-| A3.3 | Verify chain success | The replanned job reaches `SUCCEEDED` |
-| A3.4 | Verify artifact continuity | New job has access to artifacts from parent job's completed nodes |
-| A3.5 | Event log completeness | Both original and replan jobs have complete event logs traceable via `parent_job_id` |
+| A3.1 | Submit a task that triggers replan (e.g., agent type mismatch) | Orchestrator emits `action=replan` decision | [IMPLEMENTED] |
+| A3.2 | Verify new job creation | A new job appears in queue with `parent_job_id` referencing original | [IMPLEMENTED] |
+| A3.3 | Verify chain success | The replanned job reaches `SUCCEEDED` | [IMPLEMENTED] |
+| A3.4 | Verify artifact continuity | New job has access to artifacts from parent job's completed nodes | [IMPLEMENTED] |
+| A3.5 | Event log completeness | Both original and replan jobs have complete event logs traceable via `parent_job_id` | [IMPLEMENTED] |
 
 **Simulated scenario:** Submit "Implement feature X using nonexistent agent" → fails → orchestrator replans with valid agent → succeeds.
 
@@ -619,12 +709,12 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A4.1 | `bash` tool invoked with destructive command | Guardrail returns `E3003 HumanApprovalRequired`, tool NOT executed |
-| A4.2 | `write` tool in `default` mode | Guardrail returns `E3003` (write is MEDIUM risk, requires approval in default mode) |
-| A4.3 | `read` tool in any mode | Auto-approved, no confirmation needed |
-| A4.4 | `bash` tool in `accept_edits` mode | Returns `E3002 GuardrailBlocked` (bash is HIGH risk, exceeds accept_edits threshold) |
-| A4.5 | Confirm and approve | After user inputs `y`, tool executes and returns success |
-| A4.6 | Deny and skip | After user inputs `n`, tool returns error, agent continues without it |
+| A4.1 | `bash` tool invoked with destructive command | Guardrail returns `E3003 HumanApprovalRequired`, tool NOT executed | [IMPLEMENTED] |
+| A4.2 | `write` tool in `default` mode | Guardrail returns `E3003` (write is MEDIUM risk, requires approval in default mode) | [IMPLEMENTED] |
+| A4.3 | `read` tool in any mode | Auto-approved, no confirmation needed | [IMPLEMENTED] |
+| A4.4 | `bash` tool in `accept_edits` mode | Returns `E3002 GuardrailBlocked` (bash is HIGH risk, exceeds accept_edits threshold) | [IMPLEMENTED] |
+| A4.5 | Confirm and approve | After user inputs `y`, tool executes and returns success | [IMPLEMENTED] |
+| A4.6 | Deny and skip | After user inputs `n`, tool returns error, agent continues without it | [IMPLEMENTED] |
 
 **Risk mapping verification:**
 - `read`, `glob`, `grep` → `RiskLevel.LOW` → Auto-approve
@@ -638,7 +728,7 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A5.1 | `harness status <job_id>` includes metrics | Response contains `progress`, `duration_ms`, `token_usage` fields |
+| A5.1 | `harness status <job_id>` includes metrics | Response contains `progress`, `duration_ms`, `token_usage` fields | [IMPLEMENTED] |
 | A5.2 | Post-batch metrics report | Scriptable: `harness list --status all --format json | jq '.metrics'` returns aggregate stats |
 | A5.3 | Failure rate alert | When failed job rate > 50% in last 10 jobs, worker stderr emits `ALERT` line with JSON payload |
 | A5.4 | Timeout alert | When a job exceeds 80% of `--timeout`, worker emits `ALERT: job_timeout_approaching` |
@@ -859,7 +949,6 @@ harness/
 │   ├── test_models.py
 │   ├── test_worker.py
 │   ├── test_evaluator.py
-│   └── test_todo_api.py
 ├── data/                      # Runtime data (gitignored)
 │   ├── events/                # JSONL event logs
 │   ├── artifacts/             # Generated artifacts

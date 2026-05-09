@@ -17,6 +17,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from control_plane.approval import (
+    ApprovalRepository,
+    TicketStatus,
+)
 from control_plane.models import Job, JobStatus, Run, RunStatus
 from control_plane.repository import JobRepository
 from monitoring.alerts import (
@@ -90,6 +94,14 @@ def repo(tmp_path) -> JobRepository:
 @pytest.fixture
 def manager(repo: JobRepository) -> AlertManager:
     return AlertManager(repo, webhook_url="", cooldown_sec=0)
+
+
+@pytest.fixture
+def approval_repo(tmp_path) -> ApprovalRepository:
+    """Fresh ApprovalRepository in a temporary directory."""
+    base = tmp_path / "approvals"
+    base.mkdir()
+    return ApprovalRepository(str(base))
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +484,8 @@ class TestDefaultFactory:
         manager = create_default_alerts(repo, webhook_url="http://example.com")
         assert isinstance(manager, AlertManager)
         assert manager.webhook_url == "http://example.com"
-        assert len(manager.rules) == 4
+        # 3 original rules + 1 watchdog rule + 2 approval rules = 6
+        assert len(manager.rules) == 6
 
     def test_default_rules_are_enabled(self, repo: JobRepository):
         manager = create_default_alerts(repo)
@@ -531,3 +544,267 @@ class TestMainFlowIsolation:
             # However the send_alert path is the one that must not block.
             with pytest.raises(Exception, match="metrics boom"):
                 manager.check_all()
+
+
+# ---------------------------------------------------------------------------
+# Helpers for approval alerts
+# ---------------------------------------------------------------------------
+
+
+def make_ticket(
+    repo: ApprovalRepository,
+    status: TicketStatus = TicketStatus.PENDING,
+    risk_level: str = "high",
+    decided_by: str | None = None,
+    wait_sec: float | None = None,
+    requested_at: datetime | None = None,
+) -> Any:
+    """Create and persist an ApprovalTicket with the given parameters."""
+    ticket = repo.create_ticket(
+        job_id="job_test",
+        tool_name="test_tool",
+        args={"cmd": "test"},
+        risk_level=risk_level,
+    )
+    if requested_at:
+        ticket.requested_at = requested_at
+    if status == TicketStatus.APPROVED:
+        ticket.status = TicketStatus.PENDING
+        repo.update_ticket(ticket)
+        approved = repo.approve_ticket(
+            ticket.id, decided_by=decided_by or "user"
+        )
+        if wait_sec is not None:
+            approved.decided_at = approved.requested_at + timedelta(
+                seconds=wait_sec
+            )
+            repo.update_ticket(approved)
+        return approved
+    elif status == TicketStatus.REJECTED:
+        ticket.status = TicketStatus.PENDING
+        repo.update_ticket(ticket)
+        rejected = repo.reject_ticket(
+            ticket.id, decided_by=decided_by or "user"
+        )
+        if wait_sec is not None:
+            rejected.decided_at = rejected.requested_at + timedelta(
+                seconds=wait_sec
+            )
+            repo.update_ticket(rejected)
+        return rejected
+    elif status == TicketStatus.EXPIRED:
+        ticket.status = TicketStatus.EXPIRED
+        ticket.decided_at = datetime.now(timezone.utc)
+        ticket.decided_by = "timeout"
+        repo.update_ticket(ticket)
+        return ticket
+    return ticket
+
+
+# ---------------------------------------------------------------------------
+# Pending approvals alert
+# ---------------------------------------------------------------------------
+
+
+class TestPendingApprovalsAlert:
+    def test_no_alert_when_below_threshold(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = AlertManager(
+            repo, approval_repo, webhook_url="", cooldown_sec=0
+        )
+        for _ in range(2):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        manager.add_rule(
+            AlertRule(
+                name="pa", rule_type="pending_approvals", threshold=3
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 0
+
+    def test_alert_when_at_threshold(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = AlertManager(
+            repo, approval_repo, webhook_url="", cooldown_sec=0
+        )
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        manager.add_rule(
+            AlertRule(
+                name="pa", rule_type="pending_approvals", threshold=3
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 1
+        assert alerts[0].rule_name == "pa"
+        assert alerts[0].severity == "warning"
+        assert "3" in alerts[0].message
+        assert alerts[0].details["pending_count"] == 3
+
+    def test_alert_when_above_threshold(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = AlertManager(
+            repo, approval_repo, webhook_url="", cooldown_sec=0
+        )
+        for _ in range(5):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        manager.add_rule(
+            AlertRule(
+                name="pa", rule_type="pending_approvals", threshold=3
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 1
+        assert alerts[0].details["pending_count"] == 5
+
+    def test_critical_when_double_threshold(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        """When pending >= 2x threshold, severity is critical."""
+        manager = AlertManager(
+            repo, approval_repo, webhook_url="", cooldown_sec=0
+        )
+        for _ in range(7):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        manager.add_rule(
+            AlertRule(
+                name="pa", rule_type="pending_approvals", threshold=3
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 1
+        assert alerts[0].severity == "critical"
+
+    def test_no_alert_without_approval_repository(
+        self, repo: JobRepository
+    ):
+        manager = AlertManager(repo, webhook_url="", cooldown_sec=0)
+        manager.add_rule(
+            AlertRule(
+                name="pa", rule_type="pending_approvals", threshold=1
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 0
+
+
+# ---------------------------------------------------------------------------
+# Approval timeout spike alert
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalTimeoutSpikeAlert:
+    def test_no_alert_when_below_threshold(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = AlertManager(
+            repo, approval_repo, webhook_url="", cooldown_sec=0
+        )
+        # Create 1 expired ticket (threshold = 2)
+        make_ticket(approval_repo, TicketStatus.EXPIRED)
+        manager.add_rule(
+            AlertRule(
+                name="ats",
+                rule_type="approval_timeout_spike",
+                threshold=2,
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 0
+
+    def test_alert_when_at_threshold(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = AlertManager(
+            repo, approval_repo, webhook_url="", cooldown_sec=0
+        )
+        for _ in range(2):
+            make_ticket(approval_repo, TicketStatus.EXPIRED)
+        manager.add_rule(
+            AlertRule(
+                name="ats",
+                rule_type="approval_timeout_spike",
+                threshold=2,
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 1
+        assert alerts[0].rule_name == "ats"
+        assert alerts[0].severity == "critical"
+        assert "2" in alerts[0].message
+
+    def test_no_alert_without_approval_repository(
+        self, repo: JobRepository
+    ):
+        manager = AlertManager(repo, webhook_url="", cooldown_sec=0)
+        manager.add_rule(
+            AlertRule(
+                name="ats",
+                rule_type="approval_timeout_spike",
+                threshold=1,
+            )
+        )
+        alerts = manager.check_all()
+        assert len(alerts) == 0
+
+
+# ---------------------------------------------------------------------------
+# Factory with approval repository
+# ---------------------------------------------------------------------------
+
+
+class TestDefaultFactoryWithApprovals:
+    def test_create_default_alerts_with_approval_repo(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = create_default_alerts(
+            repo, approval_repo, webhook_url="http://example.com"
+        )
+        assert isinstance(manager, AlertManager)
+        assert manager.webhook_url == "http://example.com"
+        # 3 original + 2 approval rules = 5
+        assert len(manager.rules) == 5
+
+    def test_default_rules_are_enabled(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = create_default_alerts(repo, approval_repo)
+        for rule in manager.rules:
+            assert rule.enabled is True
+
+    def test_approval_rules_present(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        manager = create_default_alerts(repo, approval_repo)
+        rule_types = [r.rule_type for r in manager.rules]
+        assert "pending_approvals" in rule_types
+        assert "approval_timeout_spike" in rule_types
+
+    def test_create_default_alerts_without_approval_repo(
+        self, repo: JobRepository
+    ):
+        manager = create_default_alerts(repo, webhook_url="http://example.com")
+        assert isinstance(manager, AlertManager)
+        assert len(manager.rules) == 5
+        assert manager.approval_repository is None

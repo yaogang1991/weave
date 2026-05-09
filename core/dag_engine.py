@@ -13,6 +13,7 @@ Key design decisions:
 from __future__ import annotations
 
 import asyncio
+import logging
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -30,6 +31,8 @@ from core.models import (
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
 ReplanHandler = Callable[[DAG, str], Coroutine[Any, Any, DAG]]
+
+logger = logging.getLogger(__name__)
 
 
 class DAGExecutionEngine:
@@ -83,8 +86,9 @@ class DAGExecutionEngine:
         for handler in self.event_handlers:
             try:
                 await handler(event)
-            except Exception:
-                pass  # Don't let event handlers break execution
+            except Exception as exc:
+                # Don't let event handlers break execution, but keep traceability.
+                logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
 
     def _skip_remaining(self, dag: DAG, levels: list[list[str]], from_level: int) -> None:
         """Mark all pending nodes from from_level onward as SKIPPED."""
@@ -309,10 +313,8 @@ class DAGExecutionEngine:
 
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""
-        import math
-        # Base 2 seconds, exponential with jitter cap at 60s
-        delay = min(2 ** retry_count, 60.0)
-        return delay
+        # Base exponential backoff with a hard cap at 60s.
+        return min(2 ** retry_count, 60.0)
 
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
         """Execute a single DAG node with retry logic."""

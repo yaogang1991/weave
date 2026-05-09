@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from control_plane.repository import JobRepository
 from control_plane.service import RunService
 from control_plane.models import Job, JobStatus, RunStatus
+from control_plane.approval import TicketStatus
 
 # ---------------------------------------------------------------------------
 # Logging helpers — JSON Lines on stderr
@@ -82,6 +83,7 @@ class WorkerConfig:
     recovery_max_age_sec: int = 120    # orphan threshold (lease expiry)
     heartbeat_interval_sec: int = 30   # how often to refresh an active lease
     max_poll_backoff_sec: int = 60     # cap for empty-queue backoff
+    non_interactive: bool = False      # M1.1: non-interactive mode (no stdin)
 
     def __init__(self, **kwargs: Any) -> None:
         for k, v in kwargs.items():
@@ -155,12 +157,20 @@ class TaskWorker:
             extra={"recovered_ids": recovered},
         )
 
-        # 2. Start heartbeat refresher in the background.
+        # 2. Recover pending approval tickets (expired / orphaned).
+        recovered_tickets = await self._recover_pending_tickets()
+        _json_log(
+            "INFO",
+            f"Recovered {len(recovered_tickets)} pending ticket(s)",
+            extra={"recovered_ticket_ids": recovered_tickets},
+        )
+
+        # 3. Start heartbeat refresher in the background.
         self._heartbeat_task = asyncio.create_task(
             self._heartbeat(), name="worker-heartbeat"
         )
 
-        # 3. Enter the main polling loop.
+        # 4. Enter the main polling loop.
         self._main_task = asyncio.create_task(self._poll_loop(), name="worker-poll")
         await self._main_task
 
@@ -279,6 +289,112 @@ class TaskWorker:
             })
 
         return recovered
+
+    async def _recover_pending_tickets(self) -> list[str]:
+        """
+        启动时处理 pending ticket：
+        1. 过期已超时的 pending ticket
+        2. 将过期 ticket 关联的 job 推进失败策略
+        3. 检查状态不一致（job 已不在 running/leased 但 ticket 仍 pending）
+        4. 返回被处理的 ticket ID 列表
+        """
+        if not hasattr(self.run_service, "approval_repo") or not self.run_service.approval_repo:
+            return []
+
+        approval_repo = self.run_service.approval_repo
+        ticket_ids: list[str] = []
+
+        # Step 1: 过期超时的 pending ticket
+        expired_tickets = await asyncio.to_thread(approval_repo.expire_tickets)
+
+        for ticket in expired_tickets:
+            ticket_ids.append(ticket.id)
+
+            # 将关联的 job 推进失败策略
+            job = await asyncio.to_thread(self.repository.get_job, ticket.job_id)
+            if job and job.status in (JobStatus.LEASED, JobStatus.RUNNING):
+                error_msg = f"Approval ticket {ticket.id} expired (timeout)"
+                if job.status == JobStatus.LEASED:
+                    job = await asyncio.to_thread(
+                        self.repository.transition_job_status,
+                        job.id,
+                        JobStatus.QUEUED,
+                        error=error_msg,
+                        error_category="timeout",
+                    )
+                else:
+                    job = await asyncio.to_thread(
+                        self.repository.transition_job_status,
+                        job.id,
+                        JobStatus.FAILED,
+                        error=error_msg,
+                        error_category="timeout",
+                    )
+                    job = await self.run_service.handle_job_failure(
+                        job,
+                        error_msg,
+                        "timeout",
+                    )
+
+            self._log_event("ticket_expired_recovery", ticket.job_id, {
+                "ticket_id": ticket.id,
+                "previous_status": "pending",
+                "new_status": "expired",
+                "job_id": ticket.job_id,
+                "reason": "lease_timeout_on_restart",
+            })
+
+        # Step 2: 检查剩余 pending ticket 的状态一致性
+        # 如果 job 已不在 running/leased 但 ticket 仍 pending，说明异常中断
+        pending_tickets = await asyncio.to_thread(
+            approval_repo.list_tickets, status=TicketStatus.PENDING
+        )
+
+        for ticket in pending_tickets:
+            job = await asyncio.to_thread(self.repository.get_job, ticket.job_id)
+            if job and job.status not in (JobStatus.RUNNING, JobStatus.LEASED):
+                # Job 已不在执行中，但 ticket 仍 pending —— 异常情况
+                # 将 ticket 标记为 expired，job 推进失败
+                ticket.status = TicketStatus.EXPIRED
+                ticket.decided_by = "auto"
+                ticket.reason = "Job no longer active"
+                ticket.decided_at = datetime.now(timezone.utc)
+                ticket.updated_at = datetime.now(timezone.utc)
+                await asyncio.to_thread(approval_repo.update_ticket, ticket)
+
+                if job.status not in (
+                    JobStatus.SUCCEEDED, JobStatus.FAILED,
+                    JobStatus.CANCELED, JobStatus.DEAD_LETTER,
+                ):
+                    error_msg = f"Approval ticket {ticket.id} orphaned (job no longer active)"
+                    if job.status != JobStatus.QUEUED:
+                        job = await asyncio.to_thread(
+                            self.repository.transition_job_status,
+                            job.id,
+                            JobStatus.FAILED,
+                            error=error_msg,
+                            error_category="unknown",
+                        )
+                        job = await self.run_service.handle_job_failure(
+                            job,
+                            error_msg,
+                            "unknown",
+                        )
+
+                ticket_ids.append(ticket.id)
+                self._log_event("ticket_orphan_recovery", ticket.job_id, {
+                    "ticket_id": ticket.id,
+                    "job_status": job.status.value,
+                    "reason": "job_no_longer_active",
+                })
+
+        if ticket_ids:
+            self._log_event("ticket_recovery_summary", "", {
+                "recovered_count": len(ticket_ids),
+                "recovered_ticket_ids": ticket_ids,
+            })
+
+        return ticket_ids
 
     # ------------------------------------------------------------------
     # Poll loop
@@ -405,7 +521,13 @@ class TaskWorker:
         _json_log("INFO", "Starting job execution", job_id=job_id, status="running")
 
         try:
-            # 1. Transition to RUNNING.
+            # 1. Non-interactive: expire old approval tickets before execution
+            if self.config.non_interactive:
+                approval_repo = getattr(self.run_service, "approval_repo", None)
+                if approval_repo is not None:
+                    approval_repo.expire_tickets()
+
+            # 2. Transition to RUNNING.
             await asyncio.to_thread(
                 self.repository.transition_job_status,
                 job_id,
@@ -418,7 +540,7 @@ class TaskWorker:
                 status=JobStatus.RUNNING.value,
             )
 
-            # 2. Execute the job via RunService.
+            # 3. Execute the job via RunService.
             run = await self.run_service.run_job(job_id)
 
             # 3. Handle result.

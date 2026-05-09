@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from control_plane.approval import ApprovalRepository, TicketStatus
 from control_plane.models import Job, JobStatus
 from control_plane.repository import JobRepository
 
@@ -24,8 +25,13 @@ from control_plane.repository import JobRepository
 class MetricsCollector:
     """指标收集器。"""
 
-    def __init__(self, repository: JobRepository) -> None:
-        self.repository = repository
+    def __init__(
+        self,
+        job_repository: JobRepository,
+        approval_repository: ApprovalRepository | None = None,
+    ) -> None:
+        self.job_repository = job_repository
+        self.approval_repository = approval_repository
 
     def collect(
         self,
@@ -38,7 +44,7 @@ class MetricsCollector:
             since: 起始时间（可选）
             until: 结束时间（可选）
         """
-        jobs = self.repository.list_jobs()
+        jobs = self.job_repository.list_jobs()
         if since or until:
             jobs = [
                 j
@@ -47,7 +53,7 @@ class MetricsCollector:
                 and (not until or j.created_at <= until)
             ]
 
-        return {
+        metrics: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "period": {
                 "since": since.isoformat() if since else None,
@@ -59,6 +65,12 @@ class MetricsCollector:
             "failures": self._calc_failure_stats(jobs),
             "throughput": self._calc_throughput(jobs),
         }
+
+        # 新增审批维度
+        if self.approval_repository:
+            metrics["approvals"] = self._calc_approval_stats()
+
+        return metrics
 
     # ------------------------------------------------------------------
     # Summary
@@ -98,7 +110,7 @@ class MetricsCollector:
         """计算执行时长统计（从关联的 Run 记录中获取）。"""
         durations: list[float] = []
         for job in jobs:
-            runs = self.repository.list_runs_by_job(job.id)
+            runs = self.job_repository.list_runs_by_job(job.id)
             for run in runs:
                 if run.completed_at and run.started_at:
                     durations.append(
@@ -215,6 +227,99 @@ class MetricsCollector:
             "peak_count": peak_count,
         }
 
+    # ------------------------------------------------------------------
+    # Approval stats
+    # ------------------------------------------------------------------
+
+    def _calc_approval_stats(self) -> dict[str, Any] | None:
+        """计算审批相关指标。"""
+        if not self.approval_repository:
+            return None
+
+        stats = self.approval_repository.get_stats()
+        all_tickets = self.approval_repository.list_tickets()
+
+        # 等待中的审批数
+        pending_count = stats.get(TicketStatus.PENDING.value, 0)
+
+        # 平均等待时长（仅统计已决定的）
+        wait_times: list[float] = []
+        for ticket in all_tickets:
+            if ticket.status in (TicketStatus.APPROVED, TicketStatus.REJECTED):
+                if ticket.decided_at and ticket.requested_at:
+                    wait_sec = (
+                        ticket.decided_at - ticket.requested_at
+                    ).total_seconds()
+                    if wait_sec >= 0:
+                        wait_times.append(wait_sec)
+
+        avg_wait = (
+            round(statistics.mean(wait_times), 2) if wait_times else 0
+        )
+        p95_wait = (
+            round(
+                sorted(wait_times)[int(len(wait_times) * 0.95)], 2
+            )
+            if len(wait_times) >= 20
+            else (max(wait_times) if wait_times else 0)
+        )
+
+        # 自动通过率
+        total_decided = stats.get(
+            TicketStatus.APPROVED.value, 0
+        ) + stats.get(TicketStatus.REJECTED.value, 0)
+        auto_approved = sum(
+            1
+            for t in all_tickets
+            if t.status == TicketStatus.APPROVED
+            and t.decided_by == "auto"
+        )
+        auto_approve_rate = (
+            round(auto_approved / total_decided * 100, 2)
+            if total_decided > 0
+            else 0
+        )
+
+        # 人工干预率（需要人确认的占总审批的比例）
+        total_tickets = sum(stats.values())
+        manual_approved = sum(
+            1
+            for t in all_tickets
+            if t.status == TicketStatus.APPROVED
+            and t.decided_by == "user"
+        )
+        manual_rate = (
+            round(manual_approved / total_tickets * 100, 2)
+            if total_tickets > 0
+            else 0
+        )
+
+        # 按风险级别分布
+        risk_distribution: dict[str, int] = {}
+        for ticket in all_tickets:
+            risk_distribution[ticket.risk_level] = (
+                risk_distribution.get(ticket.risk_level, 0) + 1
+            )
+
+        return {
+            "pending_count": pending_count,
+            "approved_count": stats.get(
+                TicketStatus.APPROVED.value, 0
+            ),
+            "rejected_count": stats.get(
+                TicketStatus.REJECTED.value, 0
+            ),
+            "expired_count": stats.get(
+                TicketStatus.EXPIRED.value, 0
+            ),
+            "total_count": total_tickets,
+            "avg_wait_sec": avg_wait,
+            "p95_wait_sec": p95_wait,
+            "auto_approve_rate": auto_approve_rate,
+            "manual_intervention_rate": manual_rate,
+            "risk_distribution": risk_distribution,
+        }
+
 
 class MetricsReporter:
     """指标报告生成器。"""
@@ -287,6 +392,30 @@ class MetricsReporter:
             lines.append("| (无失败) | 0 |")
 
         lines.append("")
+
+        # 新增审批维度
+        approvals = metrics.get("approvals")
+        if approvals:
+            lines.extend([
+                "## 审批统计",
+                "",
+                "| 指标 | 数值 |",
+                "|------|------|",
+                f"| 待审批 | {approvals['pending_count']} |",
+                f"| 已批准 | {approvals['approved_count']} |",
+                f"| 已拒绝 | {approvals['rejected_count']} |",
+                f"| 已过期 | {approvals['expired_count']} |",
+                f"| 平均等待 | {approvals['avg_wait_sec']}s |",
+                f"| P95 等待 | {approvals['p95_wait_sec']}s |",
+                f"| 自动通过率 | {approvals['auto_approve_rate']}% |",
+                f"| 人工干预率 | {approvals['manual_intervention_rate']}% |",
+                "",
+                "### 风险分布",
+                "",
+            ])
+            for risk, count in approvals["risk_distribution"].items():
+                lines.append(f"- {risk}: {count}")
+            lines.append("")
 
         report = "\n".join(lines)
         if output_path:

@@ -72,6 +72,15 @@ class HarnessConfig(BaseModel):
         }
     )
 
+    # M1.1: Non-interactive mode configuration
+    non_interactive: bool = Field(
+        default_factory=lambda: os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
+        in ("true", "1", "yes")
+    )
+    approval_timeout_sec: int = Field(
+        default_factory=lambda: int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300"))
+    )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r") as f:
@@ -91,4 +100,7 @@ class HarnessConfig(BaseModel):
             artifact_path=os.getenv("HARNESS_ARTIFACT_PATH", "./data/artifacts"),
             agent_timeout=int(os.getenv("HARNESS_AGENT_TIMEOUT", "120")),
             max_context_tokens=int(os.getenv("HARNESS_MAX_CONTEXT_TOKENS", "100000")),
+            non_interactive=os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
+            in ("true", "1", "yes"),
+            approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
         )

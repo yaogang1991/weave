@@ -1,10 +1,12 @@
 """
 最小可用告警系统。
 
-支持三类告警规则：
+支持五类告警规则：
 1. 连续失败 >= N
 2. 任务时长 > 阈值
 3. dead_letter 新增
+4. 审批堆积 (pending_approvals)
+5. 审批超时激增 (approval_timeout_spike)
 
 支持 webhook 通知，webhook 不可用时降级控制台告警。
 告警失败不中断主流程。
@@ -18,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from control_plane.approval import ApprovalRepository, TicketStatus
 from control_plane.models import JobStatus
 from control_plane.repository import JobRepository
 from monitoring.metrics import MetricsCollector
@@ -33,7 +36,8 @@ class AlertRule:
     """告警规则定义。"""
 
     name: str
-    rule_type: str  # "consecutive_failures", "duration_threshold", "dead_letter"
+    rule_type: str  # "consecutive_failures", "duration_threshold", "dead_letter",
+    # "pending_approvals", "approval_timeout_spike"
     threshold: float  # 阈值
     enabled: bool = True
     webhook_url: str = ""  # 可选的 webhook URL（覆盖全局）
@@ -69,12 +73,14 @@ class AlertManager:
 
     def __init__(
         self,
-        repository: JobRepository,
+        job_repository: JobRepository,
+        approval_repository: ApprovalRepository | None = None,
         webhook_url: str = "",
         cooldown_sec: int = 300,
     ) -> None:
-        self.repository = repository
-        self.metrics = MetricsCollector(repository)
+        self.job_repository = job_repository
+        self.approval_repository = approval_repository
+        self.metrics = MetricsCollector(job_repository, approval_repository)
         self.webhook_url = webhook_url
         self.cooldown_sec = cooldown_sec
         self.rules: list[AlertRule] = []
@@ -119,13 +125,17 @@ class AlertManager:
             return self._check_node_unhealthy_killed(rule)
         if rule.rule_type == "heartbeat_miss_spike":
             return self._check_heartbeat_miss_spike(rule)
+        if rule.rule_type == "pending_approvals":
+            return self._check_pending_approvals(rule)
+        if rule.rule_type == "approval_timeout_spike":
+            return self._check_approval_timeout_spike(rule)
         return None
 
     def _check_consecutive_failures(
         self, rule: AlertRule
     ) -> AlertEvent | None:
         """检查连续失败数。"""
-        jobs = self.repository.list_jobs()
+        jobs = self.job_repository.list_jobs()
         # 获取最近的 job（按时间排序）
         recent_jobs = sorted(
             jobs, key=lambda j: j.created_at, reverse=True
@@ -170,7 +180,7 @@ class AlertManager:
 
     def _check_dead_letter(self, rule: AlertRule) -> AlertEvent | None:
         """检查是否有新增的 dead_letter。"""
-        jobs = self.repository.list_jobs(status=JobStatus.DEAD_LETTER)
+        jobs = self.job_repository.list_jobs(status=JobStatus.DEAD_LETTER)
         count = len(jobs)
 
         if count >= rule.threshold:
@@ -187,7 +197,7 @@ class AlertManager:
     ) -> AlertEvent | None:
         """检查是否有节点被 watchdog 杀死。"""
         # 检查最近的 failed 节点中 error 包含 watchdog 的
-        jobs = self.repository.list_jobs()
+        jobs = self.job_repository.list_jobs()
         killed_count = 0
         for job in jobs:
             if job.error_category == "watchdog":
@@ -208,6 +218,62 @@ class AlertManager:
         """检查心跳丢失激增。"""
         # 实现从 metrics 中检查
         return None  # Placeholder - implement if metrics support
+
+    def _check_pending_approvals(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查待审批堆积。"""
+        if not self.approval_repository:
+            return None
+
+        stats = self.approval_repository.get_stats()
+        pending_count = stats.get(TicketStatus.PENDING.value, 0)
+
+        if pending_count >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical"
+                if pending_count >= rule.threshold * 2
+                else "warning",
+                message=f"有 {pending_count} 个审批待处理（阈值: {rule.threshold}）",
+                details={
+                    "pending_count": pending_count,
+                    "threshold": rule.threshold,
+                },
+            )
+        return None
+
+    def _check_approval_timeout_spike(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查审批超时激增。"""
+        if not self.approval_repository:
+            return None
+
+        # 获取最近 1 小时过期的 ticket 数量
+        recent_expired = [
+            t
+            for t in self.approval_repository.list_tickets(
+                status=TicketStatus.EXPIRED
+            )
+            if t.decided_at
+            and (
+                datetime.now(timezone.utc) - t.decided_at
+            ).total_seconds()
+            < 3600
+        ]
+
+        if len(recent_expired) >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical",
+                message=f"最近 1 小时有 {len(recent_expired)} 个审批超时过期（阈值: {rule.threshold}）",
+                details={
+                    "expired_count": len(recent_expired),
+                    "threshold": rule.threshold,
+                },
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Sending
@@ -294,10 +360,14 @@ class AlertManager:
 
 
 def create_default_alerts(
-    repository: JobRepository, webhook_url: str = ""
+    job_repository: JobRepository,
+    approval_repository: ApprovalRepository | None = None,
+    webhook_url: str = "",
 ) -> AlertManager:
     """创建默认告警配置。"""
-    manager = AlertManager(repository, webhook_url=webhook_url)
+    manager = AlertManager(
+        job_repository, approval_repository, webhook_url=webhook_url
+    )
 
     manager.add_rule(
         AlertRule(
@@ -331,6 +401,25 @@ def create_default_alerts(
             name="node_unhealthy_killed",
             rule_type="node_unhealthy_killed",
             threshold=1,
+            enabled=True,
+        )
+    )
+
+    # 审批规则
+    manager.add_rule(
+        AlertRule(
+            name="pending_approvals_over_threshold",
+            rule_type="pending_approvals",
+            threshold=3,
+            enabled=True,
+        )
+    )
+
+    manager.add_rule(
+        AlertRule(
+            name="approval_timeout_spike",
+            rule_type="approval_timeout_spike",
+            threshold=2,
             enabled=True,
         )
     )

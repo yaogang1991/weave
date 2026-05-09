@@ -14,6 +14,9 @@ from core.models import ToolResult
 
 # Maximum file size to read/search (10 MB)
 _MAX_FILE_SIZE = 10 * 1024 * 1024
+_MAX_GLOB_RESULTS = 1000
+_MAX_GREP_MATCH_LINES = 200
+_DEFAULT_IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "dist", "build", "__pycache__"}
 
 # File extensions that are typically binary
 _BINARY_EXTENSIONS = frozenset({
@@ -105,6 +108,7 @@ class ToolRegistry:
                 "properties": {
                     "command": {"type": "string", "description": "Command to execute"},
                     "timeout": {"type": "integer", "default": 120},
+                    "cwd": {"type": "string", "description": "Optional working directory (must stay within project root)"},
                 },
                 "required": ["command"],
             },
@@ -118,6 +122,7 @@ class ToolRegistry:
                 "properties": {
                     "pattern": {"type": "string", "description": "Glob pattern like '**/*.py'"},
                     "path": {"type": "string", "description": "Base directory"},
+                    "max_results": {"type": "integer", "default": 1000},
                 },
                 "required": ["pattern"],
             },
@@ -132,6 +137,7 @@ class ToolRegistry:
                     "pattern": {"type": "string"},
                     "path": {"type": "string"},
                     "file_pattern": {"type": "string", "description": "e.g. '*.py'"},
+                    "max_results": {"type": "integer", "default": 200},
                 },
                 "required": ["pattern"],
             },
@@ -190,6 +196,36 @@ class ToolRegistry:
                 error=str(e),
                 duration_ms=int((time.time() - start) * 1000),
             )
+
+
+
+    def _validate_bash_command(self, command: str) -> str | None:
+        """Validate bash command against conservative deny patterns."""
+        denied_patterns = [
+            "rm -rf /",
+            "shutdown",
+            "reboot",
+            "mkfs",
+            ":(){ :|:& };:",
+        ]
+        normalized = command.lower()
+        for pattern in denied_patterns:
+            if pattern in normalized:
+                return pattern
+        return None
+
+
+    def _resolve_safe_cwd(self, requested_cwd: str | None = None) -> Path:
+        """Resolve and validate cwd within project root."""
+        project_root = Path.cwd().resolve()
+        target = (Path(requested_cwd).expanduser().resolve() if requested_cwd else project_root)
+        if target != project_root and project_root not in target.parents:
+            raise ValueError(f"cwd outside project root is not allowed: {target}")
+        return target
+
+    def _should_skip_path(self, file_path: Path) -> bool:
+        """Return True when file path is under ignored directories."""
+        return any(part in _DEFAULT_IGNORE_DIRS for part in file_path.parts)
 
     # --- Built-in tool implementations ---
 
@@ -254,15 +290,24 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
 
-    def _tool_bash(self, command: str, timeout: int = 120) -> ToolResult:
+    def _tool_bash(self, command: str, timeout: int = 120, cwd: str | None = None) -> ToolResult:
+        denied = self._validate_bash_command(command)
+        if denied:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                error=f"Blocked unsafe command pattern: {denied}",
+            )
+
         try:
+            run_cwd = self._resolve_safe_cwd(cwd)
             result = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                cwd=str(self.base_cwd) if self.base_cwd else None,
+                cwd=str(run_cwd),
             )
             output = result.stdout
             if result.stderr:
@@ -278,16 +323,25 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
 
-    def _tool_glob(self, pattern: str, path: str = ".") -> ToolResult:
+    def _tool_glob(self, pattern: str, path: str = ".", max_results: int = _MAX_GLOB_RESULTS) -> ToolResult:
         try:
             base = self._resolve_path(path)
-            matches = list(base.rglob(pattern))
+            matches: list[Path] = []
+            for match in base.rglob(pattern):
+                if self._should_skip_path(match):
+                    continue
+                matches.append(match)
+                if len(matches) >= max_results:
+                    break
+
             output = "\n".join(str(m.relative_to(base)) for m in matches)
+            if len(matches) >= max_results:
+                output += f"\n... (truncated to {max_results} results)"
             return ToolResult(tool_call_id="", success=True, output=output or "No matches")
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
 
-    def _tool_grep(self, pattern: str, path: str = ".", file_pattern: str = "*") -> ToolResult:
+    def _tool_grep(self, pattern: str, path: str = ".", file_pattern: str = "*", max_results: int = _MAX_GREP_MATCH_LINES) -> ToolResult:
         try:
             base = self._resolve_path(path)
             matches = []
@@ -295,7 +349,7 @@ class ToolRegistry:
             skipped_large = 0
 
             for file_path in base.rglob(file_pattern):
-                if not file_path.is_file():
+                if not file_path.is_file() or self._should_skip_path(file_path):
                     continue
 
                 # Fast reject by extension
@@ -330,13 +384,17 @@ class ToolRegistry:
                             if pattern in line
                         ]
                         matches.extend(lines)
+                        if len(matches) >= max_results:
+                            break
                 except (UnicodeDecodeError, UnicodeError):
                     skipped_binary += 1
                     continue
                 except Exception:
                     continue
 
-            output = "\n".join(matches[:100]) or "No matches"
+            output = "\n".join(matches[:max_results]) or "No matches"
+            if len(matches) > max_results:
+                output += f"\n... (truncated to {max_results} matching lines)"
             if skipped_binary:
                 output += f"\n({skipped_binary} binary files skipped)"
             if skipped_large:

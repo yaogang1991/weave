@@ -18,6 +18,7 @@ Design decisions:
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import traceback
 import uuid
@@ -99,6 +100,9 @@ class RunService:
         policy: GuardrailPolicy | None = None,
         default_backend: str = "local",
         backend_base_path: str = "./data/backends",
+        non_interactive: bool = False,
+        approval_repo: Any | None = None,
+        approval_timeout_sec: int = 300,
     ) -> None:
         self.repository = repository
         self.llm_config = llm_config
@@ -109,6 +113,10 @@ class RunService:
         self.event_store_path = event_store_path
         self.max_iterations = max_iterations
         self.policy = policy
+        self.non_interactive = non_interactive
+        self.approval_repo = approval_repo
+        self.approval_timeout_sec = approval_timeout_sec
+        self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
         # M2.1/M2.2: Backend manager for isolated execution
         from backend.lifecycle import BackendManager
@@ -173,6 +181,10 @@ class RunService:
         self.repository.transition_job_status(job_id, JobStatus.RUNNING)
         job = self.repository.get_job(job_id)  # refresh
 
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._running_tasks[job_id] = current_task
+
         # Create session
         session_id = str(uuid.uuid4())
         store = SessionStore(self.event_store_path)
@@ -195,6 +207,10 @@ class RunService:
         try:
             work_dir = backend_manager.setup(job_id=job.id, run_id=run.id)
 
+            # --- Non-interactive: expire old approval tickets ---
+            if self.non_interactive and self.approval_repo is not None:
+                self.approval_repo.expire_tickets()
+
             # --- Core execution (with task-level timeout) ---
             result_dag = await asyncio.wait_for(
                 self._execute_plan_and_run(job, session_id, store, work_dir),
@@ -208,6 +224,7 @@ class RunService:
                 replan_handler=lambda dag, failed_id: orchestrator.replan(
                     dag, failed_id, job.requirement,
                 ),
+                work_dir=work_dir,
             )
             summary = engine.get_execution_summary(result_dag)
 
@@ -225,7 +242,18 @@ class RunService:
             # Persist run
             self.repository.update_run(run)
 
-            # Transition job to final state
+            # Transition job to final state unless externally canceled/requeued.
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status != JobStatus.RUNNING:
+                run.status = (
+                    RunStatus.CANCELED
+                    if current_job.status == JobStatus.CANCELED
+                    else RunStatus.FAILED
+                )
+                run.completed_at = _utc_now()
+                self.repository.update_run(run)
+                return self.repository.get_run(run.id) or run
+
             error_msg = ""
             error_cat = ""
             if job_status == JobStatus.FAILED:
@@ -263,6 +291,14 @@ class RunService:
 
         except asyncio.TimeoutError:
             # --- Timeout handling ---
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status == JobStatus.CANCELED:
+                run.status = RunStatus.CANCELED
+                run.completed_at = _utc_now()
+                run.dag_result = {"error": "canceled", "reason": "Job canceled during execution"}
+                self.repository.update_run(run)
+                return self.repository.get_run(run.id) or run
+
             run.status = RunStatus.TIMED_OUT
             run.completed_at = _utc_now()
             run.dag_result = {"error": "timeout", "reason": f"Exceeded {timeout}s"}
@@ -282,8 +318,28 @@ class RunService:
             if work_dir is not None:
                 backend_manager.preserve(job.id, run.id, reason="timeout")
 
+        except asyncio.CancelledError:
+            run.status = RunStatus.CANCELED
+            run.completed_at = _utc_now()
+            run.dag_result = {"error": "canceled", "reason": "Run coroutine canceled"}
+            self.repository.update_run(run)
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status == JobStatus.RUNNING:
+                self.repository.transition_job_status(
+                    job_id, JobStatus.CANCELED, error="Run canceled", error_category="tool_blocked",
+                )
+            return self.repository.get_run(run.id) or run
+
         except Exception as exc:
             # --- Unexpected error handling ---
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status == JobStatus.CANCELED:
+                run.status = RunStatus.CANCELED
+                run.completed_at = _utc_now()
+                run.dag_result = {"error": "canceled", "reason": "Job canceled during execution"}
+                self.repository.update_run(run)
+                return self.repository.get_run(run.id) or run
+
             error_msg = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
             error_cat = _classify_error(str(exc))
 
@@ -303,6 +359,9 @@ class RunService:
             )
             if work_dir is not None:
                 backend_manager.preserve(job.id, run.id, reason=error_cat)
+
+        finally:
+            self._running_tasks.pop(job_id, None)
 
         return self.repository.get_run(run.id) or run
 
@@ -400,6 +459,108 @@ class RunService:
             )
 
     # ------------------------------------------------------------------
+    # Approval resume / abort
+    # ------------------------------------------------------------------
+
+    async def resume_after_approval(self, job_id: str, ticket_id: str) -> Run | None:
+        """Resume a job after an approval decision by re-queuing it for workers."""
+        job = self.repository.get_job(job_id)
+        if not job:
+            return None
+
+        runs = self.repository.list_runs_by_job(job_id)
+        active_runs = [r for r in runs if r.status == RunStatus.RUNNING]
+        if not active_runs:
+            return None
+
+        run = active_runs[-1]
+
+        if job.status in {JobStatus.RUNNING, JobStatus.LEASED}:
+            job.status = JobStatus.QUEUED
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.last_error = ""
+            job.error_category = ""
+            job = self.repository.update_job(job)
+        elif job.status != JobStatus.QUEUED:
+            return None
+
+        self._emit_event("approval_resumed", job_id, {
+            "ticket_id": ticket_id,
+            "run_id": run.id,
+            "job_id": job_id,
+            "job_status": job.status.value,
+        })
+
+        return run
+
+    async def abort_after_rejection(self, job_id: str, ticket_id: str, reason: str = "") -> Job:
+        """
+        审批被拒绝后中止任务。
+
+        将 job 状态推进到 failed 或 dead_letter（根据重试策略）。
+        """
+        job = self.repository.get_job(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+
+        error_msg = f"Approval ticket {ticket_id} rejected"
+        if reason:
+            error_msg += f": {reason}"
+
+        if job.status == JobStatus.RUNNING:
+            # Stop in-flight execution first, then mark job canceled.
+            running_task = self._running_tasks.get(job.id)
+            if running_task and not running_task.done():
+                running_task.cancel()
+            job = self.repository.transition_job_status(
+                job.id,
+                JobStatus.CANCELED,
+                error=error_msg,
+                error_category="tool_blocked",
+            )
+        elif job.status == JobStatus.LEASED:
+            # LEASED cannot transition directly to FAILED in repository rules.
+            job = self.repository.transition_job_status(
+                job.id,
+                JobStatus.QUEUED,
+                error=error_msg,
+                error_category="tool_blocked",
+            )
+            # Clear lease metadata so workers can immediately acquire this queued job.
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job = self.repository.update_job(job)
+        elif job.status == JobStatus.QUEUED:
+            job = self.repository.transition_job_status(
+                job.id,
+                JobStatus.FAILED,
+                error=error_msg,
+                error_category="tool_blocked",
+            )
+
+        if job.status == JobStatus.FAILED:
+            job = await self.handle_job_failure(job, error_msg, "tool_blocked")
+
+        self._emit_event("approval_rejected_abort", job_id, {
+            "ticket_id": ticket_id,
+            "job_status": job.status.value,
+            "reason": reason,
+        })
+
+        return job
+
+    def _emit_event(self, event_type: str, job_id: str, details: dict[str, Any]) -> None:
+        """发出结构化事件（用于日志和监控）。"""
+        event: dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "type": event_type,
+            "job_id": job_id,
+            "details": details,
+        }
+        print(json.dumps(event), flush=True)
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -468,7 +629,12 @@ class RunService:
 
         # 如果 policy 是 PersonalGuardrailPolicy，使用 PersonalGuardrails
         if isinstance(policy, PersonalGuardrailPolicy):
-            guardrails = PersonalGuardrails(policy, tool_registry)
+            guardrails = PersonalGuardrails(
+                policy,
+                tool_registry,
+                non_interactive=self.non_interactive,
+                approval_repo=self.approval_repo,
+            )
         else:
             guardrails = Guardrails(policy, tool_registry)
 

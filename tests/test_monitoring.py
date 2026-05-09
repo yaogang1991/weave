@@ -11,6 +11,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from control_plane.approval import (
+    ApprovalRepository,
+    ApprovalTicket,
+    TicketStatus,
+)
 from control_plane.models import Job, JobStatus, Run, RunStatus
 from control_plane.repository import JobRepository
 from monitoring.metrics import MetricsCollector, MetricsReporter
@@ -636,3 +641,333 @@ class TestMetricsReporterMarkdown:
         reporter.generate_markdown_report(metrics, output_path=path)
         content = open(path).read()
         assert "# Harness M1 指标报告" in content
+
+
+# ---------------------------------------------------------------------------
+# Approval stats — fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def approval_repo(tmp_path) -> ApprovalRepository:
+    """Fresh ApprovalRepository in a temporary directory."""
+    base = tmp_path / "approvals"
+    base.mkdir()
+    return ApprovalRepository(str(base))
+
+
+def make_ticket(
+    repo: ApprovalRepository,
+    status: TicketStatus = TicketStatus.PENDING,
+    risk_level: str = "high",
+    decided_by: str | None = None,
+    wait_sec: float | None = None,
+    requested_at: datetime | None = None,
+) -> ApprovalTicket:
+    """Create and persist an ApprovalTicket with the given parameters."""
+    ticket = repo.create_ticket(
+        job_id="job_test",
+        tool_name="test_tool",
+        args={"cmd": "test"},
+        risk_level=risk_level,
+    )
+    # Override requested_at if provided
+    if requested_at:
+        ticket.requested_at = requested_at
+    # Update status and decided_at if needed
+    if status == TicketStatus.APPROVED:
+        ticket.status = TicketStatus.PENDING  # Must be pending to approve
+        repo.update_ticket(ticket)
+        approved = repo.approve_ticket(ticket.id, decided_by=decided_by or "user")
+        if wait_sec is not None:
+            approved.decided_at = approved.requested_at + timedelta(
+                seconds=wait_sec
+            )
+            repo.update_ticket(approved)
+        return approved
+    elif status == TicketStatus.REJECTED:
+        ticket.status = TicketStatus.PENDING
+        repo.update_ticket(ticket)
+        rejected = repo.reject_ticket(ticket.id, decided_by=decided_by or "user")
+        if wait_sec is not None:
+            rejected.decided_at = rejected.requested_at + timedelta(
+                seconds=wait_sec
+            )
+            repo.update_ticket(rejected)
+        return rejected
+    elif status == TicketStatus.EXPIRED:
+        ticket.status = TicketStatus.EXPIRED
+        ticket.decided_at = datetime.now(timezone.utc)
+        ticket.decided_by = "timeout"
+        repo.update_ticket(ticket)
+        return ticket
+    return ticket
+
+
+# ---------------------------------------------------------------------------
+# Approval stats — MetricsCollector with approval_repository
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalStatsCollect:
+    def test_returns_approvals_when_repository_provided(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert "approvals" in metrics
+        assert metrics["approvals"] is not None
+
+    def test_no_approvals_when_repository_not_provided(
+        self, repo: JobRepository
+    ):
+        collector = MetricsCollector(repo)
+        metrics = collector.collect()
+        assert "approvals" not in metrics
+
+    def test_pending_count_correct(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        for _ in range(2):
+            make_ticket(approval_repo, TicketStatus.APPROVED)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["pending_count"] == 3
+        assert metrics["approvals"]["approved_count"] == 2
+
+    def test_total_count(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(5):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.APPROVED)
+        for _ in range(2):
+            make_ticket(approval_repo, TicketStatus.REJECTED)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["total_count"] == 10
+
+    def test_avg_wait_sec_calculation(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=10)
+        make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=20)
+        make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=30)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["avg_wait_sec"] == 20.0
+
+    def test_avg_wait_sec_with_no_decided_tickets(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["avg_wait_sec"] == 0
+
+    def test_p95_wait_sec(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        # Create 25 decided tickets with wait times 1..25
+        for i in range(1, 26):
+            make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=float(i))
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        # p95 index = int(25 * 0.95) = 23 => 24th element (1-indexed) => 24
+        assert metrics["approvals"]["p95_wait_sec"] == 24
+
+    def test_p95_wait_sec_fallback_when_fewer_than_20(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=10)
+        make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=50)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        # n < 20, fallback to max
+        assert metrics["approvals"]["p95_wait_sec"] == 50
+
+    def test_auto_approve_rate(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        # 2 auto-approved, 1 user-approved, 2 rejected => total_decided = 5
+        make_ticket(
+            approval_repo, TicketStatus.APPROVED, decided_by="auto"
+        )
+        make_ticket(
+            approval_repo, TicketStatus.APPROVED, decided_by="auto"
+        )
+        make_ticket(
+            approval_repo, TicketStatus.APPROVED, decided_by="user"
+        )
+        make_ticket(approval_repo, TicketStatus.REJECTED)
+        make_ticket(approval_repo, TicketStatus.REJECTED)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        # auto_approve_rate = 2 / 5 * 100 = 40.0
+        assert metrics["approvals"]["auto_approve_rate"] == 40.0
+
+    def test_auto_approve_rate_zero_when_no_decided(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["auto_approve_rate"] == 0
+
+    def test_manual_intervention_rate(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        # 2 user-approved out of 5 total => 40%
+        make_ticket(
+            approval_repo, TicketStatus.APPROVED, decided_by="user"
+        )
+        make_ticket(
+            approval_repo, TicketStatus.APPROVED, decided_by="user"
+        )
+        make_ticket(approval_repo, TicketStatus.REJECTED)
+        make_ticket(approval_repo, TicketStatus.PENDING)
+        make_ticket(approval_repo, TicketStatus.PENDING)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["manual_intervention_rate"] == 40.0
+
+    def test_manual_intervention_rate_zero_when_empty(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["manual_intervention_rate"] == 0
+
+    def test_risk_distribution(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.PENDING, risk_level="high")
+        for _ in range(2):
+            make_ticket(
+                approval_repo, TicketStatus.PENDING, risk_level="critical"
+            )
+        make_ticket(approval_repo, TicketStatus.PENDING, risk_level="medium")
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        dist = metrics["approvals"]["risk_distribution"]
+        assert dist["high"] == 3
+        assert dist["critical"] == 2
+        assert dist["medium"] == 1
+
+    def test_rejected_and_expired_counts(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(2):
+            make_ticket(approval_repo, TicketStatus.REJECTED)
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.EXPIRED)
+        collector = MetricsCollector(repo, approval_repo)
+        metrics = collector.collect()
+        assert metrics["approvals"]["rejected_count"] == 2
+        assert metrics["approvals"]["expired_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# Approval stats — MetricsReporter Markdown
+# ---------------------------------------------------------------------------
+
+
+class TestApprovalStatsMarkdown:
+    def test_markdown_report_contains_approval_section(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        for _ in range(3):
+            make_ticket(approval_repo, TicketStatus.PENDING)
+        for _ in range(2):
+            make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=10)
+        collector = MetricsCollector(repo, approval_repo)
+        reporter = MetricsReporter()
+        metrics = collector.collect()
+        report = reporter.generate_markdown_report(metrics)
+        assert "## 审批统计" in report
+        assert "待审批" in report
+        assert "已批准" in report
+        assert "已拒绝" in report
+        assert "已过期" in report
+        assert "平均等待" in report
+        assert "P95 等待" in report
+        assert "自动通过率" in report
+        assert "人工干预率" in report
+
+    def test_markdown_report_contains_risk_distribution(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+    ):
+        make_ticket(approval_repo, TicketStatus.PENDING, risk_level="high")
+        make_ticket(
+            approval_repo, TicketStatus.PENDING, risk_level="critical"
+        )
+        collector = MetricsCollector(repo, approval_repo)
+        reporter = MetricsReporter()
+        metrics = collector.collect()
+        report = reporter.generate_markdown_report(metrics)
+        assert "### 风险分布" in report
+        assert "high" in report
+        assert "critical" in report
+
+    def test_markdown_report_no_approval_section_when_no_repository(
+        self, repo: JobRepository
+    ):
+        collector = MetricsCollector(repo)
+        reporter = MetricsReporter()
+        metrics = collector.collect()
+        report = reporter.generate_markdown_report(metrics)
+        assert "## 审批统计" not in report
+
+    def test_markdown_file_output_with_approvals(
+        self,
+        repo: JobRepository,
+        approval_repo: ApprovalRepository,
+        tmp_path,
+    ):
+        make_ticket(approval_repo, TicketStatus.PENDING)
+        make_ticket(approval_repo, TicketStatus.APPROVED, wait_sec=10)
+        collector = MetricsCollector(repo, approval_repo)
+        reporter = MetricsReporter()
+        metrics = collector.collect()
+        path = str(tmp_path / "report_with_approvals.md")
+        reporter.generate_markdown_report(metrics, output_path=path)
+        content = open(path).read()
+        assert "## 审批统计" in content
+        assert "待审批" in content
+

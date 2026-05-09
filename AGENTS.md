@@ -24,7 +24,7 @@
   - `pytest>=8.0.0`
   - `pytest-cov>=5.0.0`
   - `flake8>=7.0.0`
-- **包管理**：仅使用 `requirements.txt`，**无 `pyproject.toml`、`setup.py` 或 `setup.cfg`**。
+- **包管理**：仅使用 `requirements.txt` 为主，项目当前同时存在 `pyproject.toml`（用于工具配置）。
 
 ---
 
@@ -132,7 +132,7 @@ agents:
 
 ## 测试策略
 
-> ⚠️ **当前项目根目录下没有 `tests/` 目录或测试文件**，但 `requirements.txt` 已包含 `pytest` 和 `pytest-cov`。
+> 当前项目已包含 `tests/` 目录与多组测试用例，可直接运行 `pytest`。
 
 **Evaluator 引擎**（`evaluator/engine.py`）内置了对测试的自动化检查逻辑：
 
