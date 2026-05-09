@@ -28,7 +28,6 @@ python main.py run "Add OAuth2 support" --project ./my-project --max-parallel 5
 
 # Tests
 python -m pytest -v --tb=short
-python -m pytest tests/test_todo_api.py -v
 
 # Lint
 flake8 --max-line-length=100

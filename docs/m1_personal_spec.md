@@ -859,7 +859,6 @@ harness/
 │   ├── test_models.py
 │   ├── test_worker.py
 │   ├── test_evaluator.py
-│   └── test_todo_api.py
 ├── data/                      # Runtime data (gitignored)
 │   ├── events/                # JSONL event logs
 │   ├── artifacts/             # Generated artifacts
