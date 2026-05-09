@@ -114,6 +114,7 @@ class RunService:
         self.non_interactive = non_interactive
         self.approval_repo = approval_repo
         self.approval_timeout_sec = approval_timeout_sec
+        self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
     # ------------------------------------------------------------------
     # Public API — Job lifecycle
@@ -171,6 +172,10 @@ class RunService:
         self.repository.acquire_lease(job_id, "run_service")
         self.repository.transition_job_status(job_id, JobStatus.RUNNING)
         job = self.repository.get_job(job_id)  # refresh
+
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self._running_tasks[job_id] = current_task
 
         # Create session
         session_id = str(uuid.uuid4())
@@ -328,6 +333,9 @@ class RunService:
                 job, error=error_msg, error_category=error_cat,
             )
 
+        finally:
+            self._running_tasks.pop(job_id, None)
+
         return self.repository.get_run(run.id) or run
 
     async def get_job_status(self, job_id: str) -> dict[str, Any]:
@@ -474,8 +482,10 @@ class RunService:
             error_msg += f": {reason}"
 
         if job.status == JobStatus.RUNNING:
-            # Avoid racing in-flight execution. Mark it canceled and let the
-            # worker observe terminal state instead of forcing RUNNING->FAILED.
+            # Stop in-flight execution first, then mark job canceled.
+            running_task = self._running_tasks.get(job.id)
+            if running_task and not running_task.done():
+                running_task.cancel()
             job = self.repository.transition_job_status(
                 job.id,
                 JobStatus.CANCELED,
