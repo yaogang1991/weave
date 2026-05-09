@@ -430,6 +430,14 @@ class RunService:
         if reason:
             error_msg += f": {reason}"
 
+        if job.status in (JobStatus.LEASED, JobStatus.RUNNING, JobStatus.QUEUED):
+            job = self.repository.transition_job_status(
+                job.id,
+                JobStatus.FAILED,
+                error=error_msg,
+                error_category="approval_rejected",
+            )
+
         job = await self.handle_job_failure(job, error_msg, "approval_rejected")
 
         self._emit_event("approval_rejected_abort", job_id, {

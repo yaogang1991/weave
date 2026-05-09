@@ -299,7 +299,15 @@ class Guardrails:
 
     # -- legacy backward-compatibility wrappers -----------------------
 
-    def guarded_execute(self, tool_name: str, arguments: dict) -> ToolResult:
+    def guarded_execute(
+        self,
+        tool_name: str,
+        arguments: dict,
+        *,
+        job_id: str = "",
+        run_id: str | None = None,
+        approval_repo: ApprovalRepository | None = None,
+    ) -> ToolResult:
         """DEPRECATED — Use :meth:`check_and_execute` instead.
 
         Kept for backward compatibility.  Wraps ``check_and_execute`` and
@@ -311,8 +319,21 @@ class Guardrails:
             DeprecationWarning,
             stacklevel=2,
         )
-        result = self.check_and_execute(tool_name, arguments)
+        result = self.check_and_execute(
+            tool_name,
+            arguments,
+            job_id=job_id,
+            run_id=run_id,
+            approval_repo=approval_repo,
+        )
         if isinstance(result, GuardrailResult):
+            if result.decision == "pending_approval":
+                ticket = f" (ticket: {result.ticket_id})" if result.ticket_id else ""
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    error=f"Blocked by guardrails: Pending approval required: {result.reason}{ticket}",
+                )
             return ToolResult(
                 tool_call_id="",
                 success=False,

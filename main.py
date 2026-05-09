@@ -305,9 +305,11 @@ def _make_repository() -> JobRepository:
 def _make_run_service(repository: JobRepository, non_interactive: bool = False) -> RunService:
     """Create a RunService with LLM config from environment."""
     harness_config = HarnessConfig.from_env()
+    approval_repo = ApprovalRepository()
     return RunService(
         repository=repository,
         llm_config=harness_config.llm,
+        approval_repo=approval_repo,
         non_interactive=non_interactive,
         approval_timeout_sec=harness_config.approval_timeout_sec,
     )
@@ -496,6 +498,8 @@ async def cmd_tickets(args):
 async def cmd_approve(args):
     """Approve an approval ticket."""
     repo = ApprovalRepository()
+    job_repo = _make_repository()
+    service = _make_run_service(job_repo, non_interactive=True)
     ticket = repo.get_ticket(args.ticket_id)
 
     if not ticket:
@@ -507,6 +511,7 @@ async def cmd_approve(args):
 
     try:
         ticket = repo.approve_ticket(args.ticket_id, reason=args.reason or "")
+        await service.resume_after_approval(ticket.job_id, ticket.id)
     except ValueError as e:
         sys.stderr.write(json.dumps({"error": str(e), "code": "E3002"}) + "\n")
         sys.exit(1)
@@ -525,6 +530,8 @@ async def cmd_approve(args):
 async def cmd_reject(args):
     """Reject an approval ticket."""
     repo = ApprovalRepository()
+    job_repo = _make_repository()
+    service = _make_run_service(job_repo, non_interactive=True)
     ticket = repo.get_ticket(args.ticket_id)
 
     if not ticket:
@@ -536,6 +543,7 @@ async def cmd_reject(args):
 
     try:
         ticket = repo.reject_ticket(args.ticket_id, reason=args.reason or "")
+        await service.abort_after_rejection(ticket.job_id, ticket.id, reason=ticket.reason)
     except ValueError as e:
         sys.stderr.write(json.dumps({"error": str(e), "code": "E3003"}) + "\n")
         sys.exit(1)

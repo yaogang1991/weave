@@ -313,6 +313,13 @@ class TaskWorker:
             # 将关联的 job 推进失败策略
             job = await asyncio.to_thread(self.repository.get_job, ticket.job_id)
             if job and job.status in (JobStatus.LEASED, JobStatus.RUNNING):
+                job = await asyncio.to_thread(
+                    self.repository.transition_job_status,
+                    job.id,
+                    JobStatus.FAILED,
+                    error=f"Approval ticket {ticket.id} expired (timeout)",
+                    error_category="timeout",
+                )
                 job = await self.run_service.handle_job_failure(
                     job,
                     f"Approval ticket {ticket.id} expired (timeout)",
@@ -349,6 +356,13 @@ class TaskWorker:
                     JobStatus.SUCCEEDED, JobStatus.FAILED,
                     JobStatus.CANCELED, JobStatus.DEAD_LETTER,
                 ):
+                    job = await asyncio.to_thread(
+                        self.repository.transition_job_status,
+                        job.id,
+                        JobStatus.FAILED,
+                        error=f"Approval ticket {ticket.id} orphaned (job no longer active)",
+                        error_category="unknown",
+                    )
                     job = await self.run_service.handle_job_failure(
                         job,
                         f"Approval ticket {ticket.id} orphaned (job no longer active)",
