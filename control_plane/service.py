@@ -401,11 +401,13 @@ class RunService:
 
         run = active_runs[-1]
 
-        if job.status == JobStatus.RUNNING:
-            job = self.repository.transition_job_status(job.id, JobStatus.FAILED)
-            job = self.repository.transition_job_status(job.id, JobStatus.QUEUED)
-        elif job.status == JobStatus.LEASED:
-            job = self.repository.transition_job_status(job.id, JobStatus.QUEUED)
+        if job.status in {JobStatus.RUNNING, JobStatus.LEASED}:
+            job.status = JobStatus.QUEUED
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job.last_error = ""
+            job.error_category = ""
+            job = self.repository.update_job(job)
         elif job.status != JobStatus.QUEUED:
             return None
 
@@ -432,57 +434,15 @@ class RunService:
         if reason:
             error_msg += f": {reason}"
 
-        if job.status == JobStatus.RUNNING:
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.FAILED,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-        elif job.status == JobStatus.LEASED:
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.QUEUED,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.LEASED,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.RUNNING,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.FAILED,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-        elif job.status == JobStatus.QUEUED:
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.LEASED,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.RUNNING,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
-            job = self.repository.transition_job_status(
-                job.id,
-                JobStatus.FAILED,
-                error=error_msg,
-                error_category="tool_blocked",
-            )
+        if job.status in {JobStatus.RUNNING, JobStatus.LEASED, JobStatus.QUEUED}:
+            # Rejection is a control-plane abort, not a worker execution failure.
+            # We normalize active jobs to FAILED directly, then reuse retry policy.
+            job.status = JobStatus.FAILED
+            job.last_error = error_msg
+            job.error_category = "tool_blocked"
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job = self.repository.update_job(job)
 
         job = await self.handle_job_failure(job, error_msg, "tool_blocked")
 
