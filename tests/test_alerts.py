@@ -472,7 +472,7 @@ class TestDefaultFactory:
         manager = create_default_alerts(repo, webhook_url="http://example.com")
         assert isinstance(manager, AlertManager)
         assert manager.webhook_url == "http://example.com"
-        assert len(manager.rules) == 3
+        assert len(manager.rules) == 4
 
     def test_default_rules_are_enabled(self, repo: JobRepository):
         manager = create_default_alerts(repo)

@@ -115,6 +115,10 @@ class AlertManager:
             return self._check_duration_threshold(rule)
         if rule.rule_type == "dead_letter":
             return self._check_dead_letter(rule)
+        if rule.rule_type == "node_unhealthy_killed":
+            return self._check_node_unhealthy_killed(rule)
+        if rule.rule_type == "heartbeat_miss_spike":
+            return self._check_heartbeat_miss_spike(rule)
         return None
 
     def _check_consecutive_failures(
@@ -177,6 +181,33 @@ class AlertManager:
                 details={"dead_letter_count": count, "threshold": rule.threshold},
             )
         return None
+
+    def _check_node_unhealthy_killed(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查是否有节点被 watchdog 杀死。"""
+        # 检查最近的 failed 节点中 error 包含 watchdog 的
+        jobs = self.repository.list_jobs()
+        killed_count = 0
+        for job in jobs:
+            if job.error_category == "watchdog":
+                killed_count += 1
+
+        if killed_count >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical",
+                message=f"{killed_count} 个节点被 watchdog 杀死（阈值: {rule.threshold}）",
+                details={"killed_count": killed_count, "threshold": rule.threshold},
+            )
+        return None
+
+    def _check_heartbeat_miss_spike(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查心跳丢失激增。"""
+        # 实现从 metrics 中检查
+        return None  # Placeholder - implement if metrics support
 
     # ------------------------------------------------------------------
     # Sending
@@ -290,6 +321,15 @@ def create_default_alerts(
         AlertRule(
             name="dead_letter",
             rule_type="dead_letter",
+            threshold=1,
+            enabled=True,
+        )
+    )
+
+    manager.add_rule(
+        AlertRule(
+            name="node_unhealthy_killed",
+            rule_type="node_unhealthy_killed",
             threshold=1,
             enabled=True,
         )

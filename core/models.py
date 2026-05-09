@@ -15,7 +15,7 @@ Key design principles:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
@@ -47,6 +47,14 @@ class NodeStatus(str, Enum):
     RETRYING = "retrying"
 
 
+class NodeHealth(str, Enum):
+    """Health status of a running DAG node — M2.0 heartbeat protocol."""
+    HEALTHY = "healthy"       # Heartbeat within threshold
+    MISSED = "missed"         # Last heartbeat > threshold but < kill_threshold
+    UNHEALTHY = "unhealthy"   # Confirmed unhealthy (miss_threshold exceeded)
+    DEAD = "dead"             # Killed by watchdog, final state
+
+
 class DAGNode(BaseModel):
     """
     A single node in the execution DAG = one agent task.
@@ -64,6 +72,54 @@ class DAGNode(BaseModel):
     retry_count: int = 0
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+    # M2.0: Heartbeat fields
+    health_status: NodeHealth = NodeHealth.HEALTHY  # Current health
+    last_heartbeat_at: datetime | None = None       # Last heartbeat timestamp
+    heartbeat_count: int = 0                         # Total heartbeats received
+    missed_heartbeats: int = 0                       # Consecutive missed beats
+
+    def record_heartbeat(self) -> None:
+        """Record a heartbeat from the executing agent."""
+        self.last_heartbeat_at = datetime.now(timezone.utc)
+        self.heartbeat_count += 1
+        if self.missed_heartbeats > 0:
+            self.missed_heartbeats = 0  # Reset on successful heartbeat
+        if self.health_status in (NodeHealth.MISSED, NodeHealth.UNHEALTHY):
+            self.health_status = NodeHealth.HEALTHY  # Recovery
+
+    def check_health(self, heartbeat_interval_sec: float = 5.0,
+                     miss_threshold: int = 3) -> NodeHealth:
+        """
+        Check current health based on last heartbeat.
+
+        Returns:
+            HEALTHY: Last heartbeat within interval
+            MISSED: 1+ missed beats but below threshold
+            UNHEALTHY: miss_threshold exceeded → should be killed
+        """
+        if self.status != NodeStatus.RUNNING:
+            return self.health_status  # Only check running nodes
+
+        if self.last_heartbeat_at is None:
+            # Never sent heartbeat since starting
+            if self.started_at is None:
+                return self.health_status
+            elapsed = (datetime.now(timezone.utc) - self.started_at).total_seconds()
+        else:
+            elapsed = (datetime.now(timezone.utc) - self.last_heartbeat_at).total_seconds()
+
+        missed = int(elapsed / heartbeat_interval_sec)
+        self.missed_heartbeats = max(self.missed_heartbeats, missed)
+
+        if missed >= miss_threshold:
+            self.health_status = NodeHealth.UNHEALTHY
+        elif missed >= 1:
+            self.health_status = NodeHealth.MISSED
+        else:
+            self.health_status = NodeHealth.HEALTHY
+
+        return self.health_status
 
     def model_post_init(self, __context: Any) -> None:
         if not self.id:
@@ -148,9 +204,13 @@ class DAG(BaseModel):
 
 class ExecutionEvent(BaseModel):
     """An event during DAG execution."""
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     node_id: str
-    event_type: Literal["started", "completed", "failed", "retrying", "skipped"]
+    event_type: Literal[
+        "started", "completed", "failed", "retrying", "skipped",
+        "heartbeat", "heartbeat_missed", "unhealthy_killed", "health_recovered",
+        "health_alert",
+    ]
     details: dict[str, Any] = Field(default_factory=dict)
 
 
