@@ -97,6 +97,8 @@ class RunService:
         event_store_path: str = "./data/events",
         max_iterations: int = 50,
         policy: GuardrailPolicy | None = None,
+        default_backend: str = "local",
+        backend_base_path: str = "./data/backends",
     ) -> None:
         self.repository = repository
         self.llm_config = llm_config
@@ -107,6 +109,14 @@ class RunService:
         self.event_store_path = event_store_path
         self.max_iterations = max_iterations
         self.policy = policy
+
+        # M2.1/M2.2: Backend manager for isolated execution
+        from backend.lifecycle import BackendManager
+
+        self.backend_manager = BackendManager(
+            default_backend=default_backend,
+            base_path=backend_base_path,
+        )
 
     # ------------------------------------------------------------------
     # Public API — Job lifecycle

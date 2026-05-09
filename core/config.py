@@ -50,6 +50,28 @@ class HarnessConfig(BaseModel):
     max_context_tokens: int = 100000  # token threshold for context truncation
     log_level: str = "INFO"
 
+    # M2.2: Backend configuration
+    default_backend: str = Field(
+        default_factory=lambda: os.getenv(
+            "HARNESS_DEFAULT_BACKEND", "local"
+        )
+    )
+    backend_base_path: str = Field(
+        default_factory=lambda: os.getenv(
+            "HARNESS_BACKEND_BASE_PATH", "./data/backends"
+        )
+    )
+    risk_backend_map: dict[str, str] = Field(
+        default_factory=lambda: {
+            "low": os.getenv("HARNESS_BACKEND_LOW", "local"),
+            "medium": os.getenv("HARNESS_BACKEND_MEDIUM", "local"),
+            "high": os.getenv("HARNESS_BACKEND_HIGH", "worktree"),
+            "critical": os.getenv(
+                "HARNESS_BACKEND_CRITICAL", "worktree"
+            ),
+        }
+    )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r") as f:
