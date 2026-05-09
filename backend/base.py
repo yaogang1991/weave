@@ -38,7 +38,7 @@ class ExecutionBackend(abc.ABC):
         repo_root: str | None = None,
         base_path: str = "./data/backends",
     ):
-        self.repo_root = Path(repo_root or ".")
+        self.repo_root = Path(repo_root) if repo_root else None
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
 

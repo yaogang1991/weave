@@ -14,6 +14,7 @@ from typing import Any
 from backend.base import ExecutionBackend, BackendType
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
+from backend.docker_stub import DockerBackend
 
 
 class BackendManager:
@@ -63,6 +64,10 @@ class BackendManager:
                 )
             elif backend_type == BackendType.WORKTREE:
                 self._backends[key] = WorktreeBackend(
+                    self.repo_root, self.base_path
+                )
+            elif backend_type == BackendType.DOCKER:
+                self._backends[key] = DockerBackend(
                     self.repo_root, self.base_path
                 )
             else:

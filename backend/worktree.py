@@ -56,7 +56,7 @@ class WorktreeBackend(ExecutionBackend):
         # Create worktree
         result = subprocess.run(
             ["git", "worktree", "add", "--detach", str(worktree_path)],
-            cwd=str(self.repo_root),
+            cwd=str(self.repo_root) if self.repo_root else None,
             capture_output=True,
             text=True,
         )
@@ -107,7 +107,7 @@ class WorktreeBackend(ExecutionBackend):
         try:
             result = subprocess.run(
                 ["git", "worktree", "list"],
-                cwd=str(self.repo_root),
+                cwd=str(self.repo_root) if self.repo_root else None,
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -119,12 +119,15 @@ class WorktreeBackend(ExecutionBackend):
     def _remove_worktree(self, path: str) -> None:
         """Safely remove git worktree."""
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["git", "worktree", "remove", "--force", path],
-                cwd=str(self.repo_root),
+                cwd=str(self.repo_root) if self.repo_root else None,
                 capture_output=True,
                 timeout=10,
             )
+            if result.returncode != 0 and Path(path).exists():
+                # git worktree remove failed (e.g. stale dir not a registered worktree)
+                shutil.rmtree(path, ignore_errors=True)
         except (subprocess.TimeoutExpired, Exception):
             # Fallback: manual cleanup
             if Path(path).exists():

@@ -214,7 +214,7 @@ class ToolRegistry:
 
     def _resolve_safe_cwd(self, requested_cwd: str | None = None) -> Path:
         """Resolve and validate cwd within project root."""
-        project_root = Path.cwd().resolve()
+        project_root = self.base_cwd.resolve() if self.base_cwd else Path.cwd().resolve()
         target = (Path(requested_cwd).expanduser().resolve() if requested_cwd else project_root)
         if target != project_root and project_root not in target.parents:
             raise ValueError(f"cwd outside project root is not allowed: {target}")
