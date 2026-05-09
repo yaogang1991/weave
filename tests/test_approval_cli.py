@@ -395,6 +395,22 @@ class TestCmdReject:
         decided = datetime.fromisoformat(ticket.decided_at.isoformat().replace("Z", "+00:00"))
         assert before <= decided <= after
 
+    @pytest.mark.asyncio
+    async def test_reject_succeeds_when_job_missing(self, tmp_approval_repo, sample_ticket, capsys, monkeypatch):
+        """Ticket rejection should succeed even if abort path reports missing job."""
+        class _RunServiceStub:
+            async def abort_after_rejection(self, job_id: str, ticket_id: str, reason: str = "") -> None:
+                raise ValueError(f"Job {job_id} not found")
+
+        monkeypatch.setattr(main_module, "_make_run_service", lambda *args, **kwargs: _RunServiceStub())
+        args = _make_namespace(ticket_id=sample_ticket.id, reason="Clear pending ticket only")
+        await main_module.cmd_reject(args)
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+
+        assert output["status"] == "rejected"
+        assert output["ticket_id"] == sample_ticket.id
+
 
 # ------------------------------------------------------------------------------
 # End-to-end flow: approve + reject interleaved
