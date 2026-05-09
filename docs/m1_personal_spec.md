@@ -894,6 +894,29 @@ harness/
 
 ---
 
+## M1 完成状态
+
+| 任务 | 状态 |
+|------|------|
+| Task 01 — 规格文档 | ✅ 已完成 |
+| Task 02 — 数据模型 | ✅ 已完成 |
+| Task 03 — 持久化仓储 | ✅ 已完成 |
+| Task 04 — CLI 控制面 | ✅ 已完成 |
+| Task 05 — 执行服务 | ✅ 已完成 |
+| Task 06 — Worker 队列 | ✅ 已完成 |
+| Task 07 — 超时/重试/死信 | ✅ 已完成 |
+| Task 08 — replan 闭环 | ✅ 已完成 |
+| Task 09 — 个人模式 Guardrails | ✅ 已完成 |
+| Task 10 — 指标聚合 | ✅ 已完成 |
+| Task 11 — 告警 | ✅ 已完成 |
+| Task 12 — 重启恢复 | ✅ 已完成 |
+| Task 13 — 测试补齐 | ✅ 已完成 |
+| Task 14 — 文档更新 | ✅ 已完成 |
+
+完成日期: 2026-05-09
+
+---
+
 ## Revision History
 
 | Version | Date | Author | Changes |

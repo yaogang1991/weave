@@ -1,125 +1,184 @@
 # Unattended Software Development Harness
 
-基于 [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) 架构理念实现的自托管无人看守软件开发工作流 Harness。
+Based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) architecture, a self-hosted unattended software development workflow Harness.
 
-## 核心设计原则
+## Core Design Principles
 
-1. **Artifact-Centric** — 所有状态外化到事件日志和文件产物，模型上下文只是缓存
-2. **Minimal by Design** — 以 "dumb loop" 为核心，按需添加复杂度
-3. **Defense-in-Depth** — 工具层 + Harness 层 + 执行层多层防御
-4. **Trust-First** — 审计日志、回滚、监控作为一等公民
-5. **Human-on-the-Loop** — 计划级人类监督，执行级自动运行
-6. **Contract-Driven** — 预定义成功标准，自动化评估
+1. **Artifact-Centric** — All state externalized to event logs and file artifacts, model context is just cache
+2. **Minimal by Design** — "dumb loop" as core, add complexity on demand
+3. **Defense-in-Depth** — Tool layer + Harness layer + execution layer multi-layer defense
+4. **Trust-First** — Audit logs, rollback, monitoring as first-class citizens
+5. **Human-on-the-Loop** — Plan-level human supervision, execution-level automated running
+6. **Contract-Driven** — Predefined success criteria, automated evaluation
 
-## 架构
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Orchestrator Layer                        │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   Planner   │  │  Generator  │  │     Evaluator       │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│              Session Manager (Append-Only Event Log)             │
-├─────────────────────────────────────────────────────────────────┤
-│                      Harness Core (Dumb Loop)                    │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   Agent     │  │   Tool      │  │     Guardrails      │  │
-│  │   Worker    │◄─┤   Registry  │◄─┤  (Permission/Risk)  │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   Sandbox   │  │   Git       │  │     Reporter        │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------+
+|                        Orchestrator Layer                         |
+|  +-------------+  +-------------+  +---------------------+      |
+|  |   Planner   |  |  Generator  |  |     Evaluator       |      |
+|  +-------------+  +-------------+  +---------------------+      |
++------------------------------------------------------------------+
+|              Session Manager (Append-Only Event Log)              |
++------------------------------------------------------------------+
+|                      Harness Core (Dumb Loop)                     |
+|  +-------------+  +-------------+  +---------------------+      |
+|  |   Agent     |  |   Tool      |  |     Guardrails      |      |
+|  |   Worker    |<--|   Registry  |<--|  (Permission/Risk)  |      |
+|  +-------------+  +-------------+  +---------------------+      |
++------------------------------------------------------------------+
+|  +-------------+  +-------------+  +---------------------+      |
+|  |   Sandbox   |  |   Git       |  |     Reporter        |      |
+|  +-------------+  +-------------+  +---------------------+      |
++------------------------------------------------------------------+
 ```
 
-## 快速开始
+## M1 Personal Mode Guide
 
-### 1. 安装依赖
+### Quick Start (Up and Running in 10 Minutes)
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Set API Key
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# 3. Submit a task
+python main.py submit "Build a REST API for user authentication"
+# Output: {"job_id": "job_abc123", "status": "queued", "message": "Job submitted"}
+
+# 4. Start Worker (auto-executes tasks)
+python main.py worker --concurrency 1
+
+# 5. Check task status
+python main.py status job_abc123
+
+# 6. List all tasks
+python main.py list
+python main.py list --status queued
+python main.py list --status succeeded
+python main.py list --status failed
+
+# 7. Cancel a task
+python main.py cancel job_abc123
+```
+
+### Command Cheat Sheet
+
+| Command | Description |
+|---------|-------------|
+| `submit "<requirement>"` | Submit a new task |
+| `status <job_id>` | View task status |
+| `list [--status STATUS]` | List tasks |
+| `cancel <job_id>` | Cancel a task |
+| `worker [--concurrency N]` | Start Worker |
+| `recover` | Manually recover orphaned tasks |
+| `plan "<requirement>"` | Generate execution plan (no execution) |
+| `run "<requirement>"` | One-command plan + execute |
+
+### Personal Mode Features
+
+- **Unattended**: Throw tasks in, worker auto-runs to completion
+- **Failure Recovery**: timeout/retry/dead-letter mechanism
+- **High-Risk Confirmation**: HIGH risk operations require confirmation (or whitelist auto-pass)
+- **Metrics & Alerts**: Auto-collect success rate, duration, and other metrics
+- **Restart Recovery**: Process interruption can recover to processable state
+
+### Known Limitations (M2 Items)
+
+- Single-user scenario (no multi-tenancy)
+- No persistent database (uses JSON files)
+- No Web UI (CLI only)
+- Single-machine execution (no distribution)
+
+## Quick Start
+
+### 1. Install Dependencies
 
 ```bash
 cd harness
 pip install -r requirements.txt
 ```
 
-### 2. 设置 API Key
+### 2. Set API Key
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-# 或者使用 OpenAI 兼容模型
+# Or use an OpenAI-compatible model
 export HARNESS_MODEL="gpt-4"
 ```
 
-### 3. 运行工作流
+### 3. Run Workflow
 
 ```bash
-# 一键规划并执行
+# One-command plan and execute
 python main.py run "Build a REST API for todo items"
 
-# 或先规划再执行
+# Or plan first, then execute
 python main.py plan "Build a REST API for todo items"
 python main.py execute ./data/plans/plan_xxx.json
 ```
 
-## 工作流编排
+## Workflow Orchestration
 
-Harness 采用 **智能多 Agent 编排**：由 LLM 动态生成 DAG 执行计划，支持并行执行与失败自适应。
+Harness uses **Intelligent Multi-Agent Orchestration**: LLM dynamically generates DAG execution plans, supports parallel execution and failure adaptation.
 
 ```bash
 python main.py run "Add OAuth2 support" --project ./my-project --max-parallel 5
 ```
 
-Agent 类型（默认）：
-- **planner** — 架构师，负责需求分析和设计
-- **generator** — 工程师，负责编码实现
-- **evaluator** — QA，负责测试和审查
+Agent Types (default):
+- **planner** — Architect, responsible for requirements analysis and design
+- **generator** — Engineer, responsible for coding and implementation
+- **evaluator** — QA, responsible for testing and review
 
-项目可通过 `.harness/agents.yaml` 扩展自定义 Agent。
+Projects can extend custom Agents via `.harness/agents.yaml`.
 
-## 安全模型
+## Security Model
 
-受 Anthropic 四层安全架构启发：
+Inspired by Anthropic's four-layer security architecture:
 
-| 层级 | 组件 | 功能 |
-|------|------|------|
-| 模型层 | Agent Worker | Constitutional AI，不确定性时暂停 |
-| 工具层 | Tool Registry | 最小权限，allow/deny 列表 |
-| Harness层 | Guardrails | 权限模式（plan/default/auto/dontAsk） |
-| 执行层 | Sandbox | Docker 隔离，凭证代理 |
+| Layer | Component | Function |
+|-------|-----------|----------|
+| Model Layer | Agent Worker | Constitutional AI, pause when uncertain |
+| Tool Layer | Tool Registry | Least privilege, allow/deny lists |
+| Harness Layer | Guardrails | Permission modes (plan/default/auto/dontAsk) |
+| Execution Layer | Sandbox | Docker isolation, credential proxy |
 
-## 模块说明
+## Module Reference
 
-| 模块 | 职责 |
-|------|------|
-| `core/` | Pydantic 模型、配置管理 |
-| `session/` | 事件存储、状态恢复、checkpoint |
-| `agent/` | LLM API 调用、dumb loop |
-| `tools/` | 内置工具 + MCP 集成 |
-| `guardrails/` | 风险分级、权限控制 |
-| `evaluator/` | 自动化评估、测试执行 |
-| `orchestrator/` | 工作流编排、Stage 流转 |
-| `reporter/` | 审计日志、报告生成 |
+| Module | Responsibility |
+|--------|---------------|
+| `core/` | Pydantic models, configuration management |
+| `session/` | Event storage, state recovery, checkpoint |
+| `agent/` | LLM API calls, dumb loop |
+| `tools/` | Built-in tools + MCP integration |
+| `guardrails/` | Risk classification, permission control |
+| `evaluator/` | Automated evaluation, test execution |
+| `orchestrator/` | Workflow orchestration, Stage transitions |
+| `reporter/` | Audit logs, report generation |
 
-## 与 Anthropic Managed Agents 的关系
+## Relationship with Anthropic Managed Agents
 
-本项目是 Anthropic Managed Agents **理念的自托管实现**：
+This project is a **self-hosted implementation** of the Anthropic Managed Agents concept:
 
-| 特性 | Anthropic Managed Agents | 本 Harness |
-|------|-------------------------|-----------|
-| 运行位置 | Anthropic Cloud | 本地/自托管 |
-| 定价 | $0.08/session-hour + tokens | 仅 token 费用 |
-| Session | 托管事件日志 | 本地 JSONL |
-| Sandbox | 托管容器 | Docker/本地 |
-| LLM | Claude 系列 | Claude/OpenAI 兼容 |
-| MCP | 原生支持 | 客户端集成 |
+| Feature | Anthropic Managed Agents | This Harness |
+|---------|-------------------------|-------------|
+| Running Location | Anthropic Cloud | Local/Self-hosted |
+| Pricing | $0.08/session-hour + tokens | Token cost only |
+| Session | Managed event log | Local JSONL |
+| Sandbox | Managed container | Docker/Local |
+| LLM | Claude series | Claude/OpenAI compatible |
+| MCP | Native support | Client integration |
 
-适合场景：
-- 需要完全控制基础设施的企业
-- 本地开发/原型验证
-- CI/CD 集成
-- 自定义安全策略
+Suitable for:
+- Enterprises needing full infrastructure control
+- Local development/prototyping
+- CI/CD integration
+- Custom security policies
 
-## 许可证
+## License
 
 MIT

@@ -425,6 +425,27 @@ async def cmd_worker(args):
     await run_worker(repository, service, config)
 
 
+async def cmd_recover(args):
+    """
+    Manually trigger recovery of orphaned jobs.
+
+    Scans all jobs in ``leased`` or ``running`` status with an expired lease,
+    and recovers them to ``queued`` or marks them as ``failed``.
+    """
+    repository = _make_repository()
+    recovered = repository.recover_orphan_jobs()
+
+    result = {
+        "recovered_count": len(recovered),
+        "recovered_jobs": [
+            {"job_id": j.id, "old_status": "leased|running", "new_status": j.status.value}
+            for j in recovered
+        ],
+        "message": f"Recovered {len(recovered)} orphan jobs",
+    }
+    print(json.dumps(result, indent=2, default=str))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Harness - Intelligent Multi-Agent Orchestration",
@@ -529,6 +550,10 @@ Examples:
     worker_parser.add_argument("--poll-interval", type=int, default=5, help="Poll interval in seconds (default: 5)")
     worker_parser.set_defaults(func=cmd_worker)
 
+    # recover command
+    recover_parser = subparsers.add_parser("recover", help="Recover orphaned jobs after restart")
+    recover_parser.set_defaults(func=cmd_recover)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -536,7 +561,7 @@ Examples:
         sys.exit(1)
 
     # Ensure API key (skip for commands that don't need LLM)
-    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel"}
+    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover"}
     if args.command not in _NO_API_KEY_COMMANDS:
         if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN") and not os.getenv("OPENAI_API_KEY"):
             sys.stderr.write(json.dumps({

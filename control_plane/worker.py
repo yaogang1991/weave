@@ -204,13 +204,25 @@ class TaskWorker:
     # Recovery
     # ------------------------------------------------------------------
 
+    def _log_event(self, event_type: str, job_id: str, payload: dict[str, Any]) -> None:
+        """Emit a structured recovery event log to stderr."""
+        entry: dict[str, Any] = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": "INFO",
+            "event": event_type,
+        }
+        if job_id:
+            entry["job_id"] = job_id
+        entry.update(payload)
+        print(json.dumps(entry, ensure_ascii=False, default=str), file=sys.stderr, flush=True)
+
     async def _recover_orphan_jobs(self) -> list[str]:
         """
         Scan for jobs whose lease expired while they were ``LEASED`` or
         ``RUNNING``, and return them to ``QUEUED``.
 
-        Returns:
-            List of recovered job IDs.
+        Records recovery events for each orphan job and emits a summary
+        event.  Returns a list of recovered job IDs.
         """
         orphans = await asyncio.to_thread(self.repository.recover_orphan_jobs)
         recovered: list[str] = []
@@ -225,6 +237,12 @@ class TaskWorker:
                         job_id=job.id,
                         status=JobStatus.QUEUED.value,
                     )
+                    self._log_event("recovery", job.id, {
+                        "old_status": "leased",
+                        "new_status": JobStatus.QUEUED.value,
+                        "reason": "lease_expired",
+                        "recovered_at": datetime.now(timezone.utc).isoformat(),
+                    })
                 # For orphaned running jobs, transition to FAILED then retry.
                 elif job.status == JobStatus.RUNNING:
                     await asyncio.to_thread(
@@ -240,6 +258,12 @@ class TaskWorker:
                         job_id=job.id,
                         status=JobStatus.FAILED.value,
                     )
+                    self._log_event("recovery", job.id, {
+                        "old_status": "running",
+                        "new_status": JobStatus.FAILED.value,
+                        "reason": "lease_expired",
+                        "recovered_at": datetime.now(timezone.utc).isoformat(),
+                    })
                 recovered.append(job.id)
             except Exception as exc:
                 _json_log(
@@ -247,6 +271,13 @@ class TaskWorker:
                     f"Failed to recover orphan job: {exc}",
                     job_id=job.id,
                 )
+
+        if recovered:
+            self._log_event("worker_recovery_summary", "", {
+                "recovered_count": len(recovered),
+                "recovered_job_ids": recovered,
+            })
+
         return recovered
 
     # ------------------------------------------------------------------

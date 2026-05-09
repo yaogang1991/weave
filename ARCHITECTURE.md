@@ -21,6 +21,13 @@
               │
               ▼
     ┌─────────────────────┐
+    │  CLI Control Plane  │  ← M1 新增：submit / status / list / cancel / recover
+    │  (control_plane/)   │     基于文件系统的任务队列 + Worker 消费者
+    └──────────┬──────────┘
+               │
+               │
+               ▼
+    ┌─────────────────────┐
     │  Intelligent        │  ← LLM 驱动的编排 Agent
     │  Orchestrator       │     分析需求 → 分解任务 → 生成 DAG
     └──────────┬──────────┘
@@ -50,6 +57,12 @@
     │Worker││Worker││Worker│  ← 独立上下文、独立工具
     │Agent ││Agent ││Agent │     通过 HandoffArtifact 交接
     └──────┘└──────┘└──────┘
+               │
+               ▼
+    ┌─────────────────────┐
+    │  Monitoring Layer   │  ← M1 新增：指标聚合 + 告警
+    │  (monitoring/)      │     成功率、延迟、Token 用量、失败率告警
+    └─────────────────────┘
 ```
 
 ---
@@ -196,27 +209,37 @@ python main.py run "设计登录页面" --project ./my-project
 
 ```
 harness/
+├── control_plane/          <- New: M1 Control Plane
+│   ├── models.py           # Job/Run data models
+│   ├── repository.py       # Persistence storage
+│   ├── service.py          # Execution service
+│   └── worker.py           # Worker queue consumer
+├── monitoring/             <- New: M1 Monitoring
+│   ├── metrics.py          # Metrics aggregation
+│   └── alerts.py           # Alerting system
 ├── core/
-│   ├── models.py                    # 所有数据模型（DAG/AgentCapability/Event/Session/Guardrail...）
-│   ├── config.py                    # 配置管理
-│   ├── llm_client.py                # 统一 LLM 客户端
-│   ├── agent_registry.py            # Agent 能力注册表
-│   └── dag_engine.py               # DAG 执行引擎
+│   ├── models.py                    # All data models (DAG/AgentCapability/Event/Session/Guardrail...)
+│   ├── config.py                    # Configuration management
+│   ├── llm_client.py                # Unified LLM client
+│   ├── agent_registry.py            # Agent capability registry
+│   └── dag_engine.py               # DAG execution engine
 ├── orchestrator/
-│   └── intelligent_orchestrator.py  # 智能编排 Agent
+│   └── intelligent_orchestrator.py  # Intelligent orchestration Agent
 ├── agent/
-│   ├── worker.py                    # Agent Worker（LLM 调用循环）
-│   └── agent_pool.py               # Agent 实例池
+│   ├── worker.py                    # Agent Worker (LLM call loop)
+│   └── agent_pool.py               # Agent instance pool
 ├── session/
-│   └── store.py                     # 事件存储
+│   └── store.py                     # Event storage
 ├── tools/
-│   └── registry.py                  # 工具注册
+│   └── registry.py                  # Tool registry
 ├── projects/
 │   └── example/
-│       └── agents.yaml              # 示例：项目自定义 Agent
-├── main.py                          # CLI 入口
+│       └── agents.yaml              # Example: project custom Agent
+├── docs/
+│   └── m1_personal_spec.md          # M1 specification document
+├── main.py                          # CLI entry point
 ├── README.md
-└── ARCHITECTURE.md                  # 本文档
+└── ARCHITECTURE.md                  # This document
 ```
 
 ---
