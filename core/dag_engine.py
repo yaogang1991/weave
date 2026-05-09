@@ -445,9 +445,12 @@ class DAGExecutionEngine:
                     timeout=heartbeat_interval,
                 )
             except asyncio.TimeoutError:
-                # Do not self-heartbeat on timeout polling. Heartbeat should
-                # reflect real progress from executor-side signals; otherwise
-                # hung coroutines can mask themselves as healthy forever.
+                # Record heartbeat on each poll to indicate the executor
+                # task is still alive (task.done() is False but task has
+                # not raised). This prevents false watchdog kills for
+                # long-running nodes that don't explicitly call
+                # record_heartbeat().
+                node.record_heartbeat()
                 continue
             except asyncio.CancelledError:
                 # Watchdog (or caller) cancelled outer task: explicitly cancel

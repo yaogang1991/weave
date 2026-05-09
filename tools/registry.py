@@ -45,11 +45,18 @@ class ToolRegistry:
         self._register_builtin_tools()
 
     def _resolve_path(self, file_path: str) -> Path:
-        """Resolve path relative to configured base working directory."""
+        """Resolve path relative to configured base working directory.
+
+        When base_cwd is set, enforces containment: resolved path must
+        stay under base_cwd to prevent escape from the backend workspace.
+        """
         path = Path(file_path)
-        if path.is_absolute() or self.base_cwd is None:
-            return path
-        return (self.base_cwd / path).resolve()
+        if self.base_cwd is None:
+            return path if path.is_absolute() else path.resolve()
+        resolved = (self.base_cwd / path).resolve()
+        if not (resolved == self.base_cwd or self.base_cwd in resolved.parents):
+            raise ValueError(f"Path escapes workspace: {file_path}")
+        return resolved
 
     def _register_builtin_tools(self):
         self.register("read", self._tool_read, {

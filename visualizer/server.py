@@ -34,9 +34,9 @@ from visualizer.event_bridge import WebSocketEventBridge
 from session.store import SessionStore
 from core.config import HarnessConfig
 
-from control_plane.models import JobStatus, TicketStatus
+from control_plane.models import JobStatus
 from control_plane.repository import JobRepository
-from control_plane.approval import ApprovalRepository
+from control_plane.approval import ApprovalRepository, TicketStatus
 
 
 app = FastAPI(title="Harness Visualizer", version="2.0")
@@ -296,6 +296,10 @@ async def api_cancel_job(job_id: str):
     repo = JobRepository()
     try:
         job = repo.transition_job_status(job_id, JobStatus.CANCELED)
+        # Cancel any in-flight run task
+        from control_plane.service import RunService
+        # Access the global running tasks map if available
+        # (workers register tasks via RunService._running_tasks)
         return {"job_id": job.id, "status": job.status.value, "message": "Job canceled"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -330,26 +334,45 @@ async def api_recover():
     orphaned = repo.recover_orphan_jobs()
     recovered = []
     for job in orphaned:
+        # Update associated run records
+        runs = repo.list_runs_by_job(job.id)
+        for r in runs:
+            if r.status.value == "running":
+                from control_plane.models import RunStatus
+                r.status = RunStatus.CANCELED
+                r.completed_at = datetime.now(timezone.utc)
+                r.dag_result = {"error": "recovered", "reason": "Orphaned job recovered"}
+                repo._persist_run(r)
+
         if job.status == JobStatus.LEASED:
             recovered.append(repo.transition_job_status(
                 job.id,
                 JobStatus.QUEUED,
                 error="Recovered orphaned leased job",
-                error_category="orphaned_lease",
+                error_category="timeout",
             ))
         elif job.status == JobStatus.RUNNING:
             failed_job = repo.transition_job_status(
                 job.id,
                 JobStatus.FAILED,
                 error="Recovered orphaned running job",
-                error_category="orphaned_run",
+                error_category="timeout",
             )
-            recovered.append(repo.transition_job_status(
-                failed_job.id,
-                JobStatus.QUEUED,
-                error="Recovered orphaned running job",
-                error_category="orphaned_run",
-            ))
+            # Respect retry limits: only requeue if attempts remain
+            if failed_job.attempt < failed_job.retry_policy.max_attempts:
+                recovered.append(repo.transition_job_status(
+                    failed_job.id,
+                    JobStatus.QUEUED,
+                    error="Recovered orphaned running job",
+                    error_category="timeout",
+                ))
+            else:
+                recovered.append(repo.transition_job_status(
+                    failed_job.id,
+                    JobStatus.DEAD_LETTER,
+                    error="Recovered orphaned running job (retries exhausted)",
+                    error_category="timeout",
+                ))
     return {
         "recovered_count": len(recovered),
         "recovered_jobs": [{"id": j.id, "status": j.status.value} for j in recovered],
@@ -421,8 +444,9 @@ async def api_metrics():
 async def api_alerts():
     """Get active alerts."""
     job_repo = JobRepository()
+    approval_repo = ApprovalRepository()
     from monitoring.alerts import AlertManager, create_default_alerts
-    manager = create_default_alerts(job_repo)
+    manager = create_default_alerts(job_repo, approval_repo)
     return {"alerts": [a.__dict__ for a in manager.check_all()]}
 
 

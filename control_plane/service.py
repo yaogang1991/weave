@@ -58,6 +58,8 @@ def _classify_error(error: str) -> str:
         return "eval_failed"
     if "guardrail" in lowered or "blocked" in lowered or "permission" in lowered:
         return "tool_blocked"
+    if "watchdog" in lowered or "killed by watchdog" in lowered:
+        return "watchdog"
     return "unknown"
 
 
@@ -285,7 +287,10 @@ class RunService:
                     job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
                 )
                 if work_dir is not None:
-                    backend_manager.preserve(job.id, run.id, reason=error_cat or "failed")
+                    try:
+                        backend_manager.preserve(job.id, run.id, reason=error_cat or "failed")
+                    except Exception:
+                        pass  # Backend cleanup failure must not mask original error
                 job = self.repository.get_job(job_id)
                 assert job is not None
                 # Apply retry policy: FAILED -> QUEUED (retry) or DEAD_LETTER
@@ -297,7 +302,10 @@ class RunService:
                     job_id, job_status, error=error_msg, error_category=error_cat,
                 )
                 if work_dir is not None:
-                    backend_manager.cleanup(job.id, run.id)
+                    try:
+                        backend_manager.cleanup(job.id, run.id)
+                    except Exception:
+                        pass  # Backend cleanup failure must not mask original error
 
         except asyncio.TimeoutError:
             # --- Timeout handling ---
@@ -326,7 +334,10 @@ class RunService:
                 job, error="Job execution timed out", error_category="timeout",
             )
             if work_dir is not None:
-                backend_manager.preserve(job.id, run.id, reason="timeout")
+                try:
+                    backend_manager.preserve(job.id, run.id, reason="timeout")
+                except Exception:
+                    pass
 
         except asyncio.CancelledError:
             run.status = RunStatus.CANCELED
@@ -338,6 +349,11 @@ class RunService:
                 self.repository.transition_job_status(
                     job_id, JobStatus.CANCELED, error="Run canceled", error_category="tool_blocked",
                 )
+            if work_dir is not None:
+                try:
+                    backend_manager.preserve(job.id, run.id, reason="canceled")
+                except Exception:
+                    pass
             return self.repository.get_run(run.id) or run
 
         except Exception as exc:
@@ -368,7 +384,10 @@ class RunService:
                 job, error=error_msg, error_category=error_cat,
             )
             if work_dir is not None:
-                backend_manager.preserve(job.id, run.id, reason=error_cat)
+                try:
+                    backend_manager.preserve(job.id, run.id, reason=error_cat)
+                except Exception:
+                    pass
 
         finally:
             self._running_tasks.pop(job_id, None)
