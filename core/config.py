@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 def _load_claude_settings() -> dict[str, str]:
@@ -28,6 +28,22 @@ def _load_claude_settings() -> dict[str, str]:
 
 # Cache so we don't re-read the file for every field default.
 _CLAUDE_ENV = _load_claude_settings()
+
+
+def infer_provider(model: str, default: str = "anthropic") -> str:
+    """Infer LLM provider from model name.
+
+    Handles known prefixes: gpt*, chatgpt*, o-series (o1, o3, o4, etc.),
+    and claude*.
+    """
+    if model.startswith("gpt") or model.startswith("chatgpt"):
+        return "openai"
+    # o-series models: o1, o3, o4, etc. (starts with 'o' followed by digit)
+    if len(model) > 1 and model[0] == "o" and model[1].isdigit():
+        return "openai"
+    if model.startswith("claude"):
+        return "anthropic"
+    return default
 
 
 class LLMConfig(BaseModel):
@@ -98,9 +114,8 @@ class ModelRoutingConfig(BaseModel):
         ]:
             model = os.getenv(env_var, "")
             if model:
-                provider = "openai" if model.startswith("gpt") else "anthropic"
                 routing[agent_type] = ModelRoute(
-                    provider=provider, model=model
+                    provider=infer_provider(model), model=model
                 )
 
         fallback_str = os.getenv(
@@ -120,8 +135,7 @@ class ModelRoutingConfig(BaseModel):
             if isinstance(val, dict):
                 routing[key] = ModelRoute(**val)
             elif isinstance(val, str):
-                provider = "openai" if val.startswith("gpt") else "anthropic"
-                routing[key] = ModelRoute(provider=provider, model=val)
+                routing[key] = ModelRoute(provider=infer_provider(val), model=val)
         return cls(
             routing=routing,
             fallback_chain=data.get("fallback_chain", ["claude-sonnet-4-6"]),
@@ -174,6 +188,8 @@ class ImpactConfig(BaseModel):
 
 
 class HarnessConfig(BaseModel):
+    model_config = ConfigDict(validate_default=True)
+
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
@@ -256,6 +272,7 @@ class HarnessConfig(BaseModel):
             non_interactive=os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
             in ("true", "1", "yes"),
             approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
+            cleanup_policy=os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
             model_routing=ModelRoutingConfig.from_env(),
             memory=MemoryConfig(
                 enabled=os.getenv("HARNESS_MEMORY_ENABLED", "true").lower()
