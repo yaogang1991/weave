@@ -28,6 +28,7 @@ from core.models import (
 from core.agent_registry import AgentRegistry
 from core.config import LLMConfig
 from core.llm_client import LLMClient
+from core.llm_router import LLMRouter
 from session.store import SessionStore
 
 
@@ -206,11 +207,15 @@ Return a JSON object with this exact structure:
         llm_config: LLMConfig,
         session_store: SessionStore,
         agent_registry: AgentRegistry,
+        llm_router: LLMRouter | None = None,
     ):
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
-        self.llm = LLMClient(llm_config)
+        if llm_router:
+            self.llm = llm_router.get_client("orchestrator")
+        else:
+            self.llm = LLMClient(llm_config)
 
     async def plan(self, requirement: str, project_context: dict | None = None) -> DAG:
         """

@@ -306,7 +306,14 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     """Create a RunService with LLM config from environment."""
     harness_config = HarnessConfig.from_env()
     approval_repo = ApprovalRepository()
-    return RunService(
+
+    # M3.1: Create LLM router if model routing is configured
+    llm_router = None
+    if harness_config.model_routing.routing:
+        from core.llm_router import LLMRouter
+        llm_router = LLMRouter(harness_config.model_routing, harness_config.llm)
+
+    service = RunService(
         repository=repository,
         llm_config=harness_config.llm,
         default_backend=harness_config.default_backend,
@@ -315,6 +322,9 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
         non_interactive=non_interactive,
         approval_timeout_sec=harness_config.approval_timeout_sec,
     )
+    if llm_router:
+        service.llm_router = llm_router
+    return service
 
 
 async def cmd_submit(args):
@@ -722,7 +732,14 @@ Examples:
     # Ensure API key (skip for commands that don't need LLM)
     _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject"}
     if args.command not in _NO_API_KEY_COMMANDS:
-        if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN") and not os.getenv("OPENAI_API_KEY"):
+        from core.config import _CLAUDE_ENV
+        has_key = (
+            os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("ANTHROPIC_AUTH_TOKEN")
+            or os.getenv("OPENAI_API_KEY")
+            or _CLAUDE_ENV.get("ANTHROPIC_AUTH_TOKEN")
+        )
+        if not has_key:
             sys.stderr.write(json.dumps({
                 "error": "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or OPENAI_API_KEY must be set",
                 "code": "E_NO_API_KEY",

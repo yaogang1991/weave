@@ -17,6 +17,7 @@ from core.models import AgentMessage
 from core.models import DAGNode, HandoffArtifact, AgentCapability
 from core.config import LLMConfig
 from core.agent_registry import AgentRegistry
+from core.llm_router import LLMRouter
 from session.store import SessionStore
 from agent.worker import AgentWorker
 from tools.registry import ToolRegistry
@@ -239,6 +240,7 @@ class AgentPool:
         max_iterations: int = 50,
         timeout: int = 120,
         max_context_tokens: int = 100_000,
+        llm_router: LLMRouter | None = None,
     ):
         self.llm_config = llm_config
         self.session_store = session_store
@@ -248,6 +250,7 @@ class AgentPool:
         self.max_iterations = max_iterations
         self.timeout = timeout
         self.max_context_tokens = max_context_tokens
+        self.llm_router = llm_router
         self._instances: dict[str, WorkerAgent] = {}
 
     def get_or_create(self, agent_type: str) -> WorkerAgent:
@@ -257,9 +260,15 @@ class AgentPool:
             if not capability:
                 raise ValueError(f"Unknown agent type: {agent_type}")
 
+            # Use router for per-agent-type model selection if available
+            if self.llm_router:
+                llm_config = self.llm_router.get_client(agent_type).config
+            else:
+                llm_config = self.llm_config
+
             self._instances[agent_type] = WorkerAgent(
                 capability=capability,
-                llm_config=self.llm_config,
+                llm_config=llm_config,
                 session_store=self.session_store,
                 tool_registry=self.tool_registry,
                 guardrails=self.guardrails,
