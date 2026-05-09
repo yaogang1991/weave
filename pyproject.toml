@@ -22,7 +22,6 @@ harness = "main:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-asyncio_mode = "auto"
 markers = [
     "asyncio: mark async tests",
 ]
