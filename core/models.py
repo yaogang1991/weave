@@ -315,6 +315,23 @@ class GuardrailPolicy(BaseModel):
     require_human_on_error: bool = True
 
 
+class PersonalGuardrailPolicy(GuardrailPolicy):
+    """个人模式专用护栏策略。
+
+    LOW/MEDIUM: 自动通过
+    HIGH: 需要确认（或命中白名单自动通过）
+    CRITICAL: 始终需要确认
+    """
+    # 白名单：命令前缀或正则列表
+    whitelist_patterns: list[str] = Field(default_factory=list)
+    # 自动确认的白名单命令
+    whitelist_commands: list[str] = Field(default_factory=list)
+    # HIGH 风险是否自动通过（个人模式下不推荐，但可配置）
+    auto_approve_high: bool = False
+    # 交互式确认超时（秒），超时则拒绝
+    confirmation_timeout_sec: int = 300
+
+
 class EvaluationResult(BaseModel):
     """Result of an evaluation pass."""
     passed: bool

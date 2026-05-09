@@ -9,6 +9,7 @@ from core.models import (
     RiskLevel,
     PermissionMode,
     GuardrailPolicy,
+    PersonalGuardrailPolicy,
     ToolResult,
 )
 from tools.registry import ToolRegistry
@@ -120,3 +121,125 @@ Arguments:
 
 Allow this action? (y/n/skip)
 """
+
+
+class PersonalGuardrails(Guardrails):
+    """
+    个人模式护栏系统。
+
+    策略：
+    - LOW: 自动通过
+    - MEDIUM: 自动通过（文件编辑等可逆操作）
+    - HIGH:
+      - 命中白名单 → 自动通过
+      - 未命中 → 进入确认流程（需要人类确认）
+    - CRITICAL: 始终需要确认（不可逆操作）
+
+    拒绝时返回 ToolResult.error，供 orchestrator 决策。
+    """
+
+    def __init__(self, policy: PersonalGuardrailPolicy, tool_registry: ToolRegistry):
+        super().__init__(policy, tool_registry)
+        self.personal_policy = policy
+
+    def evaluate(self, tool_name: str, arguments: dict) -> tuple[bool, str]:
+        """个人模式评估逻辑。"""
+        risk = self.RISK_MAP.get(tool_name, RiskLevel.HIGH)
+
+        # 检查白名单（命令级别）
+        if tool_name == "bash" and "command" in arguments:
+            cmd = arguments["command"]
+            if self._is_whitelisted(cmd):
+                return True, "Auto-approved: command in whitelist"
+
+        # 检查工具级白名单
+        if tool_name in self.personal_policy.whitelist_commands:
+            return True, "Auto-approved: tool in whitelist"
+
+        # 按风险级别处理
+        if risk == RiskLevel.LOW:
+            return True, "Auto-approved: low risk"
+
+        if risk == RiskLevel.MEDIUM:
+            return True, "Auto-approved: medium risk (reversible)"
+
+        if risk == RiskLevel.HIGH:
+            if self.personal_policy.auto_approve_high:
+                return True, "Auto-approved: high risk (auto_approve_high enabled)"
+            return False, f"HIGH risk action '{tool_name}' requires confirmation (personal mode)"
+
+        if risk == RiskLevel.CRITICAL:
+            return False, f"CRITICAL action '{tool_name}' requires explicit confirmation"
+
+        return False, f"Unknown risk level for '{tool_name}'"
+
+    def _is_whitelisted(self, command: str) -> bool:
+        """检查命令是否命中白名单。
+
+        白名单支持：
+        - 前缀匹配: "git status", "pytest"
+        - 正则匹配: "^git\\s+(status|log|diff)$"
+        """
+        for pattern in self.personal_policy.whitelist_patterns:
+            try:
+                import re
+                if re.match(pattern, command):
+                    return True
+            except re.error:
+                # 不是正则，当作前缀匹配
+                if command.startswith(pattern):
+                    return True
+
+        # 检查 whitelist_commands
+        for cmd in self.personal_policy.whitelist_commands:
+            if command.startswith(cmd):
+                return True
+
+        return False
+
+    def request_confirmation(self, tool_name: str, arguments: dict) -> bool:
+        """
+        请求人类确认。
+
+        在 CLI 环境中打印确认请求，等待用户输入。
+        返回 True（确认）或 False（拒绝）。
+        """
+        print(self.format_approval_request(tool_name, arguments))
+        print("Allow this action? (y/n): ", end="", flush=True)
+
+        import select
+        import sys
+
+        timeout = self.personal_policy.confirmation_timeout_sec
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+
+        if ready:
+            response = sys.stdin.readline().strip().lower()
+            return response in ("y", "yes", "ok", "")
+
+        print(f"\nTimeout ({timeout}s). Action denied.")
+        return False
+
+    def guarded_execute_with_confirmation(self, tool_name: str, arguments: dict) -> ToolResult:
+        """
+        带确认流程的执行。
+
+        1. 先 evaluate
+        2. 如需要确认，调用 request_confirmation
+        3. 确认通过则执行，拒绝则返回 ToolResult.error
+        """
+        allowed, reason = self.evaluate(tool_name, arguments)
+
+        if allowed:
+            return self.tool_registry.execute(tool_name, arguments)
+
+        # 需要确认
+        if self.request_confirmation(tool_name, arguments):
+            return self.tool_registry.execute(tool_name, arguments)
+
+        # 被拒绝
+        return ToolResult(
+            tool_call_id="",
+            success=False,
+            error=f"Guardrails: Action '{tool_name}' denied by user. Reason: {reason}",
+        )

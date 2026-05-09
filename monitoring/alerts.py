@@ -1,0 +1,298 @@
+"""
+最小可用告警系统。
+
+支持三类告警规则：
+1. 连续失败 >= N
+2. 任务时长 > 阈值
+3. dead_letter 新增
+
+支持 webhook 通知，webhook 不可用时降级控制台告警。
+告警失败不中断主流程。
+"""
+
+from __future__ import annotations
+
+import json
+import urllib.request
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable
+
+from control_plane.models import JobStatus
+from control_plane.repository import JobRepository
+from monitoring.metrics import MetricsCollector
+
+
+# ---------------------------------------------------------------------------
+# Data structures
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class AlertRule:
+    """告警规则定义。"""
+
+    name: str
+    rule_type: str  # "consecutive_failures", "duration_threshold", "dead_letter"
+    threshold: float  # 阈值
+    enabled: bool = True
+    webhook_url: str = ""  # 可选的 webhook URL（覆盖全局）
+
+
+@dataclass
+class AlertEvent:
+    """告警事件。"""
+
+    rule_name: str
+    severity: str  # "warning", "critical"
+    message: str
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    details: dict[str, Any] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Alert manager
+# ---------------------------------------------------------------------------
+
+
+class AlertManager:
+    """告警管理器。
+
+    特性：
+    - 支持多规则配置
+    - webhook 失败降级控制台
+    - 告警不阻塞主流程
+    - 内置去重（同一规则短时间内不重复告警）
+    """
+
+    def __init__(
+        self,
+        repository: JobRepository,
+        webhook_url: str = "",
+        cooldown_sec: int = 300,
+    ) -> None:
+        self.repository = repository
+        self.metrics = MetricsCollector(repository)
+        self.webhook_url = webhook_url
+        self.cooldown_sec = cooldown_sec
+        self.rules: list[AlertRule] = []
+        self._last_alert_time: dict[str, datetime] = {}
+        self._alert_handlers: list[Callable[[AlertEvent], None]] = []
+
+    # ------------------------------------------------------------------
+    # Rule management
+    # ------------------------------------------------------------------
+
+    def add_rule(self, rule: AlertRule) -> None:
+        self.rules.append(rule)
+
+    def on_alert(self, handler: Callable[[AlertEvent], None]) -> None:
+        """注册告警处理器。"""
+        self._alert_handlers.append(handler)
+
+    # ------------------------------------------------------------------
+    # Checking
+    # ------------------------------------------------------------------
+
+    def check_all(self) -> list[AlertEvent]:
+        """检查所有规则，返回触发的告警。"""
+        alerts: list[AlertEvent] = []
+        for rule in self.rules:
+            if not rule.enabled:
+                continue
+            alert = self._check_rule(rule)
+            if alert:
+                alerts.append(alert)
+        return alerts
+
+    def _check_rule(self, rule: AlertRule) -> AlertEvent | None:
+        """检查单个规则。"""
+        if rule.rule_type == "consecutive_failures":
+            return self._check_consecutive_failures(rule)
+        if rule.rule_type == "duration_threshold":
+            return self._check_duration_threshold(rule)
+        if rule.rule_type == "dead_letter":
+            return self._check_dead_letter(rule)
+        return None
+
+    def _check_consecutive_failures(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查连续失败数。"""
+        jobs = self.repository.list_jobs()
+        # 获取最近的 job（按时间排序）
+        recent_jobs = sorted(
+            jobs, key=lambda j: j.created_at, reverse=True
+        )
+
+        consecutive = 0
+        for job in recent_jobs[:20]:  # 只看最近 20 个
+            if job.status in (JobStatus.FAILED, JobStatus.DEAD_LETTER):
+                consecutive += 1
+            elif job.status == JobStatus.SUCCEEDED:
+                break  # 连续中断
+
+        if consecutive >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical"
+                if consecutive >= rule.threshold * 2
+                else "warning",
+                message=f"连续 {consecutive} 个任务失败（阈值: {rule.threshold}）",
+                details={
+                    "consecutive_failures": consecutive,
+                    "threshold": rule.threshold,
+                },
+            )
+        return None
+
+    def _check_duration_threshold(
+        self, rule: AlertRule
+    ) -> AlertEvent | None:
+        """检查任务时长是否超过阈值。"""
+        metrics_data = self.metrics.collect()
+        p95 = metrics_data.get("duration", {}).get("p95_sec", 0)
+
+        if p95 > rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="warning",
+                message=f"任务执行时长 P95 = {p95}s，超过阈值 {rule.threshold}s",
+                details={"p95_sec": p95, "threshold_sec": rule.threshold},
+            )
+        return None
+
+    def _check_dead_letter(self, rule: AlertRule) -> AlertEvent | None:
+        """检查是否有新增的 dead_letter。"""
+        jobs = self.repository.list_jobs(status=JobStatus.DEAD_LETTER)
+        count = len(jobs)
+
+        if count >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical",
+                message=f"死信队列有 {count} 个任务（阈值: {rule.threshold}）",
+                details={"dead_letter_count": count, "threshold": rule.threshold},
+            )
+        return None
+
+    # ------------------------------------------------------------------
+    # Sending
+    # ------------------------------------------------------------------
+
+    def send_alert(self, alert: AlertEvent) -> bool:
+        """发送告警。
+
+        先尝试 webhook，失败则降级控制台。
+        不阻塞主流程（异常被捕获）。
+        """
+        # 检查冷却期
+        last_time = self._last_alert_time.get(alert.rule_name)
+        if last_time:
+            if datetime.now(timezone.utc) - last_time < timedelta(
+                seconds=self.cooldown_sec
+            ):
+                return False  # 冷却中
+
+        success = False
+
+        # 尝试 webhook
+        if self.webhook_url:
+            try:
+                self._send_webhook(alert)
+                success = True
+            except Exception as e:  # noqa: BLE001
+                print(f"[Alert] Webhook failed: {e}, falling back to console")
+
+        # 降级控制台
+        try:
+            self._send_console(alert)
+            success = True
+        except Exception:  # noqa: BLE001
+            pass
+
+        # 调用注册的处理器
+        for handler in self._alert_handlers:
+            try:
+                handler(alert)
+            except Exception:  # noqa: BLE001
+                pass
+
+        if success:
+            self._last_alert_time[alert.rule_name] = datetime.now(
+                timezone.utc
+            )
+
+        return success
+
+    def _send_webhook(self, alert: AlertEvent) -> None:
+        """发送 webhook 通知。"""
+        payload = json.dumps(
+            {
+                "rule": alert.rule_name,
+                "severity": alert.severity,
+                "message": alert.message,
+                "timestamp": alert.timestamp,
+                "details": alert.details,
+            }
+        ).encode("utf-8")
+
+        req = urllib.request.Request(
+            self.webhook_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+
+    def _send_console(self, alert: AlertEvent) -> None:
+        """控制台告警。"""
+        icon = "\U0001f534" if alert.severity == "critical" else "\U0001f7e1"
+        print(
+            f"{icon} [{alert.severity.upper()}] {alert.rule_name}: {alert.message}"
+        )
+        if alert.details:
+            print(f"   Details: {json.dumps(alert.details, indent=2)}")
+
+
+# ---------------------------------------------------------------------------
+# Factory
+# ---------------------------------------------------------------------------
+
+
+def create_default_alerts(
+    repository: JobRepository, webhook_url: str = ""
+) -> AlertManager:
+    """创建默认告警配置。"""
+    manager = AlertManager(repository, webhook_url=webhook_url)
+
+    manager.add_rule(
+        AlertRule(
+            name="consecutive_failures",
+            rule_type="consecutive_failures",
+            threshold=3,
+            enabled=True,
+        )
+    )
+
+    manager.add_rule(
+        AlertRule(
+            name="duration_threshold",
+            rule_type="duration_threshold",
+            threshold=300,  # 5 分钟
+            enabled=True,
+        )
+    )
+
+    manager.add_rule(
+        AlertRule(
+            name="dead_letter",
+            rule_type="dead_letter",
+            threshold=1,
+            enabled=True,
+        )
+    )
+
+    return manager

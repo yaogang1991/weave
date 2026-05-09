@@ -35,7 +35,8 @@ from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from agent.agent_pool import AgentPool
 from session.store import SessionStore
 from tools.registry import ToolRegistry
-from guardrails.policy import Guardrails, GuardrailPolicy, PermissionMode
+from guardrails.policy import Guardrails, GuardrailPolicy, PermissionMode, PersonalGuardrails
+from core.models import PersonalGuardrailPolicy
 from evaluator.engine import EvaluatorEngine
 
 from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
@@ -95,6 +96,7 @@ class RunService:
         artifact_path: str = "./data/artifacts",
         event_store_path: str = "./data/events",
         max_iterations: int = 50,
+        policy: GuardrailPolicy | None = None,
     ) -> None:
         self.repository = repository
         self.llm_config = llm_config
@@ -104,6 +106,7 @@ class RunService:
         self.artifact_path = artifact_path
         self.event_store_path = event_store_path
         self.max_iterations = max_iterations
+        self.policy = policy
 
     # ------------------------------------------------------------------
     # Public API — Job lifecycle
@@ -424,12 +427,20 @@ class RunService:
         tool_registry = ToolRegistry()
 
         # Default guardrails: accept edits, auto-approve reads
-        policy = GuardrailPolicy(
-            mode=PermissionMode.ACCEPT_EDITS,
-            auto_approve_read=True,
-            max_iterations=self.max_iterations,
-        )
-        guardrails = Guardrails(policy, tool_registry)
+        if getattr(self, "policy", None) is not None:
+            policy = self.policy
+        else:
+            policy = GuardrailPolicy(
+                mode=PermissionMode.ACCEPT_EDITS,
+                auto_approve_read=True,
+                max_iterations=self.max_iterations,
+            )
+
+        # 如果 policy 是 PersonalGuardrailPolicy，使用 PersonalGuardrails
+        if isinstance(policy, PersonalGuardrailPolicy):
+            guardrails = PersonalGuardrails(policy, tool_registry)
+        else:
+            guardrails = Guardrails(policy, tool_registry)
 
         pool = AgentPool(
             llm_config=self.llm_config,
