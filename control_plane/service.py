@@ -146,7 +146,8 @@ class RunService:
             3. Plan DAG via IntelligentOrchestrator.
             4. Execute DAG via DAGExecutionEngine (with timeout).
             5. Update Run and Job records with final state.
-            6. Return the Run.
+            6. On failure: apply RetryPolicy (retry via QUEUED or dead-letter).
+            7. Return the Run.
 
         Raises:
             ValueError: If the job does not exist.
@@ -155,7 +156,9 @@ class RunService:
         if job is None:
             raise ValueError(f"Job not found: {job_id}")
 
-        # Transition job to RUNNING
+        # Acquire lease then transition to RUNNING
+        # Required path: QUEUED -> LEASED -> RUNNING
+        self.repository.acquire_lease(job_id, "run_service")
         self.repository.transition_job_status(job_id, JobStatus.RUNNING)
         job = self.repository.get_job(job_id)  # refresh
 
@@ -178,7 +181,13 @@ class RunService:
             )
 
             # --- Summarize ---
-            engine = self._create_execution_engine(session_id, store)
+            orchestrator = self._create_orchestrator(store)
+            engine = self._create_execution_engine(
+                session_id, store,
+                replan_handler=lambda dag, failed_id: orchestrator.replan(
+                    dag, failed_id, job.requirement,
+                ),
+            )
             summary = engine.get_execution_summary(result_dag)
 
             # Determine final status
@@ -212,9 +221,20 @@ class RunService:
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
 
-            self.repository.transition_job_status(
-                job_id, job_status, error=error_msg, error_category=error_cat
-            )
+                # Must transition RUNNING -> FAILED before handle_job_failure
+                self.repository.transition_job_status(
+                    job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
+                )
+                job = self.repository.get_job(job_id)
+                assert job is not None
+                # Apply retry policy: FAILED -> QUEUED (retry) or DEAD_LETTER
+                job = await self.handle_job_failure(
+                    job, error=error_msg, error_category=error_cat,
+                )
+            else:
+                self.repository.transition_job_status(
+                    job_id, job_status, error=error_msg, error_category=error_cat,
+                )
 
         except asyncio.TimeoutError:
             # --- Timeout handling ---
@@ -223,11 +243,16 @@ class RunService:
             run.dag_result = {"error": "timeout", "reason": f"Exceeded {timeout}s"}
             self.repository.update_run(run)
 
+            # Must transition RUNNING -> FAILED before handle_job_failure
+            # (FAILED -> QUEUED/DEAD_LETTER is legal)
             self.repository.transition_job_status(
-                job_id,
-                JobStatus.FAILED,
-                error="timeout",
-                error_category="timeout",
+                job_id, JobStatus.FAILED,
+                error="Job execution timed out", error_category="timeout",
+            )
+            job = self.repository.get_job(job_id)
+            assert job is not None
+            job = await self.handle_job_failure(
+                job, error="Job execution timed out", error_category="timeout",
             )
 
         except Exception as exc:
@@ -240,11 +265,14 @@ class RunService:
             run.dag_result = {"error": "execution_error", "reason": str(exc)}
             self.repository.update_run(run)
 
+            # Must transition RUNNING -> FAILED before handle_job_failure
             self.repository.transition_job_status(
-                job_id,
-                JobStatus.FAILED,
-                error=error_msg,
-                error_category=error_cat,
+                job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
+            )
+            job = self.repository.get_job(job_id)
+            assert job is not None
+            job = await self.handle_job_failure(
+                job, error=error_msg, error_category=error_cat,
             )
 
         return self.repository.get_run(run.id) or run
@@ -365,8 +393,13 @@ class RunService:
             project_context=project_context,
         )
 
-        # 2. Create execution engine and execute
-        engine = self._create_execution_engine(session_id, store)
+        # 2. Create execution engine (with replan handler) and execute
+        engine = self._create_execution_engine(
+            session_id, store,
+            replan_handler=lambda dag_ref, failed_id: orchestrator.replan(
+                dag_ref, failed_id, job.requirement,
+            ),
+        )
         result_dag = await engine.execute(dag)
 
         return result_dag
@@ -384,8 +417,9 @@ class RunService:
         self,
         session_id: str,
         store: SessionStore,
+        replan_handler: Any | None = None,
     ) -> DAGExecutionEngine:
-        """Build a DAGExecutionEngine with agent pool and failure handler."""
+        """Build a DAGExecutionEngine with agent pool, failure handler, and optional replan handler."""
         registry = AgentRegistry()
         tool_registry = ToolRegistry()
 
@@ -417,6 +451,7 @@ class RunService:
         return DAGExecutionEngine(
             agent_executor=pool.get_executor(session_id),
             failure_handler=orchestrator.adapt_to_failure,
+            replan_handler=replan_handler,
             max_parallel=self.max_parallel,
             evaluator=evaluator,
             artifact_path=self.artifact_path,

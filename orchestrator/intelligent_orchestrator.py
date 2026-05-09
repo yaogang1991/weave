@@ -138,6 +138,69 @@ Choose "retry" if:
 - The agent can succeed with another attempt
 """
 
+    REPLAN_PROMPT_TEMPLATE = """You are the Orchestrator Agent for a multi-agent software development harness.
+
+A previous execution plan has partially failed. You need to create a new plan for the REMAINING work, taking into account what has already been successfully completed.
+
+## Already Executed Nodes
+
+{executed_nodes}
+
+## Failed Node
+
+- ID: {failed_node}
+- Error: {failed_error}
+
+## Available Agents
+
+{agent_descriptions}
+
+## Replanning Rules
+
+1. **Preserve completed work**: Do NOT re-plan nodes that already succeeded. Only plan for failed, skipped, or pending nodes.
+2. **Address the root cause**: The new plan should specifically address why the failed node errored (e.g., different agent type, simpler task decomposition, alternative approach).
+3. **Reuse successful outputs**: Dependent nodes can reference artifacts from already-completed successful nodes.
+4. **Valid agent types ONLY**: Use ONLY the agent types listed above.
+5. **Keep it minimal**: Only include nodes that still need to be executed.
+
+## Output Format
+
+Return a JSON object with this exact structure:
+
+{{
+  "reasoning": "Explanation of why the original plan failed and how the new plan addresses it...",
+  "nodes": [
+    {{
+      "id": "plan_fix",
+      "agent_type": "planner",
+      "task": "Re-analyze the failure and produce a corrected implementation plan..."
+    }},
+    {{
+      "id": "impl_fix",
+      "agent_type": "generator",
+      "task": "Implement the corrected plan...",
+      "success_criteria": ["tests pass", "lint clean"]
+    }},
+    {{
+      "id": "eval_fix",
+      "agent_type": "evaluator",
+      "task": "Verify the corrected implementation...",
+      "success_criteria": ["tests pass", "coverage 80%"]
+    }}
+  ],
+  "edges": [
+    {{"from": "plan_fix", "to": "impl_fix"}},
+    {{"from": "impl_fix", "to": "eval_fix"}}
+  ]
+}}
+
+## Important
+- Node IDs must be unique and not conflict with already-executed nodes
+- Every edge references valid node IDs
+- The DAG must be acyclic
+- Include ALL nodes that still need execution (failed node + any pending downstream nodes)
+"""
+
     def __init__(
         self,
         llm_config: LLMConfig,
@@ -300,3 +363,76 @@ Choose "retry" if:
                         continue
 
         raise json.JSONDecodeError("No valid JSON object found in LLM response", text, 0)
+
+    async def replan(self, dag: DAG, failed_node_id: str, requirement: str = "") -> DAG:
+        """
+        Re-plan the remaining work after a node failure.
+
+        This method:
+        1. Collects a summary of already-executed nodes (both successful and failed)
+        2. Builds a replanning prompt with execution context
+        3. Calls the LLM to generate a new plan for the remaining work
+        4. Validates and converts the plan to a DAG
+        5. Returns the new DAG (to be merged with the old one by the engine)
+
+        Args:
+            dag: The current DAG with execution status populated.
+            failed_node_id: The ID of the node that triggered the replan.
+            requirement: The original user requirement for context.
+
+        Returns:
+            A new DAG containing only the nodes that still need execution.
+        """
+        # 1. Collect executed node summaries
+        executed_summary: list[dict[str, Any]] = []
+        for nid, node in dag.nodes.items():
+            if node.status.value in ("success", "failed"):
+                executed_summary.append({
+                    "id": nid,
+                    "agent_type": node.agent_type,
+                    "status": node.status.value,
+                    "task": node.task_description[:100],
+                    "result_summary": (
+                        node.result.get("summary", "")[:200]
+                        if node.result else ""
+                    ),
+                })
+
+        # 2. Build replan prompt
+        failed_error = dag.nodes[failed_node_id].error[:500] if failed_node_id in dag.nodes else ""
+        system_prompt = self.REPLAN_PROMPT_TEMPLATE.format(
+            executed_nodes=json.dumps(executed_summary, indent=2),
+            failed_node=failed_node_id,
+            failed_error=failed_error,
+            agent_descriptions=self.agent_registry.to_prompt_description(),
+        )
+
+        user_prompt = (
+            f"Original requirement: {requirement}\n\n"
+            f"Failed node: {failed_node_id}\n\n"
+            f"Please generate a new plan for the remaining work."
+        )
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        # 3. Call LLM
+        response = self.llm.call(messages, tools=[])
+
+        # 4. Parse and validate
+        plan_data = self._extract_json(response.get("content", ""))
+        plan = OrchestratorPlan(**plan_data)
+
+        for node_def in plan.nodes:
+            agent_type = node_def.get("agent_type", "")
+            if not self.agent_registry.has_agent(agent_type):
+                raise ValueError(
+                    f"Replan references unregistered agent: {agent_type}. "
+                    f"Available: {[a.id for a in self.agent_registry.list_agents()]}"
+                )
+
+        # 5. Convert to DAG and return
+        new_dag = self._plan_to_dag(plan)
+        return new_dag

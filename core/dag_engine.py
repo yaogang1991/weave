@@ -4,8 +4,10 @@ DAG Execution Engine: Topological scheduling + parallel execution + failure hand
 Key design decisions:
 1. Topological levels: Nodes at the same level execute in parallel
 2. Failure handling: Delegated to IntelligentOrchestrator (not hardcoded)
-3. Context isolation: Each agent gets independent context
-4. Handoff artifacts: Structured transfer of outputs between agents
+3. Replanning: True closed-loop replan with max_replans protection
+4. Context isolation: Each agent gets independent context
+5. Handoff artifacts: Structured transfer of outputs between agents
+6. Exponential backoff: RetryPolicy with configurable backoff
 """
 
 from __future__ import annotations
@@ -26,30 +28,38 @@ from core.models import (
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
+ReplanHandler = Callable[[DAG, str], Coroutine[Any, Any, DAG]]
 
 
 class DAGExecutionEngine:
     """
     Executes a DAG by:
     1. Computing topological levels
-    2. Running nodes at each level in parallel
+    2. Running nodes at each level in parallel (up to max_parallel)
     3. Waiting for all to complete before next level
-    4. Handling failures via orchestrator callback
+    4. Handling failures via orchestrator callback (retry / skip / abort / replan)
+    5. Supporting true replanning with max_replans limit and DAG result merging
     """
 
     def __init__(
         self,
         agent_executor: Callable[[DAGNode, list[HandoffArtifact]], Coroutine[Any, Any, dict]],
         failure_handler: Callable[[DAG, str, str], Coroutine[Any, Any, FailureDecision]],
+        replan_handler: ReplanHandler | None = None,
+        max_replans: int = 3,
         max_parallel: int = 5,
         evaluator: Any | None = None,
         artifact_path: str = "./data/artifacts",
+        job_timeout: float | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
+        self.replan_handler = replan_handler
+        self.max_replans = max_replans
         self.max_parallel = max_parallel
         self.evaluator = evaluator
         self.artifact_path = artifact_path
+        self.job_timeout = job_timeout
         self.event_handlers: list[EventHandler] = []
 
     def on_event(self, handler: EventHandler) -> None:
@@ -71,9 +81,27 @@ class DAGExecutionEngine:
                 if dag.nodes[nid].status == NodeStatus.PENDING:
                     dag.nodes[nid].status = NodeStatus.SKIPPED
 
+    def _merge_dag_results(self, old_dag: DAG, new_dag: DAG) -> DAG:
+        """
+        Merge two DAGs, preserving successful node results from old_dag.
+
+        For each node that succeeded in old_dag and also exists in new_dag,
+        copy over its status, result, output_artifacts, and timestamps so
+        the re-executed plan does not re-run already-completed work.
+        """
+        merged = new_dag
+        for node_id, node in old_dag.nodes.items():
+            if node.status == NodeStatus.SUCCESS and node_id in merged.nodes:
+                merged.nodes[node_id].status = node.status
+                merged.nodes[node_id].result = node.result
+                merged.nodes[node_id].output_artifacts = node.output_artifacts
+                merged.nodes[node_id].started_at = node.started_at
+                merged.nodes[node_id].completed_at = node.completed_at
+        return merged
+
     async def execute(self, dag: DAG) -> DAG:
         """
-        Execute the full DAG.
+        Execute the full DAG with support for replanning.
 
         Returns the executed DAG with all nodes' status and results populated.
         """
@@ -82,7 +110,11 @@ class DAGExecutionEngine:
         except ValueError as e:
             raise ValueError(f"Invalid DAG: {e}")
 
-        for level_idx, level in enumerate(levels):
+        replan_count = 0
+        level_idx = 0
+
+        while level_idx < len(levels):
+            level = levels[level_idx]
             semaphore = asyncio.Semaphore(self.max_parallel)
 
             async def run_with_limit(
@@ -102,7 +134,7 @@ class DAGExecutionEngine:
             if failed_in_level:
                 for failed_id in failed_in_level:
                     decision = await self.failure_handler(
-                        dag, failed_id, dag.nodes[failed_id].error
+                        dag, failed_id, dag.nodes[failed_id].error,
                     )
 
                     if decision.action == "abort":
@@ -110,8 +142,11 @@ class DAGExecutionEngine:
                         return dag
 
                     elif decision.action == "retry":
+                        # Exponential backoff before retry
+                        backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
+                        if backoff > 0:
+                            await asyncio.sleep(backoff)
                         await self._execute_single_node(dag, failed_id)
-                        # If retry did not resolve the failure, abort to keep state consistent
                         if dag.nodes[failed_id].status == NodeStatus.FAILED:
                             self._skip_remaining(dag, levels, level_idx + 1)
                             return dag
@@ -120,13 +155,53 @@ class DAGExecutionEngine:
                         dag.nodes[failed_id].status = NodeStatus.SKIPPED
 
                     elif decision.action == "replan":
-                        return dag
+                        if replan_count >= self.max_replans:
+                            dag.nodes[failed_id].error = (
+                                f"Max replans ({self.max_replans}) reached"
+                            )
+                            self._skip_remaining(dag, levels, level_idx + 1)
+                            return dag
+
+                        if self.replan_handler is not None:
+                            new_dag = await self.replan_handler(dag, failed_id)
+                            dag = self._merge_dag_results(dag, new_dag)
+                            replan_count += 1
+                            # Recompute topological levels and restart from beginning
+                            # so that newly added nodes are accounted for
+                            levels = dag.topological_levels()
+                            level_idx = 0
+                            break  # Break out of failed_in_level loop
+                        else:
+                            # No replan handler available — treat as abort
+                            self._skip_remaining(dag, levels, level_idx + 1)
+                            return dag
+                else:
+                    # All failed nodes in this level were handled without replan
+                    # Continue to next level
+                    level_idx += 1
+                    continue
+                # If we hit the break (replan), we continue the while loop
+                # without incrementing level_idx (it's reset to 0 above)
+                pass
+            else:
+                level_idx += 1
 
         return dag
+
+    def _compute_backoff(self, retry_count: int) -> float:
+        """Compute exponential backoff delay in seconds."""
+        import math
+        # Base 2 seconds, exponential with jitter cap at 60s
+        delay = min(2 ** retry_count, 60.0)
+        return delay
 
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
         """Execute a single DAG node with retry logic."""
         node = dag.nodes[node_id]
+
+        # Skip if already executed (from merged DAG after replan)
+        if node.status == NodeStatus.SUCCESS:
+            return
 
         if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
             return
@@ -192,7 +267,8 @@ class DAGExecutionEngine:
                     event_type="retrying",
                     details={"attempt": node.retry_count, "error": str(e)},
                 ))
-                await asyncio.sleep(1)
+                backoff = self._compute_backoff(node.retry_count)
+                await asyncio.sleep(backoff)
                 await self._execute_single_node(dag, node_id)
             else:
                 node.status = NodeStatus.FAILED
