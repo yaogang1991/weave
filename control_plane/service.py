@@ -218,7 +218,18 @@ class RunService:
             # Persist run
             self.repository.update_run(run)
 
-            # Transition job to final state
+            # Transition job to final state unless externally canceled/requeued.
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status != JobStatus.RUNNING:
+                run.status = (
+                    RunStatus.CANCELED
+                    if current_job.status == JobStatus.CANCELED
+                    else RunStatus.FAILED
+                )
+                run.completed_at = _utc_now()
+                self.repository.update_run(run)
+                return self.repository.get_run(run.id) or run
+
             error_msg = ""
             error_cat = ""
             if job_status == JobStatus.FAILED:
@@ -252,6 +263,14 @@ class RunService:
 
         except asyncio.TimeoutError:
             # --- Timeout handling ---
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status == JobStatus.CANCELED:
+                run.status = RunStatus.CANCELED
+                run.completed_at = _utc_now()
+                run.dag_result = {"error": "canceled", "reason": "Job canceled during execution"}
+                self.repository.update_run(run)
+                return self.repository.get_run(run.id) or run
+
             run.status = RunStatus.TIMED_OUT
             run.completed_at = _utc_now()
             run.dag_result = {"error": "timeout", "reason": f"Exceeded {timeout}s"}
@@ -269,8 +288,28 @@ class RunService:
                 job, error="Job execution timed out", error_category="timeout",
             )
 
+        except asyncio.CancelledError:
+            run.status = RunStatus.CANCELED
+            run.completed_at = _utc_now()
+            run.dag_result = {"error": "canceled", "reason": "Run coroutine canceled"}
+            self.repository.update_run(run)
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status == JobStatus.RUNNING:
+                self.repository.transition_job_status(
+                    job_id, JobStatus.CANCELED, error="Run canceled", error_category="tool_blocked",
+                )
+            return self.repository.get_run(run.id) or run
+
         except Exception as exc:
             # --- Unexpected error handling ---
+            current_job = self.repository.get_job(job_id)
+            if current_job and current_job.status == JobStatus.CANCELED:
+                run.status = RunStatus.CANCELED
+                run.completed_at = _utc_now()
+                run.dag_result = {"error": "canceled", "reason": "Job canceled during execution"}
+                self.repository.update_run(run)
+                return self.repository.get_run(run.id) or run
+
             error_msg = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
             error_cat = _classify_error(str(exc))
 
@@ -451,6 +490,10 @@ class RunService:
                 error=error_msg,
                 error_category="tool_blocked",
             )
+            # Clear lease metadata so workers can immediately acquire this queued job.
+            job.lease_owner = None
+            job.lease_expires_at = None
+            job = self.repository.update_job(job)
         elif job.status == JobStatus.QUEUED:
             job = self.repository.transition_job_status(
                 job.id,
