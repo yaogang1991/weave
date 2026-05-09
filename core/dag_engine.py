@@ -436,7 +436,12 @@ class DAGExecutionEngine:
 
         while not task.done():
             try:
-                return await asyncio.wait_for(task, timeout=heartbeat_interval)
+                # Shield the executor task so heartbeat polling timeouts do not
+                # cancel a healthy long-running node execution.
+                return await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=heartbeat_interval,
+                )
             except asyncio.TimeoutError:
                 node.record_heartbeat()
 

@@ -304,7 +304,12 @@ def _make_repository() -> JobRepository:
 def _make_run_service(repository: JobRepository) -> RunService:
     """Create a RunService with LLM config from environment."""
     harness_config = HarnessConfig.from_env()
-    return RunService(repository=repository, llm_config=harness_config.llm)
+    return RunService(
+        repository=repository,
+        llm_config=harness_config.llm,
+        default_backend=harness_config.default_backend,
+        backend_base_path=harness_config.backend_base_path,
+    )
 
 
 async def cmd_submit(args):

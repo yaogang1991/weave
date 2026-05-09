@@ -314,7 +314,29 @@ async def api_retry_job(job_id: str):
 async def api_recover():
     """Recover orphaned jobs."""
     repo = JobRepository()
-    recovered = repo.recover_orphan_jobs()
+    orphaned = repo.recover_orphan_jobs()
+    recovered = []
+    for job in orphaned:
+        if job.status == JobStatus.LEASED:
+            recovered.append(repo.transition_job_status(
+                job.id,
+                JobStatus.QUEUED,
+                error="Recovered orphaned leased job",
+                error_category="orphaned_lease",
+            ))
+        elif job.status == JobStatus.RUNNING:
+            failed_job = repo.transition_job_status(
+                job.id,
+                JobStatus.FAILED,
+                error="Recovered orphaned running job",
+                error_category="orphaned_run",
+            )
+            recovered.append(repo.transition_job_status(
+                failed_job.id,
+                JobStatus.QUEUED,
+                error="Recovered orphaned running job",
+                error_category="orphaned_run",
+            ))
     return {
         "recovered_count": len(recovered),
         "recovered_jobs": [{"id": j.id, "status": j.status.value} for j in recovered],
