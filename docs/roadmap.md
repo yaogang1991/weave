@@ -3,7 +3,7 @@
 ---
 
 **最后更新:** 2026-05-10
-**当前版本:** M2
+**当前版本:** M3.2
 
 ---
 
@@ -14,6 +14,9 @@
 | **M1** | 单用户无人值守任务执行系统 | ✅ 已完成 | 2026-05-09 |
 | **M1.1** | 稳定化 — 审批票据化 + 统一 Guardrail 入口 | ✅ 已完成 | 2026-05-09 |
 | **M2** | 单用户高可靠自治 — 健康检查 + 隔离后端 + Web 控制台 | ✅ 已完成 | 2026-05-10 |
+| **M3.0** | 知识系统 — SPECs, ADRs, 知识索引 | ✅ 已完成 | 2026-05-10 |
+| **M3.1** | 多模型路由 — 按 Agent 类型分配模型 | ✅ 已完成 | 2026-05-10 |
+| **M3.2** | Agent 记忆 — 持久化跨任务/跨会话记忆系统 | ✅ 已完成 | 2026-05-10 |
 
 ---
 
@@ -131,6 +134,66 @@
 
 ---
 
+## M3.2 — Agent Memory
+
+**目标:** 持久化跨任务、跨会话的 Agent 记忆系统，让 Agent 具备学习和记忆能力。
+
+### 记忆架构
+
+```
+MemoryScope: PRIVATE (per-agent) → SESSION (session shared) → GLOBAL (cross-session)
+MemoryType:  FACT | EXPERIENCE | PREFERENCE | CONTEXT
+```
+
+### 核心模块
+
+- ✅ `core/models.py` — MemoryEntry, MemoryScope, MemoryType 模型 + EventType 扩展
+- ✅ `core/config.py` — MemoryConfig 配置（TTL、容量、检索限制）
+- ✅ `memory/store.py` — 原子写入持久化存储（文件级别隔离）
+  - 目录布局: global/agents/{type}/sessions/{id}/
+  - CRUD: store/get/update/delete
+  - 查询: list_entries/search/get_relevant
+  - 维护: cleanup_expired/enforce_limits/recompute_relevance
+- ✅ `memory/manager.py` — 高层记忆操作接口
+  - store_learning/store_task_outcome/store_preference
+  - get_context_for_agent/format_memory_prompt
+  - extract_and_store（自动从执行结果提取学习）
+  - run_maintenance/get_stats
+  - 关键词提取 + 相关度评分（recency × frequency × keyword_overlap）
+- ✅ `memory/sharing.py` — 跨 Agent 记忆共享
+  - share_with_downstream（DAG 节点间记忆传递）
+  - promote_to_session/promote_to_global（记忆提升）
+- ✅ `agent/agent_pool.py` — WorkerAgent 记忆注入/提取钩子
+  - execute() 前注入记忆到 system prompt
+  - execute() 后自动提取学习存储
+- ✅ `core/dag_engine.py` — DAG 节点间记忆共享钩子
+  - _collect_input_artifacts() 中触发 MemorySharing
+- ✅ `control_plane/service.py` — MemoryManager 初始化与注入
+- ✅ `main.py` — 5 个 CLI 命令: memory-search/list/stats/add/cleanup
+- ✅ `visualizer/server.py` — 6 个 REST API 端点
+- ✅ `tests/test_memory.py` — 63 个测试，覆盖率 90%
+
+### 记忆注入流程
+
+```
+Agent 执行前: get_context_for_agent() → format_memory_prompt() → 注入 system prompt
+Agent 执行后: extract_and_store() → 自动提取 fact/experience
+DAG 节点间: share_with_downstream() → 上游记忆共享给下游 Agent
+定期维护: cleanup_expired + enforce_limits + recompute_relevance
+```
+
+### 环境变量
+
+- `HARNESS_MEMORY_PATH` — 存储路径（默认 ./data/memory）
+- `HARNESS_MEMORY_ENABLED` — 启用/禁用（默认 true）
+- `HARNESS_MEMORY_MAX_ENTRIES` — 每 Agent 最大条目数（默认 500）
+- `HARNESS_MEMORY_MAX_LENGTH` — 内容最大长度（默认 1000 字符）
+- `HARNESS_MEMORY_TTL_DAYS` — 默认过期天数（默认 90）
+- `HARNESS_MEMORY_RETRIEVAL_LIMIT` — 每次注入最大条目数（默认 10）
+- `HARNESS_MEMORY_DECAY_DAYS` — 相关度衰减半衰期（默认 30 天）
+
+---
+
 ## 完整文件清单
 
 ```
@@ -174,6 +237,10 @@ harness/
 │   └── registry.py                # 工具注册表
 ├── guardrails/
 │   └── policy.py                  # 安全策略
+├── memory/                        # M3.2: Agent 记忆系统
+│   ├── store.py                   # 持久化存储（原子写入）
+│   ├── manager.py                 # 高层记忆操作接口
+│   └── sharing.py                 # 跨 Agent 记忆共享
 ├── evaluator/
 │   └── engine.py                  # 评估引擎
 ├── reporter/

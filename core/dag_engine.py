@@ -59,6 +59,9 @@ class DAGExecutionEngine:
         heartbeat_interval_sec: float = 5.0,
         heartbeat_miss_threshold: int = 3,
         enable_watchdog: bool = True,
+        # M3.2: Memory integration
+        memory_manager: Any | None = None,
+        session_id: str | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -76,6 +79,9 @@ class DAGExecutionEngine:
         self._watchdog_task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}  # M2.0: Tasks for cancellation
+        # M3.2: Memory integration
+        self.memory_manager = memory_manager
+        self._session_id = session_id
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -85,7 +91,10 @@ class DAGExecutionEngine:
         """Emit execution event to all handlers."""
         for handler in self.event_handlers:
             try:
-                await handler(event)
+                if asyncio.iscoroutinefunction(handler):
+                    await handler(event)
+                else:
+                    handler(event)
             except Exception as exc:
                 # Don't let event handlers break execution, but keep traceability.
                 logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
@@ -264,6 +273,9 @@ class DAGExecutionEngine:
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
                             if backoff > 0:
                                 await asyncio.sleep(backoff)
+                            # Reset status so _execute_single_node will actually run
+                            dag.nodes[failed_id].status = NodeStatus.RETRYING
+                            dag.nodes[failed_id].error = ""
                             await self._execute_single_node(dag, failed_id)
                             if dag.nodes[failed_id].status == NodeStatus.FAILED:
                                 self._skip_remaining(dag, levels, level_idx + 1)
@@ -485,6 +497,25 @@ class DAGExecutionEngine:
                     },
                 )
                 artifacts.append(artifact)
+
+                # M3.2: Share relevant memories from upstream agent
+                if (
+                    self.memory_manager
+                    and self._session_id
+                    and dep_node.agent_type != dag.nodes[node_id].agent_type
+                ):
+                    try:
+                        from memory.sharing import MemorySharing
+                        sharing = MemorySharing(self.memory_manager)
+                        sharing.share_with_downstream(
+                            from_agent=dep_node.agent_type,
+                            to_agent=dag.nodes[node_id].agent_type,
+                            session_id=self._session_id,
+                            dag=dag,
+                            node_id=node_id,
+                        )
+                    except Exception as e:
+                        logger.debug("Memory sharing failed: %s", e)
 
         # Include evaluation feedback from previous attempt (retry scenario)
         node = dag.nodes[node_id]

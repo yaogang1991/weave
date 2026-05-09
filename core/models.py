@@ -287,6 +287,13 @@ class EventType(str, Enum):
     CHECKPOINT_CREATED = "checkpoint.created"
     CHECKPOINT_RESTORED = "checkpoint.restored"
 
+    # Memory events (M3.2)
+    MEMORY_STORED = "memory.stored"
+    MEMORY_ACCESSED = "memory.accessed"
+    MEMORY_SHARED = "memory.shared"
+    MEMORY_EXPIRED = "memory.expired"
+    MEMORY_PRUNED = "memory.pruned"
+
 
 class Event(BaseModel):
     """Immutable event in the session log."""
@@ -399,3 +406,41 @@ class EvaluationResult(BaseModel):
     criteria_results: dict[str, bool] = Field(default_factory=dict)
     feedback: str = ""
     suggestions: list[str] = Field(default_factory=list)
+
+
+# =============================================================================
+# M3.2: Agent Memory models
+# =============================================================================
+
+
+class MemoryScope(str, Enum):
+    """Visibility scope of a memory entry."""
+    PRIVATE = "private"      # Per-agent, only the owning agent sees it
+    SESSION = "session"      # Shared among agents within one session
+    GLOBAL = "global"        # Cross-session, cross-agent, persistent
+
+
+class MemoryType(str, Enum):
+    """Classification of memory content."""
+    FACT = "fact"            # Learned knowledge (e.g., "project uses pytest")
+    EXPERIENCE = "experience"  # Task outcome (e.g., "planner succeeded with linear DAG")
+    PREFERENCE = "preference"  # User preference (e.g., "user prefers type hints")
+    CONTEXT = "context"      # Project context (e.g., "entry point is main.py")
+
+
+class MemoryEntry(BaseModel):
+    """A single memory record persisted across agent executions."""
+    id: str = Field(default_factory=lambda: f"mem_{uuid.uuid4().hex[:12]}")
+    agent_type: str           # Owning agent (planner/generator/evaluator or "shared")
+    scope: MemoryScope = MemoryScope.PRIVATE
+    memory_type: MemoryType = MemoryType.FACT
+    content: str
+    keywords: list[str] = Field(default_factory=list)
+    session_id: str | None = None
+    source_node_id: str | None = None
+    access_count: int = 0
+    relevance_score: float = 1.0
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    last_accessed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)

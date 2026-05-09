@@ -77,8 +77,8 @@ Execution Layer (Backend abstraction, Git, Reporter)
 **Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `AgentPool` → Watchdog monitors heartbeats (M2) → failures go back to orchestrator via `adapt_to_failure()`.
 
 **Key module responsibilities**:
-- `core/models.py` — All data models: DAG, DAGNode, AgentCapability, HandoffArtifact, events, session state, guardrails, NodeHealth
-- `core/config.py` — HarnessConfig, LLMConfig, SandboxConfig
+- `core/models.py` — All data models: DAG, DAGNode, AgentCapability, HandoffArtifact, events, session state, guardrails, NodeHealth, MemoryEntry, MemoryScope, MemoryType
+- `core/config.py` — HarnessConfig, LLMConfig, SandboxConfig, MemoryConfig
 - `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.harness/agents.yaml`)
 - `core/dag_engine.py` — Topological sort, parallel execution with `asyncio.gather`, failure callback, Watchdog coroutine (M2)
 - `core/llm_client.py` — Unified LLM client (Anthropic/OpenAI)
@@ -101,6 +101,9 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `backend/lifecycle.py` — BackendManager: config-driven selection, risk mapping, auto-fallback
 - `monitoring/metrics.py` — Metrics aggregation
 - `monitoring/alerts.py` — Alerting system (failure, heartbeat, approval)
+- `memory/store.py` — M3.2: Persistent memory store with atomic writes (file-per-entry)
+- `memory/manager.py` — M3.2: High-level memory operations (store/retrieve/inject/extract)
+- `memory/sharing.py` — M3.2: Cross-agent memory sharing (PRIVATE→SESSION→GLOBAL promotion)
 - `visualizer/server.py` — FastAPI web console (M2.3)
 - `visualizer/cli_renderer.py` — CLI DAG visualization
 - `visualizer/event_bridge.py` — WebSocket event bridge
@@ -121,6 +124,7 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - **Data model changes**: Edit `core/models.py` — it is the single source of truth for all models.
 - **Adding an execution backend**: Extend `backend/base.py` `ExecutionBackend`, register in `backend/lifecycle.py` `BackendManager`.
 - **State is externalized**: All runtime state lives in `./data/events/` (JSONL) and `./data/artifacts/`. Agent context windows are just cache.
+- **Memory system**: `memory/store.py` handles persistence (atomic writes), `memory/manager.py` is the primary API. Memory is injected into agent system prompts via `memory_manager.get_context_for_agent()` + `format_memory_prompt()` in `agent/agent_pool.py`.
 
 ## Runtime Data
 
@@ -129,3 +133,4 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `./data/artifacts/` — Session artifacts
 - `./data/reports/` — Markdown reports
 - `./data/queue/` — Job queue (pending/leased/dead)
+- `./data/memory/` — M3.2: Agent memory entries (global/agents/{type}/sessions/{id}/)

@@ -65,6 +65,9 @@ Rules:
 4. Use write tool for new files
 5. Run tests after implementation
 6. Follow project coding standards (import order, naming, formatting)
+7. CRITICAL: If evaluation feedback from a previous attempt is provided,
+   read it carefully and fix ALL reported issues before proceeding.
+   The feedback tells you exactly what failed and why.
 
 Work systematically: gather context → implement → verify.
 """,
@@ -107,6 +110,7 @@ Evaluate against:
         max_iterations: int = 50,
         timeout: int = 120,
         max_context_tokens: int = 100_000,
+        memory_manager: Any | None = None,
     ):
         self.capability = capability
         self.llm_config = llm_config
@@ -115,6 +119,7 @@ Evaluate against:
         self.guardrails = guardrails
         self.max_iterations = max_iterations
         self.timeout = timeout
+        self.memory_manager = memory_manager
 
         # Build agent-specific system prompt
         system_prompt = capability.system_prompt or self.SYSTEM_PROMPTS.get(
@@ -140,6 +145,7 @@ Evaluate against:
         task: str,
         input_artifacts: list[HandoffArtifact],
         session_id: str,
+        node_id: str | None = None,
     ) -> dict[str, Any]:
         """
         Execute this agent's task with isolated context.
@@ -150,15 +156,47 @@ Evaluate against:
         # Build context from input artifacts
         artifact_context = self._format_artifacts(input_artifacts)
 
+        # M3.2: Inject memory context if memory manager is available
+        memory_section = ""
+        if self.memory_manager and self.memory_manager.config.enabled:
+            memory_entries = self.memory_manager.get_context_for_agent(
+                agent_type=self.capability.id,
+                task_description=task,
+                session_id=session_id,
+            )
+            memory_section = self.memory_manager.format_memory_prompt(memory_entries)
+
         full_prompt = f"""{artifact_context}
 
+{memory_section}
 Your task: {task}
 
 Execute using your available tools. Produce clear, verifiable output.
 """
 
         # Run the agent (dumb loop) via AgentWorker
-        return await self._run_with_tools(full_prompt, session_id)
+        result = await self._run_with_tools(full_prompt, session_id)
+
+        # M3.2: Store learnings from execution result
+        if (
+            self.memory_manager
+            and self.memory_manager.config.enabled
+            and self.memory_manager.config.auto_store
+            and node_id
+        ):
+            try:
+                self.memory_manager.extract_and_store(
+                    agent_type=self.capability.id,
+                    task_description=task,
+                    execution_result=result,
+                    session_id=session_id,
+                    node_id=node_id,
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).debug("Memory extraction failed: %s", e)
+
+        return result
 
     async def _run_with_tools(self, prompt: str, session_id: str) -> dict[str, Any]:
         """Run agent loop and collect results via AgentWorker."""
@@ -241,6 +279,7 @@ class AgentPool:
         timeout: int = 120,
         max_context_tokens: int = 100_000,
         llm_router: LLMRouter | None = None,
+        memory_manager: Any | None = None,
     ):
         self.llm_config = llm_config
         self.session_store = session_store
@@ -251,6 +290,7 @@ class AgentPool:
         self.timeout = timeout
         self.max_context_tokens = max_context_tokens
         self.llm_router = llm_router
+        self.memory_manager = memory_manager
         self._instances: dict[str, WorkerAgent] = {}
 
     def get_or_create(self, agent_type: str) -> WorkerAgent:
@@ -275,6 +315,7 @@ class AgentPool:
                 max_iterations=self.max_iterations,
                 timeout=self.timeout,
                 max_context_tokens=self.max_context_tokens,
+                memory_manager=self.memory_manager,
             )
 
         return self._instances[agent_type]
@@ -287,7 +328,10 @@ class AgentPool:
         """
         async def _executor(node: DAGNode, artifacts: list[HandoffArtifact]) -> dict:
             worker = self.get_or_create(node.agent_type)
-            return await worker.execute(node.task_description, artifacts, session_id)
+            return await worker.execute(
+                node.task_description, artifacts, session_id,
+                node_id=node.id,
+            )
 
         return _executor
 

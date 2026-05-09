@@ -605,6 +605,9 @@ class RunService:
 
         Returns the executed DAG object.
         """
+        # M3.2: Initialize memory manager for this execution
+        self._init_memory_manager(store)
+
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
@@ -635,6 +638,27 @@ class RunService:
             agent_registry=registry,
             llm_router=getattr(self, "llm_router", None),
         )
+
+    def _init_memory_manager(self, store: SessionStore) -> None:
+        """M3.2: Initialize MemoryManager from config."""
+        try:
+            from core.config import HarnessConfig
+            from memory.manager import MemoryManager
+
+            config = HarnessConfig.from_env()
+            if config.memory.enabled:
+                self._memory_manager = MemoryManager(
+                    config=config.memory,
+                    session_store=store,
+                )
+                # Run maintenance before execution
+                self._memory_manager.run_maintenance()
+            else:
+                self._memory_manager = None
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("Memory manager init skipped: %s", exc)
+            self._memory_manager = None
 
     def _create_execution_engine(
         self,
@@ -678,6 +702,7 @@ class RunService:
             timeout=self.agent_timeout,
             max_context_tokens=self.max_context_tokens,
             llm_router=getattr(self, "llm_router", None),
+            memory_manager=getattr(self, "_memory_manager", None),
         )
 
         # Orchestrator for failure handling
@@ -693,4 +718,6 @@ class RunService:
             max_parallel=self.max_parallel,
             evaluator=evaluator,
             artifact_path=self.artifact_path,
+            memory_manager=getattr(self, "_memory_manager", None),
+            session_id=session_id,
         )
