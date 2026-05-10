@@ -49,17 +49,24 @@ class LLMRouter:
             config_data["provider"] = provider
             config_data["model"] = model
 
-            # Use provider-specific credentials when routing to a different provider
+            # Use provider-specific credentials when routing to a different provider.
+            # Only overwrite if the env var is set — preserves custom gateway setups
+            # where a single base_url/key handles multiple providers.
             if provider != self._base_config.provider:
                 if provider == "openai":
-                    config_data["api_key"] = os.getenv("OPENAI_API_KEY", "")
-                    config_data["base_url"] = os.getenv("OPENAI_BASE_URL", "")
+                    _key = os.getenv("OPENAI_API_KEY")
+                    if _key:
+                        config_data["api_key"] = _key
+                    _url = os.getenv("OPENAI_BASE_URL")
+                    if _url:
+                        config_data["base_url"] = _url
                 elif provider == "anthropic":
-                    config_data["api_key"] = os.getenv(
-                        "ANTHROPIC_API_KEY",
-                        os.getenv("ANTHROPIC_AUTH_TOKEN", ""),
-                    )
-                    config_data["base_url"] = os.getenv("ANTHROPIC_BASE_URL", "")
+                    _key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN")
+                    if _key:
+                        config_data["api_key"] = _key
+                    _url = os.getenv("ANTHROPIC_BASE_URL")
+                    if _url:
+                        config_data["base_url"] = _url
 
             for k, v in overrides.items():
                 if v is not None:

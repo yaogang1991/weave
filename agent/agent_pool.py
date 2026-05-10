@@ -299,7 +299,10 @@ class AgentPool:
         exc_name = type(exc).__name__
         return any(
             substr in exc_name
-            for substr in ("Authentication", "Permission", "RateLimit", "API", "Connection", "ServiceUnavailable")
+            for substr in (
+                "Authentication", "Permission", "RateLimit", "API",
+                "Connection", "ServiceUnavailable", "NotFound", "BadRequest",
+            )
         )
 
     def get_or_create(self, agent_type: str) -> WorkerAgent:
@@ -351,15 +354,18 @@ class AgentPool:
                 if not self.llm_router or not self._is_api_error(exc):
                     raise
 
-                # Walk the fallback chain
+                # Walk the fallback chain, tracking attempted models to prevent cycles
                 failed_model = worker.llm_config.model
+                attempted: set[str] = {failed_model}
+                last_exc = exc
                 while True:
                     fallback = self.llm_router.get_fallback_client(failed_model)
-                    if fallback is None:
-                        raise
+                    if fallback is None or fallback.config.model in attempted:
+                        raise last_exc
+                    attempted.add(fallback.config.model)
                     _log.warning(
                         "Model %s failed (%s), trying fallback %s",
-                        failed_model, exc, fallback.config.model,
+                        failed_model, last_exc, fallback.config.model,
                     )
                     capability = self.agent_registry.get(node.agent_type)
                     fallback_worker = WorkerAgent(
@@ -381,6 +387,7 @@ class AgentPool:
                     except Exception as retry_exc:
                         if not self._is_api_error(retry_exc):
                             raise
+                        last_exc = retry_exc
                         failed_model = fallback.config.model
                         continue
 
