@@ -1,0 +1,23 @@
+name: setup_project
+description: Initialize a new project with standard structure
+version: "1.0"
+category: scaffolding
+variables:
+  project: new-project
+  language: Python
+nodes:
+  - id: planner_structure
+    agent_type: planner
+    task_description: "Plan the project structure for {project} in {language}. Define directory layout, configuration files, and entry points."
+  - id: generator_scaffold
+    agent_type: generator
+    task_description: "Create the project scaffold for {project}: directories, config files, boilerplate code, README, and dependencies."
+  - id: evaluator
+    agent_type: evaluator
+    task_description: "Evaluate the project setup for {project}: verify file structure, check configs, run any initial tests."
+edges:
+  - from: planner_structure
+    to: generator_scaffold
+  - from: generator_scaffold
+    to: evaluator
+reasoning_template: "Setting up {project} in {language}: plan structure -> scaffold -> evaluate"

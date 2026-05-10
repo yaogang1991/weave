@@ -71,26 +71,66 @@ def _serialize_dag(dag: DAG) -> dict:
     }
 
 
+def _parse_template_vars(var_list: list[str]) -> dict[str, str]:
+    """Parse KEY=VALUE pairs from --var arguments."""
+    variables: dict[str, str] = {}
+    for item in var_list:
+        if "=" in item:
+            key, value = item.split("=", 1)
+            variables[key.strip()] = value.strip()
+        else:
+            sys.stderr.write(f"Invalid --var format: {item} (expected KEY=VALUE)\n")
+    return variables
+
+
 async def cmd_plan(args):
     """Generate an execution plan (DAG) from requirements."""
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
 
+    # M3.1: LLM router for multi-model support
+    llm_router = None
+    if config.model_routing.routing:
+        from core.llm_router import LLMRouter
+        llm_router = LLMRouter(config.model_routing, config.llm)
+
+    # M3.3: Learning optimizer for planning hints
+    learning_optimizer = None
+    if config.memory.enabled:
+        try:
+            from memory.manager import MemoryManager
+            from learning.optimizer import LearningOptimizer
+            mm = MemoryManager(config.memory, session_store=store)
+            learning_optimizer = LearningOptimizer(mm)
+        except Exception:
+            pass
+
     orchestrator = IntelligentOrchestrator(
         llm_config=config.llm,
         session_store=store,
         agent_registry=registry,
+        llm_router=llm_router,
+        learning_optimizer=learning_optimizer,
     )
 
     print(f"Planning: {args.requirement}")
     print(f"Available agents: {[a.id for a in registry.list_agents()]}")
 
-    # Generate DAG
-    dag = await orchestrator.plan(
-        requirement=args.requirement,
-        project_context={"project_path": args.project} if args.project else None,
-    )
+    # Use template if specified
+    if args.template:
+        variables = _parse_template_vars(args.var)
+        print(f"Using template: {args.template} (vars: {variables})")
+        dag = await orchestrator.plan_from_template(
+            template_name=args.template,
+            variables=variables,
+        )
+    else:
+        # Generate DAG via LLM
+        dag = await orchestrator.plan(
+            requirement=args.requirement,
+            project_context={"project_path": args.project} if args.project else None,
+        )
 
     # Save plan with deterministic filename
     plans_dir = Path("./data/plans")
@@ -141,6 +181,14 @@ async def cmd_execute(args, dag: DAG | None = None):
         for edge_def in plan_data.get("edges", []):
             dag.add_edge(edge_def["from"], edge_def["to"])
 
+    # Store DAG in session for visualizer
+    from core.models import EventType
+    store.emit_event(
+        session_id,
+        EventType.SESSION_DAG,
+        _serialize_dag(dag),
+    )
+
     # Create guardrails (default: accept_edits)
     policy = GuardrailPolicy(
         mode=PermissionMode.ACCEPT_EDITS,
@@ -149,7 +197,31 @@ async def cmd_execute(args, dag: DAG | None = None):
     )
     guardrails = Guardrails(policy, tool_registry)
 
-    # Create agent pool with guardrails
+    # M3.1: LLM router for multi-model support
+    llm_router = None
+    if config.model_routing.routing:
+        from core.llm_router import LLMRouter
+        llm_router = LLMRouter(config.model_routing, config.llm)
+
+    # M3.2: Initialize memory manager
+    memory_manager = None
+    if config.memory.enabled:
+        try:
+            from memory.manager import MemoryManager
+            memory_manager = MemoryManager(config.memory, session_store=store)
+        except Exception:
+            pass
+
+    # M3.3: Initialize learning optimizer
+    learning_optimizer = None
+    if memory_manager:
+        try:
+            from learning.optimizer import LearningOptimizer
+            learning_optimizer = LearningOptimizer(memory_manager)
+        except Exception:
+            pass
+
+    # Create agent pool with guardrails + M3 integration
     pool = AgentPool(
         llm_config=config.llm,
         session_store=store,
@@ -159,22 +231,30 @@ async def cmd_execute(args, dag: DAG | None = None):
         max_iterations=args.max_iterations,
         timeout=config.agent_timeout,
         max_context_tokens=config.max_context_tokens,
+        llm_router=llm_router,
+        memory_manager=memory_manager,
     )
 
-    # Create orchestrator for failure handling
-    orchestrator = IntelligentOrchestrator(config.llm, store, registry)
+    # Create orchestrator for failure handling + M3 learning
+    orchestrator = IntelligentOrchestrator(
+        config.llm, store, registry,
+        llm_router=llm_router,
+        learning_optimizer=learning_optimizer,
+    )
 
     # Create evaluator for quality gates
     from evaluator.engine import EvaluatorEngine
     evaluator = EvaluatorEngine(session_store=store)
 
-    # Create DAG engine
+    # Create DAG engine + M3 memory integration
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
         max_parallel=args.max_parallel,
         evaluator=evaluator,
         artifact_path=config.artifact_path,
+        memory_manager=memory_manager,
+        session_id=session_id,
     )
 
     # ── Visualization setup ──────────────────────────────────
@@ -265,6 +345,8 @@ async def cmd_run(args):
         viz=args.viz,
         visualize=args.visualize,
         no_browser=args.no_browser,
+        template=getattr(args, "template", None),
+        var=getattr(args, "var", []),
     )
     return await cmd_execute(exec_args, dag=dag)
 
@@ -316,7 +398,7 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     service = RunService(
         repository=repository,
         llm_config=harness_config.llm,
-        default_backend=harness_config.workspace_isolation,
+        default_backend=harness_config.default_backend,
         backend_base_path=harness_config.backend_base_path,
         approval_repo=approval_repo,
         non_interactive=non_interactive,
@@ -752,6 +834,117 @@ async def cmd_learning_status(args):
     print(json.dumps(status, indent=2, default=str))
 
 
+# =============================================================================
+# Template CLI commands (M3.4)
+# =============================================================================
+
+
+async def cmd_templates(args):
+    """List available DAG templates."""
+    from templates.library import TemplateRegistry
+    registry = TemplateRegistry()
+    templates = registry.list_templates()
+
+    if args.name:
+        # Show details of a specific template
+        tpl = registry.get_template(args.name)
+        if tpl is None:
+            _write_error("E_TEMPLATE_NOT_FOUND", f"Template not found: {args.name}")
+            return
+        result = {
+            "name": tpl.name,
+            "description": tpl.description,
+            "version": tpl.version,
+            "category": tpl.category,
+            "variables": tpl.variables,
+            "nodes": tpl.nodes,
+            "edges": tpl.edges,
+            "reasoning_template": tpl.reasoning_template,
+        }
+    else:
+        # List all templates
+        result = {
+            "templates": [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "version": t.version,
+                    "category": t.category,
+                    "nodes": len(t.nodes),
+                    "edges": len(t.edges),
+                    "variables": list(t.variables.keys()),
+                }
+                for t in templates
+            ],
+            "count": len(templates),
+        }
+    print(json.dumps(result, indent=2, default=str))
+
+
+# =============================================================================
+# Impact Analysis CLI commands (M3.5)
+# =============================================================================
+
+
+async def cmd_impact_predict(args):
+    """Predict the impact of a requirement on a project."""
+    from analysis.impact_predictor import ImpactPredictor
+    config = HarnessConfig.from_env()
+    predictor = ImpactPredictor(
+        llm_config=config.llm,
+        memory_manager=_make_memory_manager() if config.memory.enabled else None,
+    )
+    scope = await predictor.predict(
+        requirement=args.requirement,
+        project_path=args.project or ".",
+    )
+    result = {
+        "id": scope.id,
+        "requirement": scope.requirement,
+        "predicted_files": scope.predicted_files,
+        "predicted_modules": scope.predicted_modules,
+        "risk_level": scope.risk_level.value,
+        "confidence": scope.confidence,
+        "reasoning": scope.reasoning,
+    }
+    print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_impact_graph(args):
+    """Build and display the dependency graph for a project."""
+    from analysis.dependency_graph import DependencyGraph
+    graph = DependencyGraph(args.project or ".")
+    graph.build()
+    result = {
+        "project_path": str(graph.project_path),
+        "files": len(graph._graph),
+        "graph": graph.to_dict(),
+    }
+    print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_impact_history(args):
+    """List past impact predictions from memory."""
+    manager = _make_memory_manager()
+    entries = manager.store.search(
+        query="impact_analysis prediction",
+        limit=args.limit,
+    )
+    result = {
+        "predictions": [
+            {
+                "id": e.id,
+                "content": e.content,
+                "keywords": e.keywords,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+        "count": len(entries),
+    }
+    print(json.dumps(result, indent=2, default=str))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Harness - Intelligent Multi-Agent Orchestration",
@@ -798,6 +991,14 @@ Examples:
     # plan command
     plan_parser = subparsers.add_parser("plan", help="Generate execution plan")
     plan_parser.add_argument("requirement", help="User requirement")
+    plan_parser.add_argument(
+        "--template",
+        help="Use a named DAG template instead of LLM planning",
+    )
+    plan_parser.add_argument(
+        "--var", action="append", default=[], metavar="KEY=VALUE",
+        help="Template variable substitution (repeatable)",
+    )
     plan_parser.set_defaults(func=cmd_plan)
 
     # execute command
@@ -811,8 +1012,19 @@ Examples:
     # run command (plan + execute)
     run_parser = subparsers.add_parser("run", help="Plan and execute in one step")
     run_parser.add_argument("requirement", help="User requirement")
-    run_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
-    run_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
+    run_parser.add_argument(
+        "--template",
+        help="Use a named DAG template instead of LLM planning",
+    )
+    run_parser.add_argument(
+        "--var", action="append", default=[], metavar="KEY=VALUE",
+        help="Template variable substitution (repeatable)",
+    )
+    run_parser.add_argument("--viz", action="store_true",
+                            help="Enable CLI + Web visualization")
+    run_parser.add_argument(
+        "--visualize", action="store_true",
+        help="Enable visualization and auto-open browser")
     run_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     run_parser.set_defaults(func=cmd_run)
 
@@ -945,6 +1157,41 @@ Examples:
     learn_status_parser = subparsers.add_parser("learning-status", help="Learning system status")
     learn_status_parser.set_defaults(func=cmd_learning_status)
 
+    # ------------------------------------------------------------------
+    # Template commands (M3.4)
+    # ------------------------------------------------------------------
+
+    # templates command
+    templates_parser = subparsers.add_parser("templates", help="List DAG templates")
+    templates_parser.add_argument("--name", help="Show details of a specific template")
+    templates_parser.set_defaults(func=cmd_templates)
+
+    # ------------------------------------------------------------------
+    # Impact Analysis commands (M3.5)
+    # ------------------------------------------------------------------
+
+    # impact-predict command
+    impact_predict_parser = subparsers.add_parser(
+        "impact-predict", help="Predict impact of a requirement",
+    )
+    impact_predict_parser.add_argument("requirement", help="Requirement text")
+    impact_predict_parser.add_argument("--project", help="Project path")
+    impact_predict_parser.set_defaults(func=cmd_impact_predict)
+
+    # impact-graph command
+    impact_graph_parser = subparsers.add_parser(
+        "impact-graph", help="Show project dependency graph",
+    )
+    impact_graph_parser.add_argument("--project", help="Project path")
+    impact_graph_parser.set_defaults(func=cmd_impact_graph)
+
+    # impact-history command
+    impact_history_parser = subparsers.add_parser(
+        "impact-history", help="List past impact predictions",
+    )
+    impact_history_parser.add_argument("--limit", type=int, default=20)
+    impact_history_parser.set_defaults(func=cmd_impact_history)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -952,7 +1199,15 @@ Examples:
         sys.exit(1)
 
     # Ensure API key (skip for commands that don't need LLM)
-    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject", "memory-search", "memory-list", "memory-stats", "memory-add", "memory-cleanup", "learning-analyze", "learning-insights", "learning-status"}
+    _NO_API_KEY_COMMANDS = {
+        "viz", "status", "list", "cancel", "recover", "console",
+        "tickets", "approve", "reject",
+        "memory-search", "memory-list", "memory-stats",
+        "memory-add", "memory-cleanup",
+        "learning-analyze", "learning-insights", "learning-status",
+        "templates",
+        "impact-predict", "impact-graph", "impact-history",
+    }
     if args.command not in _NO_API_KEY_COMMANDS:
         from core.config import _CLAUDE_ENV
         has_key = (

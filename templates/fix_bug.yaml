@@ -1,0 +1,22 @@
+name: fix_bug
+description: Analyze and fix a bug with root cause analysis
+version: "1.0"
+category: maintenance
+variables:
+  bug: reported issue
+nodes:
+  - id: planner_analyze
+    agent_type: planner
+    task_description: "Analyze the bug: {bug}. Find the root cause by examining relevant code, logs, and test failures."
+  - id: generator_fix
+    agent_type: generator
+    task_description: "Fix the bug identified in the analysis. Make minimal changes to resolve the issue without introducing regressions."
+  - id: evaluator
+    agent_type: evaluator
+    task_description: "Verify the bug fix: run existing tests, check that the original issue is resolved, ensure no regressions."
+edges:
+  - from: planner_analyze
+    to: generator_fix
+  - from: generator_fix
+    to: evaluator
+reasoning_template: "Fixing bug: {bug} -> analyze -> fix -> verify"

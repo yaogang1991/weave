@@ -263,6 +263,7 @@ class EventType(str, Enum):
 
     # Session events
     SESSION_START = "session.status_start"
+    SESSION_DAG = "session.dag"
     SESSION_IDLE = "session.status_idle"
     SESSION_RUNNING = "session.status_running"
     SESSION_ERROR = "session.status_error"
@@ -298,6 +299,12 @@ class EventType(str, Enum):
     LEARNING_ANALYSIS_START = "learning.analysis_start"
     LEARNING_INSIGHT_GENERATED = "learning.insight_generated"
     LEARNING_OPTIMIZATION_APPLIED = "learning.optimization_applied"
+
+    # Impact analysis events (M3.5)
+    IMPACT_PREDICTED = "impact.predicted"
+    IMPACT_VERIFIED = "impact.verified"
+    IMPACT_MISMATCH = "impact.mismatch"
+    IMPACT_LEARNED = "impact.learned"
 
 
 class Event(BaseModel):
@@ -483,3 +490,57 @@ class LearningInsight(BaseModel):
     applies_to: list[str] = Field(default_factory=list)  # Agent types
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# -- M3.4: DAG Templates --
+
+
+class DAGTemplate(BaseModel):
+    """A reusable DAG template with variable substitution."""
+    name: str
+    description: str
+    version: str = "1.0"
+    category: str = "general"
+    variables: dict[str, str] = Field(default_factory=dict)
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    reasoning_template: str = ""
+
+
+# -- M3.5: Impact Analysis --
+
+
+class ImpactRiskLevel(str, Enum):
+    """Risk level of predicted impact scope."""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
+class ImpactScope(BaseModel):
+    """Predicted impact of a requirement on a project's file structure."""
+    id: str = Field(default_factory=lambda: f"imp_{uuid.uuid4().hex[:12]}")
+    requirement: str
+    predicted_files: list[str] = Field(default_factory=list)
+    predicted_modules: list[str] = Field(default_factory=list)
+    risk_level: ImpactRiskLevel = ImpactRiskLevel.MEDIUM
+    confidence: float = 0.0
+    reasoning: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class VerificationResult(BaseModel):
+    """Result of comparing predicted impact to actual changes."""
+    impact_scope_id: str
+    expected_files: list[str] = Field(default_factory=list)
+    actual_changed_files: list[str] = Field(default_factory=list)
+    covered_files: list[str] = Field(default_factory=list)
+    unexpected_files: list[str] = Field(default_factory=list)
+    missed_files: list[str] = Field(default_factory=list)
+    coverage: float = 0.0
+    prediction_accuracy: float = 0.0
+    passes: bool = False
+    notes: str = ""
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
