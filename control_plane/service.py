@@ -38,6 +38,7 @@ from session.store import SessionStore
 from tools.registry import ToolRegistry
 from guardrails.policy import Guardrails, GuardrailPolicy, PermissionMode, PersonalGuardrails
 from core.models import PersonalGuardrailPolicy
+from core.exceptions import PendingApprovalError
 from evaluator.engine import EvaluatorEngine
 
 from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
@@ -177,11 +178,12 @@ class RunService:
         if job is None:
             raise ValueError(f"Job not found: {job_id}")
 
-        # Acquire lease then transition to RUNNING
-        # Required path: QUEUED -> LEASED -> RUNNING
-        self.repository.acquire_lease(job_id, "run_service")
-        self.repository.transition_job_status(job_id, JobStatus.RUNNING)
-        job = self.repository.get_job(job_id)  # refresh
+        # Worker is responsible for LEASED -> RUNNING transition.
+        # run_job() only executes jobs that are already RUNNING.
+        if job.status != JobStatus.RUNNING:
+            raise ValueError(
+                f"Expected job {job_id} to be RUNNING, got {job.status.value}"
+            )
 
         current_task = asyncio.current_task()
         if current_task is not None:
@@ -206,10 +208,12 @@ class RunService:
             from core.config import HarnessConfig
             harness_config = HarnessConfig.from_env()
             backend_manager = BackendManager(
-                default_backend=self.default_backend,
+                workspace=harness_config.workspace_isolation,
+                sandbox=harness_config.execution_sandbox,
                 repo_root=str(project_root),
                 base_path=self.backend_base_path,
-                risk_backend_map=harness_config.risk_backend_map,
+                workspace_by_risk=harness_config.workspace_isolation_by_risk,
+                cleanup_policy=harness_config.cleanup_policy,
             )
             work_dir = backend_manager.setup(
                 job_id=job.id,
@@ -221,11 +225,30 @@ class RunService:
             if self.non_interactive and self.approval_repo is not None:
                 self.approval_repo.expire_tickets()
 
+            # --- Lifecycle hook: after_create ---
+            hooks = self._load_project_hooks(job.project_path)
+            if hooks.get("after_create"):
+                await backend_manager.execute_hook(
+                    "after_create", hooks["after_create"], work_dir,
+                )
+
+            # --- Lifecycle hook: before_run ---
+            if hooks.get("before_run"):
+                await backend_manager.execute_hook(
+                    "before_run", hooks["before_run"], work_dir,
+                )
+
             # --- Core execution (with task-level timeout) ---
             result_dag = await asyncio.wait_for(
                 self._execute_plan_and_run(job, session_id, store, work_dir),
                 timeout=timeout,
             )
+
+            # --- Lifecycle hook: after_run ---
+            if hooks.get("after_run"):
+                await backend_manager.execute_hook(
+                    "after_run", hooks["after_run"], work_dir,
+                )
 
             # --- Summarize ---
             orchestrator = self._create_orchestrator(store)
@@ -355,6 +378,17 @@ class RunService:
                 except Exception:
                     pass
             return self.repository.get_run(run.id) or run
+
+        except PendingApprovalError as exc:
+            # --- Approval required: pause execution, do NOT cleanup/preserve ---
+            run.status = RunStatus.PENDING_APPROVAL
+            run.dag_result = {
+                "status": "pending_approval",
+                "ticket_id": exc.ticket_id,
+            }
+            self.repository.update_run(run)
+            # Re-raise so Worker can enter PENDING_APPROVAL poll loop.
+            raise
 
         except Exception as exc:
             # --- Unexpected error handling ---
@@ -605,8 +639,8 @@ class RunService:
 
         Returns the executed DAG object.
         """
-        # M3.2: Initialize memory manager for this execution
-        self._init_memory_manager(store)
+        # M3.2: Initialize memory manager for this execution (local, not self)
+        memory_manager = self._build_memory_manager(store)
 
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
@@ -624,10 +658,52 @@ class RunService:
                 dag_ref, failed_id, job.requirement,
             ),
             work_dir=work_dir,
+            memory_manager=memory_manager,
         )
         result_dag = await engine.execute(dag)
 
         return result_dag
+
+    def _load_project_hooks(self, project_path: str | None) -> dict[str, str]:
+        """Load lifecycle hooks from .harness/config.yaml if present."""
+        hooks: dict[str, str] = {}
+        if not project_path:
+            return hooks
+        try:
+            config_path = Path(project_path) / ".harness" / "config.yaml"
+            if config_path.exists():
+                import yaml
+                with open(config_path, "r") as f:
+                    cfg = yaml.safe_load(f) or {}
+                hook_cfg = cfg.get("hooks", {})
+                for key in ("after_create", "before_run", "after_run", "before_remove"):
+                    if key in hook_cfg:
+                        hooks[key] = hook_cfg[key]
+        except Exception:
+            pass
+        return hooks
+
+    def _load_project_guardrails(self, work_dir: Path | None) -> dict[str, Any]:
+        """Load guardrail overrides from .harness/config.yaml if present."""
+        result: dict[str, Any] = {}
+        if work_dir is None:
+            return result
+        try:
+            config_path = Path(work_dir) / ".harness" / "config.yaml"
+            if config_path.exists():
+                import yaml
+                with open(config_path, "r") as f:
+                    cfg = yaml.safe_load(f) or {}
+                gr = cfg.get("guardrails", {})
+                if "permission_mode" in gr:
+                    result["permission_mode"] = PermissionMode(gr["permission_mode"])
+                if "auto_approve_read" in gr:
+                    result["auto_approve_read"] = gr["auto_approve_read"]
+                if "denied_commands" in gr:
+                    result["denied_commands"] = gr["denied_commands"]
+        except Exception:
+            pass
+        return result
 
     def _create_orchestrator(self, store: SessionStore) -> IntelligentOrchestrator:
         """Build an IntelligentOrchestrator with default registries."""
@@ -639,26 +715,25 @@ class RunService:
             llm_router=getattr(self, "llm_router", None),
         )
 
-    def _init_memory_manager(self, store: SessionStore) -> None:
-        """M3.2: Initialize MemoryManager from config."""
+    def _build_memory_manager(self, store: SessionStore) -> Any:
+        """M3.2: Build a MemoryManager from config. Returns None on failure/disabled."""
         try:
             from core.config import HarnessConfig
             from memory.manager import MemoryManager
 
             config = HarnessConfig.from_env()
             if config.memory.enabled:
-                self._memory_manager = MemoryManager(
+                mgr = MemoryManager(
                     config=config.memory,
                     session_store=store,
                 )
-                # Run maintenance before execution
-                self._memory_manager.run_maintenance()
-            else:
-                self._memory_manager = None
+                mgr.run_maintenance()
+                return mgr
+            return None
         except Exception as exc:
             import logging
             logging.getLogger(__name__).debug("Memory manager init skipped: %s", exc)
-            self._memory_manager = None
+            return None
 
     def _create_execution_engine(
         self,
@@ -666,6 +741,7 @@ class RunService:
         store: SessionStore,
         replan_handler: Any | None = None,
         work_dir: Path | None = None,
+        memory_manager: Any | None = None,
     ) -> DAGExecutionEngine:
         """Build a DAGExecutionEngine with agent pool, failure handler, and optional replan handler."""
         registry = AgentRegistry()
@@ -675,9 +751,12 @@ class RunService:
         if getattr(self, "policy", None) is not None:
             policy = self.policy
         else:
+            # Load project-level guardrail overrides from .harness/config.yaml
+            project_guardrails = self._load_project_guardrails(work_dir)
             policy = GuardrailPolicy(
-                mode=PermissionMode.ACCEPT_EDITS,
-                auto_approve_read=True,
+                mode=project_guardrails.get("permission_mode", PermissionMode.ACCEPT_EDITS),
+                auto_approve_read=project_guardrails.get("auto_approve_read", True),
+                denied_commands=project_guardrails.get("denied_commands", []),
                 max_iterations=self.max_iterations,
             )
 
@@ -702,7 +781,7 @@ class RunService:
             timeout=self.agent_timeout,
             max_context_tokens=self.max_context_tokens,
             llm_router=getattr(self, "llm_router", None),
-            memory_manager=getattr(self, "_memory_manager", None),
+            memory_manager=memory_manager,
         )
 
         # Orchestrator for failure handling
@@ -718,6 +797,6 @@ class RunService:
             max_parallel=self.max_parallel,
             evaluator=evaluator,
             artifact_path=self.artifact_path,
-            memory_manager=getattr(self, "_memory_manager", None),
+            memory_manager=memory_manager,
             session_id=session_id,
         )

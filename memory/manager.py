@@ -122,6 +122,11 @@ class MemoryManager:
                 f"({self.config.max_content_length})"
             )
 
+        if scope == MemoryScope.SESSION and not session_id:
+            raise ValueError(
+                "session_id is required when storing SESSION-scoped memory"
+            )
+
         if keywords is None:
             keywords = _extract_keywords(content)
 
@@ -200,11 +205,13 @@ class MemoryManager:
         session_id: str | None = None,
     ) -> list[MemoryEntry]:
         """Retrieve relevant memories for an agent and task."""
+        # Fetch more than needed so task-specific re-ranking has a bigger pool
+        fetch_limit = self.config.retrieval_limit * 3
         entries = self.store.get_relevant(
             agent_type=agent_type,
             session_id=session_id,
             context=task_description,
-            limit=self.config.retrieval_limit,
+            limit=fetch_limit,
         )
 
         # Re-score with task-specific relevance

@@ -62,6 +62,9 @@ class DAGExecutionEngine:
         # M3.2: Memory integration
         memory_manager: Any | None = None,
         session_id: str | None = None,
+        # Retry backoff configuration
+        backoff_base: float = 2.0,
+        backoff_cap: float = 60.0,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -71,6 +74,8 @@ class DAGExecutionEngine:
         self.evaluator = evaluator
         self.artifact_path = artifact_path
         self.job_timeout = job_timeout
+        self.backoff_base = backoff_base
+        self.backoff_cap = backoff_cap
         self.event_handlers: list[EventHandler] = []
         # M2.0: Watchdog configuration
         self.heartbeat_interval_sec = heartbeat_interval_sec
@@ -91,10 +96,9 @@ class DAGExecutionEngine:
         """Emit execution event to all handlers."""
         for handler in self.event_handlers:
             try:
-                if asyncio.iscoroutinefunction(handler):
-                    await handler(event)
-                else:
-                    handler(event)
+                result = handler(event)
+                if asyncio.iscoroutine(result):
+                    await result
             except Exception as exc:
                 # Don't let event handlers break execution, but keep traceability.
                 logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
@@ -264,6 +268,17 @@ class DAGExecutionEngine:
                             dag, failed_id, dag.nodes[failed_id].error,
                         )
 
+                        # Emit audit event for the failure decision
+                        await self._emit(ExecutionEvent(
+                            node_id=failed_id,
+                            event_type="failure_decision",
+                            details={
+                                "action": decision.action,
+                                "reasoning": decision.reasoning,
+                                "error": dag.nodes[failed_id].error,
+                            },
+                        ))
+
                         if decision.action == "abort":
                             self._skip_remaining(dag, levels, level_idx + 1)
                             return dag
@@ -325,8 +340,7 @@ class DAGExecutionEngine:
 
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""
-        # Base exponential backoff with a hard cap at 60s.
-        return min(2 ** retry_count, 60.0)
+        return min(self.backoff_base ** retry_count, self.backoff_cap)
 
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
         """Execute a single DAG node with retry logic."""
