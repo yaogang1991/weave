@@ -99,9 +99,11 @@ class MemoryManager:
 
     def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """Emit an event to the session store if available."""
-        if self.session_store and hasattr(self.session_store, "emit_event") and self._session_id:
+        if self.session_store and hasattr(self.session_store, "emit_event"):
             try:
-                self.session_store.emit_event(self._session_id, event_type, payload)
+                sid = self._session_id or payload.get("session_id")
+                if sid:
+                    self.session_store.emit_event(sid, event_type, payload)
             except Exception as e:
                 logger.debug("Failed to emit memory event: %s", e)
 
@@ -234,16 +236,20 @@ class MemoryManager:
             limit=fetch_limit,
         )
 
-        # Re-score with task-specific relevance (in-memory only)
+        # Re-score with task-specific relevance
         now = datetime.now(timezone.utc)
         query_tokens = set(re.findall(r"\w+", task_description.lower()))
         for entry in entries:
             entry.relevance_score = _compute_relevance(
                 entry, query_tokens, now, self.config.decay_half_life_days,
             )
-            # Update access stats in-memory only; persisted by run_maintenance
+            # Update access stats and persist
             entry.access_count += 1
             entry.last_accessed_at = now
+            try:
+                self.store.update(entry)
+            except Exception:
+                logger.debug("Failed to persist access stats for %s", entry.id)
 
         # Re-sort by updated score
         entries.sort(key=lambda e: e.relevance_score, reverse=True)

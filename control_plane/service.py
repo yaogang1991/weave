@@ -769,14 +769,23 @@ class RunService:
         result_dag = await engine.execute(dag)
 
         # M3.5: Post-execution change verification
-        if impact_scope and before_snapshot and work_dir:
+        if impact_scope and work_dir:
             try:
                 from analysis.change_verifier import ChangeVerifier
                 from core.models import MemoryType, MemoryScope
+                # Use coverage_threshold from config (or default 0.7)
+                config = getattr(self, "_harness_config", None)
+                threshold = (
+                    config.impact.coverage_threshold
+                    if config else 0.7
+                )
                 verifier = ChangeVerifier(
                     project_path=str(work_dir),
+                    coverage_threshold=threshold,
                 )
-                verification = verifier.verify(impact_scope, before_snapshot)
+                # If no baseline snapshot, capture one now (empty = no prior state)
+                actual_before = before_snapshot if before_snapshot else {}
+                verification = verifier.verify(impact_scope, actual_before)
                 if getattr(self, "_memory_manager", None):
                     self._memory_manager.store_learning(
                         agent_type="impact_analyzer",
@@ -938,6 +947,8 @@ class RunService:
             self._impact_predictor = ImpactPredictor(
                 llm_config=self.llm_config,
                 memory_manager=getattr(self, "_memory_manager", None),
+                max_predicted_files=config.impact.max_predicted_files,
+                confidence_threshold=config.impact.confidence_threshold,
             )
             self._change_verifier = ChangeVerifier(
                 project_path=".",

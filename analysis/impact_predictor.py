@@ -27,9 +27,13 @@ class ImpactPredictor:
         self,
         llm_config: Any | None = None,
         memory_manager: Any | None = None,
+        max_predicted_files: int = 50,
+        confidence_threshold: float = 0.5,
     ) -> None:
         self.llm_config = llm_config
         self.memory_manager = memory_manager
+        self.max_predicted_files = max_predicted_files
+        self.confidence_threshold = confidence_threshold
 
     async def predict(
         self,
@@ -76,7 +80,7 @@ class ImpactPredictor:
         expanded = self._expand_with_dependencies(matched_files, dep_graph)
 
         # Deduplicate
-        predicted_files = sorted(set(expanded))
+        predicted_files = sorted(set(expanded))[:self.max_predicted_files]
 
         # Extract module names
         predicted_modules = sorted({

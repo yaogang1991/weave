@@ -326,22 +326,17 @@ class DAGExecutionEngine:
                                         node.status = NodeStatus.RETRYING
                                         node.error = ""
                                         await self._execute_single_node(dag, failed_id)
-                                        if node.status == NodeStatus.SUCCESS:
-                                            # Both fixed — continue to next level
-                                            level_idx += 1
-                                            break
                             else:
                                 # Normal retry: retry the failed node itself
                                 node.status = NodeStatus.RETRYING
                                 node.error = ""
                                 await self._execute_single_node(dag, failed_id)
-                                if node.status == NodeStatus.SUCCESS:
-                                    level_idx += 1
-                                    break
 
-                            # Retry did not resolve the failure
-                            self._skip_remaining(dag, levels, level_idx + 1)
-                            return dag
+                            # Check if retry resolved this failure
+                            if dag.nodes[failed_id].status != NodeStatus.SUCCESS:
+                                # This failure was not resolved
+                                self._skip_remaining(dag, levels, level_idx + 1)
+                                return dag
 
                         elif decision.action == "skip":
                             dag.nodes[failed_id].status = NodeStatus.SKIPPED

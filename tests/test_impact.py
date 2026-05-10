@@ -268,7 +268,7 @@ class TestChangeVerifier:
         assert "app/models.py" in snapshot
 
     def test_verify_no_changes(self, verifier):
-        snapshot = {"a.py": 1000.0, "b.py": 2000.0}
+        snapshot = {"a.py": (1000.0, 100), "b.py": (2000.0, 200)}
         scope = ImpactScope(
             requirement="test",
             predicted_files=["a.py"],
@@ -278,8 +278,8 @@ class TestChangeVerifier:
         assert result.actual_changed_files == []
 
     def test_verify_all_predicted(self, verifier):
-        before = {"a.py": 1000.0, "b.py": 2000.0}
-        after = {"a.py": 3000.0, "b.py": 2000.0}
+        before = {"a.py": (1000.0, 100), "b.py": (2000.0, 200)}
+        after = {"a.py": (3000.0, 150), "b.py": (2000.0, 200)}
         scope = ImpactScope(
             requirement="test",
             predicted_files=["a.py"],
@@ -289,8 +289,8 @@ class TestChangeVerifier:
         assert result.coverage == 1.0
 
     def test_verify_unexpected_changes(self, verifier):
-        before = {"a.py": 1000.0}
-        after = {"a.py": 2000.0, "b.py": 3000.0}
+        before = {"a.py": (1000.0, 100)}
+        after = {"a.py": (2000.0, 120), "b.py": (3000.0, 80)}
         scope = ImpactScope(
             requirement="test",
             predicted_files=["a.py"],
@@ -300,8 +300,8 @@ class TestChangeVerifier:
         assert result.coverage == 0.5
 
     def test_verify_passes_threshold(self, verifier):
-        before = {"a.py": 1000.0, "b.py": 2000.0}
-        after = {"a.py": 3000.0, "b.py": 4000.0}
+        before = {"a.py": (1000.0, 100), "b.py": (2000.0, 200)}
+        after = {"a.py": (3000.0, 150), "b.py": (4000.0, 250)}
         scope = ImpactScope(
             requirement="test",
             predicted_files=["a.py", "b.py"],
@@ -311,8 +311,8 @@ class TestChangeVerifier:
 
     def test_verify_fails_threshold(self):
         v = ChangeVerifier(project_path="/tmp", coverage_threshold=0.9)
-        before = {"a.py": 1000.0, "b.py": 2000.0, "c.py": 3000.0}
-        after = {"a.py": 4000.0, "b.py": 5000.0, "c.py": 6000.0}
+        before = {"a.py": (1000.0, 100), "b.py": (2000.0, 200), "c.py": (3000.0, 300)}
+        after = {"a.py": (4000.0, 130), "b.py": (5000.0, 230), "c.py": (6000.0, 330)}
         scope = ImpactScope(
             requirement="test",
             predicted_files=["a.py"],
@@ -321,8 +321,8 @@ class TestChangeVerifier:
         assert not result.passes  # coverage=0.33 < 0.9
 
     def test_verify_missed_files(self, verifier):
-        before = {"a.py": 1000.0}
-        after = {"a.py": 1000.0}  # No changes
+        before = {"a.py": (1000.0, 100)}
+        after = {"a.py": (1000.0, 100)}  # No changes
         scope = ImpactScope(
             requirement="test",
             predicted_files=["a.py", "b.py"],
@@ -331,21 +331,27 @@ class TestChangeVerifier:
         assert "a.py" in result.missed_files or "b.py" in result.missed_files
 
     def test_get_changed_files_new_file(self, verifier):
-        before = {"a.py": 1000.0}
-        after = {"a.py": 1000.0, "new.py": 5000.0}
+        before = {"a.py": (1000.0, 100)}
+        after = {"a.py": (1000.0, 100), "new.py": (5000.0, 50)}
         changed = verifier.get_changed_files(before, after)
         assert "new.py" in changed
         assert "a.py" not in changed
 
     def test_get_changed_files_deleted(self, verifier):
-        before = {"a.py": 1000.0, "b.py": 2000.0}
-        after = {"a.py": 1000.0}
+        before = {"a.py": (1000.0, 100), "b.py": (2000.0, 200)}
+        after = {"a.py": (1000.0, 100)}
         changed = verifier.get_changed_files(before, after)
         assert "b.py" in changed
 
     def test_get_changed_files_modified(self, verifier):
-        before = {"a.py": 1000.0}
-        after = {"a.py": 2000.0}
+        before = {"a.py": (1000.0, 100)}
+        after = {"a.py": (2000.0, 100)}
+        changed = verifier.get_changed_files(before, after)
+        assert "a.py" in changed
+
+    def test_get_changed_files_size_only_change(self, verifier):
+        before = {"a.py": (1000.0, 100)}
+        after = {"a.py": (1000.0, 150)}
         changed = verifier.get_changed_files(before, after)
         assert "a.py" in changed
 
@@ -420,13 +426,20 @@ class TestImpactIntegration:
 
 
 class TestImpactCLI:
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        import sys
+        from pathlib import Path
+        self._root = str(Path(__file__).resolve().parent.parent)
+        self._python = sys.executable
+
     def test_impact_predict_command(self):
         import subprocess
         result = subprocess.run(
-            [".venv/bin/python", "main.py", "impact-predict",
+            [self._python, "main.py", "impact-predict",
              "Fix bug", "--project", "."],
             capture_output=True, text=True,
-            cwd="/Users/yaogang/project/harness",
+            cwd=self._root,
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -436,10 +449,10 @@ class TestImpactCLI:
     def test_impact_graph_command(self):
         import subprocess
         result = subprocess.run(
-            [".venv/bin/python", "main.py", "impact-graph",
+            [self._python, "main.py", "impact-graph",
              "--project", "."],
             capture_output=True, text=True,
-            cwd="/Users/yaogang/project/harness",
+            cwd=self._root,
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -449,9 +462,9 @@ class TestImpactCLI:
     def test_impact_history_command(self):
         import subprocess
         result = subprocess.run(
-            [".venv/bin/python", "main.py", "impact-history"],
+            [self._python, "main.py", "impact-history"],
             capture_output=True, text=True,
-            cwd="/Users/yaogang/project/harness",
+            cwd=self._root,
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)

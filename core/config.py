@@ -166,7 +166,7 @@ class MemoryConfig(BaseModel):
 class LearningConfig(BaseModel):
     """Configuration for the M3.3 Self-Learning system."""
     enabled: bool = True
-    analysis_interval_hours: float = Field(default=6.0, ge=0.1)
+    analysis_interval_hours: float = Field(default=6.0, ge=0.0)
     min_samples: int = Field(default=5, ge=1)                # Min executions before analysis
     max_insights: int = Field(default=100, ge=1)
     confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
@@ -230,6 +230,9 @@ class HarnessConfig(BaseModel):
     approval_timeout_sec: int = Field(
         default_factory=lambda: int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300"))
     )
+    cleanup_policy: str = Field(
+        default_factory=lambda: os.getenv("HARNESS_CLEANUP_POLICY", "on_success")
+    )
 
     # M3.1: Multi-model routing
     model_routing: ModelRoutingConfig = Field(default_factory=ModelRoutingConfig)
@@ -271,6 +274,7 @@ class HarnessConfig(BaseModel):
             non_interactive=os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
             in ("true", "1", "yes"),
             approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
+            cleanup_policy=os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
             model_routing=ModelRoutingConfig.from_env(),
             memory=MemoryConfig(
                 enabled=os.getenv("HARNESS_MEMORY_ENABLED", "true").lower()

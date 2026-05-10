@@ -33,9 +33,9 @@ class ChangeVerifier:
         self.project_path = Path(project_path).resolve()
         self.coverage_threshold = coverage_threshold
 
-    def capture_snapshot(self) -> dict[str, float]:
-        """Capture current file modification times as a baseline snapshot."""
-        snapshot: dict[str, float] = {}
+    def capture_snapshot(self) -> dict[str, tuple[float, int]]:
+        """Capture current file modification times and sizes as a baseline snapshot."""
+        snapshot: dict[str, tuple[float, int]] = {}
         for ext in self._TRACKED_EXTENSIONS:
             for tracked_file in self.project_path.rglob(f"*{ext}"):
                 parts = tracked_file.relative_to(self.project_path).parts
@@ -43,7 +43,8 @@ class ChangeVerifier:
                     continue
                 try:
                     rel = str(tracked_file.relative_to(self.project_path))
-                    snapshot[rel] = tracked_file.stat().st_mtime
+                    stat = tracked_file.stat()
+                    snapshot[rel] = (stat.st_mtime, stat.st_size)
                 except OSError:
                     continue
         return snapshot
@@ -51,8 +52,8 @@ class ChangeVerifier:
     def verify(
         self,
         impact_scope: ImpactScope,
-        before_snapshot: dict[str, float],
-        after_snapshot: dict[str, float] | None = None,
+        before_snapshot: dict[str, tuple[float, int]],
+        after_snapshot: dict[str, tuple[float, int]] | None = None,
     ) -> VerificationResult:
         """Compare actual changes against predicted scope."""
         if after_snapshot is None:
@@ -99,8 +100,8 @@ class ChangeVerifier:
 
     def get_changed_files(
         self,
-        before: dict[str, float],
-        after: dict[str, float],
+        before: dict[str, tuple[float, int]],
+        after: dict[str, tuple[float, int]],
     ) -> list[str]:
         """Diff two snapshots to find changed/new/deleted files."""
         changed: list[str] = []
@@ -112,7 +113,10 @@ class ChangeVerifier:
             elif f not in after:
                 # Deleted file
                 changed.append(f)
-            elif abs(before[f] - after[f]) > 0.001:
-                # Modified file
-                changed.append(f)
+            else:
+                before_mtime, before_size = before[f]
+                after_mtime, after_size = after[f]
+                if abs(before_mtime - after_mtime) > 0.001 or before_size != after_size:
+                    # Modified file (mtime or size changed)
+                    changed.append(f)
         return changed

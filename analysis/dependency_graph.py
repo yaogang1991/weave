@@ -133,22 +133,27 @@ class DependencyGraph:
                 for alias in node.names:
                     imports.append(alias.name)
             elif isinstance(node, ast.ImportFrom):
-                if node.level == 0 and node.module:
-                    # Absolute import: from foo.bar import baz
-                    imports.append(node.module)
+                if node.level == 0:
+                    # Absolute import
+                    if node.module:
+                        imports.append(node.module)
+                        # Also resolve imported names as submodules:
+                        # from app import models -> app.models
+                        for alias in node.names:
+                            imports.append(f"{node.module}.{alias.name}")
                 elif node.level > 0:
                     # Relative import: from . import X, from ..foo import bar
-                    rel = self._resolve_relative_import(node, abs_path)
-                    if rel:
-                        imports.append(rel)
+                    mods = self._resolve_relative_import(node, abs_path)
+                    imports.extend(mods)
         return imports
 
     def _resolve_relative_import(
         self, node: ast.ImportFrom, abs_path: Path,
-    ) -> str | None:
-        """Resolve a relative import to an absolute module name.
+    ) -> list[str]:
+        """Resolve a relative import to absolute module names.
 
         Handles: from . import X, from .foo import bar, from .. import X, etc.
+        Returns a list to support multi-name imports like `from . import a, b`.
         """
         rel_path = str(abs_path.relative_to(self.project_path))
         parts = Path(rel_path).parts
@@ -159,18 +164,24 @@ class DependencyGraph:
         # Go up (level - 1) levels from the package
         level = node.level
         if level - 1 > len(package_parts):
-            return None
+            return []
         if level > 1:
             base_parts = package_parts[:len(package_parts) - (level - 1)]
         else:
             base_parts = package_parts
 
         if node.module:
-            return ".".join(base_parts + [node.module]) if base_parts else node.module
-        elif base_parts:
-            # from . import X — return the package itself
-            return ".".join(base_parts)
-        return None
+            mod = ".".join(base_parts + [node.module]) if base_parts else node.module
+            return [mod]
+        else:
+            # from . import X — resolve each imported name as a sibling module
+            results: list[str] = []
+            for alias in node.names:
+                if base_parts:
+                    results.append(".".join(base_parts + [alias.name]))
+                else:
+                    results.append(alias.name)
+            return results
 
     def _resolve_module(self, module_name: str, from_file: str) -> str | None:
         """Resolve an import module name to a project-relative file path."""
