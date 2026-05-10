@@ -1,0 +1,224 @@
+"""
+ImpactPredictor — Predict which files a requirement will affect.
+
+Uses DependencyGraph for file-level analysis and keyword matching
+to predict impact scope. Optionally uses LLM for refinement.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from pathlib import Path
+from typing import Any
+
+from core.models import ImpactRiskLevel, ImpactScope
+from analysis.dependency_graph import DependencyGraph
+
+logger = logging.getLogger(__name__)
+
+_WORD_RE = re.compile(r"[a-z][a-z0-9_]*", re.IGNORECASE)
+
+
+class ImpactPredictor:
+    """Predict file/module impact from a natural-language requirement."""
+
+    def __init__(
+        self,
+        llm_config: Any | None = None,
+        memory_manager: Any | None = None,
+    ) -> None:
+        self.llm_config = llm_config
+        self.memory_manager = memory_manager
+
+    async def predict(
+        self,
+        requirement: str,
+        project_path: str,
+    ) -> ImpactScope:
+        """Predict the impact scope of a requirement."""
+        # Check memory for similar past predictions
+        historical = self._get_historical_prediction(requirement)
+        if historical and historical.confidence >= 0.7:
+            logger.info("Using historical prediction (confidence=%.2f)", historical.confidence)
+            return historical
+
+        # Static prediction path
+        return self.predict_static(requirement, project_path)
+
+    def predict_static(
+        self,
+        requirement: str,
+        project_path: str,
+    ) -> ImpactScope:
+        """Static-only prediction using keyword matching + dependency graph."""
+        # Build dependency graph
+        dep_graph = DependencyGraph(project_path)
+        dep_graph.build()
+
+        # Extract keywords for confidence computation
+        words = set(_WORD_RE.findall(requirement.lower()))
+        stop_words = {
+            "the", "a", "an", "and", "or", "to", "for", "in", "on",
+            "of", "with", "is", "are", "be", "been", "was", "were",
+            "that", "this", "it", "from", "by", "at", "as", "but",
+            "not", "add", "build", "create", "make", "new", "set",
+            "get", "do", "can", "will", "should", "would", "could",
+            "have", "has", "had", "use", "using", "need", "needs",
+            "all", "some", "any", "no", "into", "about", "up",
+        }
+        keywords = words - stop_words
+
+        # Keyword match against file names
+        matched_files = self._keyword_match_files(requirement, project_path)
+
+        # Expand with dependency graph
+        expanded = self._expand_with_dependencies(matched_files, dep_graph)
+
+        # Deduplicate
+        predicted_files = sorted(set(expanded))
+
+        # Extract module names
+        predicted_modules = sorted({
+            str(Path(f).parent).replace("/", ".")
+            for f in predicted_files
+            if "/" in f
+        })
+
+        # Compute risk and confidence
+        risk_level = self._compute_risk_level(
+            len(predicted_files), len(predicted_modules),
+        )
+        # Confidence based on match precision: high if keywords map well to files
+        keyword_count = len(keywords)
+        if keyword_count == 0:
+            confidence = 0.0
+        elif len(matched_files) == 0:
+            confidence = 0.0
+        else:
+            # More matches per keyword = higher confidence, capped at 1.0
+            direct_ratio = min(len(matched_files) / keyword_count, 1.0)
+            # Penalize if dependency expansion is large relative to direct matches
+            expansion_ratio = len(matched_files) / max(len(predicted_files), 1)
+            confidence = direct_ratio * expansion_ratio
+            confidence = min(max(confidence, 0.1), 1.0)
+
+        return ImpactScope(
+            requirement=requirement,
+            predicted_files=predicted_files,
+            predicted_modules=predicted_modules,
+            risk_level=risk_level,
+            confidence=confidence,
+            reasoning=(
+                f"Static analysis: {len(matched_files)} direct matches, "
+                f"{len(predicted_files)} total (with dependencies)"
+            ),
+        )
+
+    def _keyword_match_files(
+        self,
+        requirement: str,
+        project_path: str,
+    ) -> list[str]:
+        """Match requirement keywords against file/module names."""
+        words = set(_WORD_RE.findall(requirement.lower()))
+        # Remove common stop words
+        stop_words = {
+            "the", "a", "an", "and", "or", "to", "for", "in", "on",
+            "of", "with", "is", "are", "be", "been", "was", "were",
+            "that", "this", "it", "from", "by", "at", "as", "but",
+            "not", "add", "build", "create", "make", "new", "set",
+            "get", "do", "can", "will", "should", "would", "could",
+            "have", "has", "had", "use", "using", "need", "needs",
+            "all", "some", "any", "no", "into", "about", "up",
+        }
+        keywords = words - stop_words
+
+        matches: list[str] = []
+        project = Path(project_path).resolve()
+        for py_file in project.rglob("*.py"):
+            parts = py_file.relative_to(project).parts
+            if any(p in {".venv", "venv", "__pycache__", ".git", "node_modules"} for p in parts):
+                continue
+            rel = str(py_file.relative_to(project))
+            file_stem = py_file.stem.lower()
+            rel_lower = rel.lower().replace("/", "_").replace(".py", "")
+            for kw in keywords:
+                if kw in file_stem or kw in rel_lower:
+                    matches.append(rel)
+                    break
+
+        return matches
+
+    def _expand_with_dependencies(
+        self,
+        files: list[str],
+        dep_graph: DependencyGraph,
+        depth: int = 1,
+    ) -> list[str]:
+        """Expand initial matches with dependency graph traversal."""
+        result = list(files)
+        current = set(files)
+        for _ in range(depth):
+            next_level: set[str] = set()
+            for f in current:
+                deps = dep_graph.get_dependencies(f)
+                deps = {d for d in deps if d not in current}
+                next_level.update(deps)
+                dependents = dep_graph.get_dependents(f)
+                dependents = {d for d in dependents if d not in current}
+                next_level.update(dependents)
+            result.extend(sorted(next_level))
+            current.update(next_level)
+        return result
+
+    def _get_historical_prediction(
+        self,
+        requirement: str,
+    ) -> ImpactScope | None:
+        """Check memory for similar past predictions."""
+        if self.memory_manager is None:
+            return None
+        try:
+            from memory.manager import _extract_keywords
+            keywords = _extract_keywords(requirement, max_keywords=5)
+            entries = self.memory_manager.store.search(
+                query="impact_analysis " + " ".join(keywords),
+                limit=3,
+            )
+            for entry in entries:
+                if "impact_analysis" in entry.keywords:
+                    # Reconstruct predicted files from metadata if available
+                    predicted_files = entry.metadata.get("predicted_files", [])
+                    # Fallback: try to parse file list from content
+                    if not predicted_files:
+                        import re
+                        file_matches = re.findall(
+                            r"[\w/]+\.py", entry.content,
+                        )
+                        predicted_files = file_matches[:10]
+                    return ImpactScope(
+                        requirement=requirement,
+                        predicted_files=predicted_files,
+                        confidence=0.75,
+                        reasoning=f"Based on similar past task: {entry.content[:100]}",
+                    )
+        except Exception as e:
+            logger.debug("Historical prediction lookup failed: %s", e)
+        return None
+
+    def _compute_risk_level(
+        self,
+        file_count: int,
+        module_count: int,
+    ) -> ImpactRiskLevel:
+        """Compute risk from file count and module spread."""
+        if file_count == 0:
+            return ImpactRiskLevel.LOW
+        if file_count <= 2 and module_count <= 1:
+            return ImpactRiskLevel.LOW
+        if file_count <= 5 and module_count <= 2:
+            return ImpactRiskLevel.MEDIUM
+        if file_count <= 15 and module_count <= 4:
+            return ImpactRiskLevel.HIGH
+        return ImpactRiskLevel.CRITICAL

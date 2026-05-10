@@ -90,16 +90,18 @@ class MemoryManager:
         self,
         config: Any,  # MemoryConfig from core.config
         session_store: Any = None,
+        session_id: str | None = None,
     ) -> None:
         self.config = config
         self.store = MemoryStore(config.base_path)
         self.session_store = session_store
+        self._session_id = session_id
 
     def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """Emit an event to the session store if available."""
-        if self.session_store and hasattr(self.session_store, "emit_event"):
+        if self.session_store and hasattr(self.session_store, "emit_event") and self._session_id:
             try:
-                self.session_store.emit_event(event_type, payload)
+                self.session_store.emit_event(self._session_id, event_type, payload)
             except Exception as e:
                 logger.debug("Failed to emit memory event: %s", e)
 
@@ -114,6 +116,7 @@ class MemoryManager:
         session_id: str | None = None,
         source_node_id: str | None = None,
         keywords: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> MemoryEntry:
         """Store a learning/memory entry."""
         if len(content) > self.config.max_content_length:
@@ -142,6 +145,7 @@ class MemoryManager:
             session_id=session_id,
             source_node_id=source_node_id,
             expires_at=expires_at,
+            metadata=metadata or {},
         )
 
         self.store.store(entry)
@@ -181,6 +185,7 @@ class MemoryManager:
             session_id=session_id,
             source_node_id=node_id,
             keywords=keywords,
+            metadata={"success": success},
         )
 
     def store_preference(
@@ -198,6 +203,21 @@ class MemoryManager:
 
     # -- Retrieving memories --
 
+    def list_entries(
+        self,
+        scope: MemoryScope | None = None,
+        agent_type: str | None = None,
+        session_id: str | None = None,
+        memory_type: MemoryType | None = None,
+    ) -> list[MemoryEntry]:
+        """List memory entries via the store. Wrapper for external consumers."""
+        return self.store.list_entries(
+            scope=scope,
+            agent_type=agent_type,
+            session_id=session_id,
+            memory_type=memory_type,
+        )
+
     def get_context_for_agent(
         self,
         agent_type: str,
@@ -214,14 +234,16 @@ class MemoryManager:
             limit=fetch_limit,
         )
 
-        # Re-score with task-specific relevance
+        # Re-score with task-specific relevance (in-memory only)
         now = datetime.now(timezone.utc)
         query_tokens = set(re.findall(r"\w+", task_description.lower()))
         for entry in entries:
             entry.relevance_score = _compute_relevance(
                 entry, query_tokens, now, self.config.decay_half_life_days,
             )
-            self.store.record_access(entry.id)
+            # Update access stats in-memory only; persisted by run_maintenance
+            entry.access_count += 1
+            entry.last_accessed_at = now
 
         # Re-sort by updated score
         entries.sort(key=lambda e: e.relevance_score, reverse=True)
@@ -254,7 +276,8 @@ class MemoryManager:
         entries: list[MemoryEntry] = []
 
         # Store the task outcome as an EXPERIENCE
-        success = execution_result.get("success", True)
+        status = execution_result.get("status", "completed")
+        success = execution_result.get("success", status == "completed")
         summary = execution_result.get("summary", execution_result.get("output", ""))
         if summary:
             outcome = self.store_task_outcome(
@@ -292,8 +315,26 @@ class MemoryManager:
         """Run cleanup tasks. Returns stats."""
         expired = self.store.cleanup_expired()
         pruned = self.store.enforce_limits(self.config.max_entries_per_agent)
+        # Flush any in-memory access count changes to disk
+        self._flush_access_updates()
         self.store.recompute_relevance(self.config.decay_half_life_days)
         return {"expired": expired, "pruned": pruned}
+
+    def _flush_access_updates(self) -> None:
+        """Persist entries whose access_count has changed since last load."""
+        for entry in self.store.list_entries():
+            path = self.store._find_entry_path(entry.id)
+            if path:
+                # Only write if file content differs (access_count changed)
+                try:
+                    import json
+                    with open(path, "r", encoding="utf-8") as f:
+                        disk_data = json.load(f)
+                    if disk_data.get("access_count", 0) != entry.access_count:
+                        from memory.store import _json_dump_atomic
+                        _json_dump_atomic(entry.model_dump(mode="json"), path)
+                except Exception:
+                    pass
 
     # -- Statistics --
 
