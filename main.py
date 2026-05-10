@@ -1122,8 +1122,8 @@ Examples:
         "learning-analyze", "learning-insights", "learning-status",
         "templates",
     }
-    # Template-based plan/run doesn't need an LLM key
-    if args.command in ("plan", "run") and getattr(args, "template", None):
+    # Template-based plan doesn't need an LLM key (run still executes agents)
+    if args.command == "plan" and getattr(args, "template", None):
         _NO_API_KEY_COMMANDS.add(args.command)
     if args.command not in _NO_API_KEY_COMMANDS:
         from core.config import _CLAUDE_ENV

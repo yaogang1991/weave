@@ -85,12 +85,12 @@ class TemplateRegistry:
 
         nodes_dict: dict[str, DAGNode] = {}
         for node_def in tpl.nodes:
-            node_dict = {
-                k: self._substitute(str(v), merged_vars)
-                if isinstance(v, str) else v
-                for k, v in node_def.items()
-            }
+            node_dict = self._substitute_deep(node_def, merged_vars)
             node = DAGNode(**node_dict)
+            if node.id in nodes_dict:
+                raise ValueError(
+                    f"Duplicate node ID '{node.id}' in template '{template_name}'"
+                )
             nodes_dict[node.id] = node
 
         edges: list[DAGEdge] = []
@@ -112,11 +112,21 @@ class TemplateRegistry:
                 )
             edges.append(DAGEdge(from_node=from_node, to_node=to_node))
 
-        return DAG(
+        dag = DAG(
             nodes=nodes_dict,
             edges=edges,
             reasoning=self._substitute(tpl.reasoning_template, merged_vars),
         )
+
+        # Warn on unresolved placeholders
+        warnings = self.validate_substitution(template_name, dag, merged_vars)
+        if warnings:
+            logger.warning(
+                "Template '%s' has %d unresolved placeholder(s): %s",
+                template_name, len(warnings), "; ".join(warnings),
+            )
+
+        return dag
 
     def validate_substitution(
         self,
@@ -144,6 +154,16 @@ class TemplateRegistry:
                     warnings_list.append(msg)
 
         return warnings_list
+
+    def _substitute_deep(self, obj: dict | list, variables: dict[str, str]) -> dict | list:
+        """Recursively substitute {var} placeholders in dicts and lists."""
+        if isinstance(obj, dict):
+            return {k: self._substitute_deep(v, variables) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._substitute_deep(item, variables) for item in obj]
+        if isinstance(obj, str):
+            return self._substitute(obj, variables)
+        return obj
 
     def _substitute(self, text: str, variables: dict[str, str]) -> str:
         """Replace {var} placeholders in text."""
