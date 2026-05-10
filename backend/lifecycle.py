@@ -53,6 +53,12 @@ class BackendManager:
             "critical": "worktree",
         }
         self.cleanup_policy = cleanup_policy
+        _VALID_POLICIES = ("always", "on_success", "never")
+        if self.cleanup_policy not in _VALID_POLICIES:
+            raise ValueError(
+                f"Invalid cleanup_policy '{self.cleanup_policy}', "
+                f"must be one of {_VALID_POLICIES}"
+            )
         self._backends: dict[str, ExecutionBackend] = {}
         self._active_runs: dict[str, ExecutionBackend] = {}  # run_id -> backend
 

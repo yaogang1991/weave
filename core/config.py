@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LLMConfig(BaseModel):
@@ -39,6 +39,8 @@ class MCPConfig(BaseModel):
 
 
 class HarnessConfig(BaseModel):
+    model_config = ConfigDict(validate_default=True)
+
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
@@ -112,4 +114,5 @@ class HarnessConfig(BaseModel):
             non_interactive=os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
             in ("true", "1", "yes"),
             approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
+            cleanup_policy=os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
         )

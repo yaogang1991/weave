@@ -70,12 +70,12 @@ class ExecutionBackend(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path:
+    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path | None:
         """
         Preserve execution scene (called on failure, for debugging).
 
         Returns:
-            Path: Preserved scene path
+            Path: Preserved scene path, or None if nothing to preserve
         """
         ...
 

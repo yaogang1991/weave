@@ -321,7 +321,7 @@ class TestCleanupPolicyContract:
 
 
 class TestCleanupPolicyValidation:
-    """Verify cleanup_policy validation in HarnessConfig."""
+    """Verify cleanup_policy validation in HarnessConfig and BackendManager."""
 
     def test_valid_policies_accepted(self):
         """All valid policy values should be accepted."""
@@ -343,3 +343,35 @@ class TestCleanupPolicyValidation:
         import pydantic
         with pytest.raises(pydantic.ValidationError):
             HarnessConfig(cleanup_policy="Always")
+
+    def test_from_env_validates_cleanup_policy(self):
+        """from_env() must validate cleanup_policy from environment."""
+        import os
+        from core.config import HarnessConfig
+        import pydantic
+        original = os.environ.get("HARNESS_CLEANUP_POLICY")
+        try:
+            os.environ["HARNESS_CLEANUP_POLICY"] = "Always"
+            with pytest.raises(pydantic.ValidationError):
+                HarnessConfig.from_env()
+        finally:
+            if original is None:
+                os.environ.pop("HARNESS_CLEANUP_POLICY", None)
+            else:
+                os.environ["HARNESS_CLEANUP_POLICY"] = original
+
+    def test_backend_manager_rejects_invalid_policy(self, tmp_path):
+        """BackendManager must reject invalid cleanup_policy."""
+        with pytest.raises(ValueError, match="Invalid cleanup_policy"):
+            BackendManager(
+                base_path=str(tmp_path),
+                cleanup_policy="Always",
+            )
+
+    def test_backend_manager_rejects_unknown_policy(self, tmp_path):
+        """BackendManager must reject unknown cleanup_policy."""
+        with pytest.raises(ValueError, match="Invalid cleanup_policy"):
+            BackendManager(
+                base_path=str(tmp_path),
+                cleanup_policy="sometimes",
+            )
