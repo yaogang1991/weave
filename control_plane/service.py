@@ -608,6 +608,13 @@ class RunService:
         # M3.2: Initialize memory manager for this execution
         self._init_memory_manager(store)
 
+        # M3.3: Run learning analysis if due
+        if getattr(self, "_learning_scheduler", None):
+            try:
+                self._learning_scheduler.maybe_run_analysis()
+            except Exception:
+                pass
+
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
@@ -637,6 +644,7 @@ class RunService:
             session_store=store,
             agent_registry=registry,
             llm_router=getattr(self, "llm_router", None),
+            learning_optimizer=getattr(self, "_learning_optimizer", None),
         )
 
     def _init_memory_manager(self, store: SessionStore) -> None:
@@ -659,6 +667,46 @@ class RunService:
             import logging
             logging.getLogger(__name__).debug("Memory manager init skipped: %s", exc)
             self._memory_manager = None
+
+        # M3.3: Initialize learning system
+        self._init_learning_system()
+
+    def _init_learning_system(self) -> None:
+        """M3.3: Initialize LearningScheduler from config."""
+        self._learning_scheduler = None
+        self._learning_optimizer = None
+        if not getattr(self, "_memory_manager", None):
+            return
+        try:
+            from core.config import HarnessConfig
+            from monitoring.metrics import MetricsCollector
+            from learning.analyzer import LearningAnalyzer
+            from learning.optimizer import LearningOptimizer
+            from learning.scheduler import LearningScheduler
+
+            config = HarnessConfig.from_env()
+            if not config.learning.enabled:
+                return
+
+            job_repo = getattr(self, "repository", None)
+            metrics_collector = MetricsCollector(job_repo) if job_repo else None
+
+            analyzer = LearningAnalyzer(
+                metrics_collector=metrics_collector,
+                memory_manager=self._memory_manager,
+            )
+            optimizer = LearningOptimizer(self._memory_manager)
+            scheduler = LearningScheduler(
+                config=config.learning,
+                analyzer=analyzer,
+                optimizer=optimizer,
+            )
+
+            self._learning_optimizer = optimizer
+            self._learning_scheduler = scheduler
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("Learning system init skipped: %s", exc)
 
     def _create_execution_engine(
         self,

@@ -142,6 +142,18 @@ class MemoryConfig(BaseModel):
     auto_store: bool = True             # Automatically store learnings after task
 
 
+class LearningConfig(BaseModel):
+    """Configuration for the M3.3 Self-Learning system."""
+    enabled: bool = True
+    analysis_interval_hours: float = 6.0
+    min_samples: int = 5                # Min executions before analysis
+    max_insights: int = 100
+    confidence_threshold: float = 0.7
+    base_path: str = Field(
+        default_factory=lambda: os.getenv("HARNESS_LEARNING_PATH", "./data/learning")
+    )
+
+
 class HarnessConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
@@ -190,6 +202,9 @@ class HarnessConfig(BaseModel):
 
     # M3.2: Agent Memory
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+
+    # M3.3: Self-Learning
+    learning: LearningConfig = Field(default_factory=LearningConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:

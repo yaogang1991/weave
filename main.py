@@ -691,6 +691,67 @@ async def cmd_memory_cleanup(args):
     print(json.dumps(result, indent=2, default=str))
 
 
+# =============================================================================
+# Learning CLI commands (M3.3)
+# =============================================================================
+
+
+def _make_learning_scheduler():
+    """Create a LearningScheduler from config."""
+    from learning.analyzer import LearningAnalyzer
+    from learning.optimizer import LearningOptimizer
+    from learning.scheduler import LearningScheduler
+    from control_plane.repository import JobRepository
+    from monitoring.metrics import MetricsCollector
+
+    config = HarnessConfig.from_env()
+    memory_manager = _make_memory_manager()
+    job_repo = JobRepository()
+    metrics_collector = MetricsCollector(job_repo)
+
+    analyzer = LearningAnalyzer(metrics_collector, memory_manager)
+    optimizer = LearningOptimizer(memory_manager)
+    return LearningScheduler(config.learning, analyzer, optimizer)
+
+
+async def cmd_learning_analyze(args):
+    """Trigger a learning analysis run."""
+    scheduler = _make_learning_scheduler()
+    result = scheduler.run_analysis()
+    print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_learning_insights(args):
+    """List stored learning insights."""
+    manager = _make_memory_manager()
+    # Learning insights are stored as FACT/EXPERIENCE memories with learning keywords
+    entries = manager.store.search(
+        query="recommendation pattern anti_pattern",
+        limit=args.limit,
+    )
+    result = [
+        {
+            "id": e.id,
+            "agent_type": e.agent_type,
+            "scope": e.scope.value,
+            "type": e.memory_type.value,
+            "content": e.content,
+            "keywords": e.keywords,
+            "relevance_score": e.relevance_score,
+            "created_at": e.created_at.isoformat(),
+        }
+        for e in entries
+    ]
+    print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_learning_status(args):
+    """Show learning system status."""
+    scheduler = _make_learning_scheduler()
+    status = scheduler.get_status()
+    print(json.dumps(status, indent=2, default=str))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Harness - Intelligent Multi-Agent Orchestration",
@@ -867,6 +928,23 @@ Examples:
     mem_cleanup_parser = subparsers.add_parser("memory-cleanup", help="Run memory maintenance")
     mem_cleanup_parser.set_defaults(func=cmd_memory_cleanup)
 
+    # ------------------------------------------------------------------
+    # Learning commands (M3.3)
+    # ------------------------------------------------------------------
+
+    # learning-analyze command
+    learn_analyze_parser = subparsers.add_parser("learning-analyze", help="Trigger learning analysis")
+    learn_analyze_parser.set_defaults(func=cmd_learning_analyze)
+
+    # learning-insights command
+    learn_insights_parser = subparsers.add_parser("learning-insights", help="List learning insights")
+    learn_insights_parser.add_argument("--limit", type=int, default=20)
+    learn_insights_parser.set_defaults(func=cmd_learning_insights)
+
+    # learning-status command
+    learn_status_parser = subparsers.add_parser("learning-status", help="Learning system status")
+    learn_status_parser.set_defaults(func=cmd_learning_status)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -874,7 +952,7 @@ Examples:
         sys.exit(1)
 
     # Ensure API key (skip for commands that don't need LLM)
-    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject", "memory-search", "memory-list", "memory-stats", "memory-add", "memory-cleanup"}
+    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject", "memory-search", "memory-list", "memory-stats", "memory-add", "memory-cleanup", "learning-analyze", "learning-insights", "learning-status"}
     if args.command not in _NO_API_KEY_COMMANDS:
         from core.config import _CLAUDE_ENV
         has_key = (
