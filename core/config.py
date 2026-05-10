@@ -264,4 +264,17 @@ class HarnessConfig(BaseModel):
                 retrieval_limit=int(os.getenv("HARNESS_MEMORY_RETRIEVAL_LIMIT", "10")),
                 decay_half_life_days=float(os.getenv("HARNESS_MEMORY_DECAY_DAYS", "30")),
             ),
+            learning=LearningConfig(
+                enabled=os.getenv("HARNESS_LEARNING_ENABLED", "true").lower()
+                not in ("false", "0", "no"),
+                analysis_interval_hours=float(
+                    os.getenv("HARNESS_LEARNING_INTERVAL_HOURS", "6.0")
+                ),
+                min_samples=int(os.getenv("HARNESS_LEARNING_MIN_SAMPLES", "5")),
+                max_insights=int(os.getenv("HARNESS_LEARNING_MAX_INSIGHTS", "100")),
+                confidence_threshold=float(
+                    os.getenv("HARNESS_LEARNING_CONFIDENCE", "0.7")
+                ),
+                base_path=os.getenv("HARNESS_LEARNING_PATH", "./data/learning"),
+            ),
         )

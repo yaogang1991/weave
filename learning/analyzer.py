@@ -45,10 +45,14 @@ class LearningAnalyzer:
         """Run all analyses and return combined insights."""
         insights: list[LearningInsight] = []
 
-        insights.extend(self._analyze_failure_patterns())
-        insights.extend(self._analyze_success_patterns())
-        insights.extend(self._analyze_agent_performance())
-        insights.extend(self._analyze_planning_quality())
+        # Snapshot metrics once for consistency across all analyzers
+        metrics = self._get_metrics()
+        experiences = self._get_experiences()
+
+        insights.extend(self._analyze_failure_patterns(metrics))
+        insights.extend(self._analyze_success_patterns(metrics, experiences))
+        insights.extend(self._analyze_agent_performance(experiences))
+        insights.extend(self._analyze_planning_quality(metrics))
 
         logger.info("Analysis produced %d insights", len(insights))
         return insights
@@ -77,10 +81,9 @@ class LearningAnalyzer:
 
     # -- Analysis methods --
 
-    def _analyze_failure_patterns(self) -> list[LearningInsight]:
+    def _analyze_failure_patterns(self, metrics: dict[str, Any]) -> list[LearningInsight]:
         """Find recurring failure categories and high-failure agents."""
         insights: list[LearningInsight] = []
-        metrics = self._get_metrics()
         if not metrics:
             return insights
 
@@ -142,10 +145,11 @@ class LearningAnalyzer:
 
         return insights
 
-    def _analyze_success_patterns(self) -> list[LearningInsight]:
+    def _analyze_success_patterns(
+        self, metrics: dict[str, Any], experiences: list[Any],
+    ) -> list[LearningInsight]:
         """Find what works well — patterns worth replicating."""
         insights: list[LearningInsight] = []
-        metrics = self._get_metrics()
         if not metrics:
             return insights
 
@@ -167,7 +171,6 @@ class LearningAnalyzer:
             ))
 
         # Analyze experiences for success patterns
-        experiences = self._get_experiences()
         success_tasks: dict[str, int] = {}
         for exp in experiences:
             if "succeeded" in exp.content.lower():
@@ -191,10 +194,9 @@ class LearningAnalyzer:
 
         return insights
 
-    def _analyze_agent_performance(self) -> list[LearningInsight]:
+    def _analyze_agent_performance(self, experiences: list[Any]) -> list[LearningInsight]:
         """Analyze per-agent performance from experience memories."""
         insights: list[LearningInsight] = []
-        experiences = self._get_experiences()
         if not experiences:
             return insights
 
@@ -250,10 +252,9 @@ class LearningAnalyzer:
 
         return insights
 
-    def _analyze_planning_quality(self) -> list[LearningInsight]:
+    def _analyze_planning_quality(self, metrics: dict[str, Any]) -> list[LearningInsight]:
         """Analyze DAG planning quality from experiences and metrics."""
         insights: list[LearningInsight] = []
-        metrics = self._get_metrics()
         if not metrics:
             return insights
 

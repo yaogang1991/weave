@@ -57,6 +57,20 @@ class LearningScheduler:
             if hours_since < self.config.analysis_interval_hours:
                 return None
 
+        # Check min samples
+        if self.analyzer.metrics_collector is not None:
+            try:
+                metrics = self.analyzer.metrics_collector.collect()
+                total = metrics.get("summary", {}).get("total", 0)
+                if total < self.config.min_samples:
+                    logger.info(
+                        "Skipping analysis: %d/%d samples",
+                        total, self.config.min_samples,
+                    )
+                    return None
+            except Exception:
+                pass  # Allow analysis to proceed if metrics unavailable
+
         return self.run_analysis()
 
     def run_analysis(self) -> dict[str, Any]:
@@ -66,6 +80,14 @@ class LearningScheduler:
 
         # 1. Analyze
         insights = self.analyzer.analyze()
+
+        # 1b. Enforce max_insights cap
+        if len(insights) > self.config.max_insights:
+            logger.info(
+                "Truncating %d insights to %d",
+                len(insights), self.config.max_insights,
+            )
+            insights = insights[: self.config.max_insights]
 
         # 2. Optimize (convert insights to memories)
         memories = self.optimizer.optimize(
