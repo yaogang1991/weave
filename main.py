@@ -307,11 +307,12 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     harness_config = HarnessConfig.from_env()
     approval_repo = ApprovalRepository()
 
-    # M3.1: Create LLM router if model routing is configured
+    # M3.1: Create LLM router if model routing is configured (including fallback-only)
     llm_router = None
-    if harness_config.model_routing.routing:
+    routing_cfg = harness_config.model_routing
+    if routing_cfg.routing or routing_cfg.fallback_chain != ["claude-sonnet-4-6"]:
         from core.llm_router import LLMRouter
-        llm_router = LLMRouter(harness_config.model_routing, harness_config.llm)
+        llm_router = LLMRouter(routing_cfg, harness_config.llm)
 
     service = RunService(
         repository=repository,

@@ -8,9 +8,10 @@ When no routing is configured, falls back to the default LLMConfig model.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
-from core.config import LLMConfig, ModelRoute, ModelRoutingConfig
+from core.config import LLMConfig, ModelRoute, ModelRoutingConfig, infer_provider
 from core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)
@@ -32,16 +33,31 @@ class LLMRouter:
         self._base_config = base_llm_config
         self._clients: dict[str, LLMClient] = {}
 
-    def _make_key(self, provider: str, model: str) -> str:
-        return f"{provider}:{model}"
+    def _make_key(self, provider: str, model: str, **overrides: Any) -> str:
+        parts = [provider, model]
+        for k in sorted(overrides):
+            v = overrides[k]
+            if v is not None:
+                parts.append(f"{k}={v}")
+        return ":".join(parts)
 
     def _get_or_create(self, provider: str, model: str, **overrides: Any) -> LLMClient:
         """Get cached client or create a new one."""
-        key = self._make_key(provider, model)
+        key = self._make_key(provider, model, **overrides)
         if key not in self._clients:
             config_data = self._base_config.model_dump()
             config_data["provider"] = provider
             config_data["model"] = model
+
+            # Use provider-specific credentials when routing to a different provider
+            if provider != self._base_config.provider:
+                if provider == "openai":
+                    config_data["api_key"] = os.getenv("OPENAI_API_KEY", "")
+                    config_data["base_url"] = os.getenv("OPENAI_BASE_URL", "")
+                elif provider == "anthropic":
+                    config_data["api_key"] = os.getenv("ANTHROPIC_API_KEY", "")
+                    config_data["base_url"] = os.getenv("ANTHROPIC_BASE_URL", "")
+
             for k, v in overrides.items():
                 if v is not None:
                     config_data[k] = v
@@ -52,11 +68,7 @@ class LLMRouter:
 
     def _resolve_provider(self, model: str) -> str:
         """Infer provider from model name."""
-        if model.startswith("gpt") or model.startswith("o1") or model.startswith("o3"):
-            return "openai"
-        if model.startswith("claude"):
-            return "anthropic"
-        return self._base_config.provider
+        return infer_provider(model, default=self._base_config.provider)
 
     def get_client(self, agent_type: str) -> LLMClient:
         """Get an LLMClient for a specific agent type.
