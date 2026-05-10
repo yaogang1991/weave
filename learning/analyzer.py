@@ -43,12 +43,16 @@ class LearningAnalyzer:
 
     def analyze(self) -> list[LearningInsight]:
         """Run all analyses and return combined insights."""
+        # Collect metrics once and share across all analysis methods
+        metrics = self._get_metrics()
+        experiences = self._get_experiences()
+
         insights: list[LearningInsight] = []
 
-        insights.extend(self._analyze_failure_patterns())
-        insights.extend(self._analyze_success_patterns())
-        insights.extend(self._analyze_agent_performance())
-        insights.extend(self._analyze_planning_quality())
+        insights.extend(self._analyze_failure_patterns(metrics))
+        insights.extend(self._analyze_success_patterns(metrics, experiences))
+        insights.extend(self._analyze_agent_performance(experiences))
+        insights.extend(self._analyze_planning_quality(metrics))
 
         logger.info("Analysis produced %d insights", len(insights))
         return insights
@@ -68,7 +72,7 @@ class LearningAnalyzer:
         if self.memory_manager is None:
             return []
         try:
-            return self.memory_manager.store.list_entries(
+            return self.memory_manager.list_entries(
                 memory_type=MemoryType.EXPERIENCE,
             )
         except Exception as e:
@@ -77,10 +81,9 @@ class LearningAnalyzer:
 
     # -- Analysis methods --
 
-    def _analyze_failure_patterns(self) -> list[LearningInsight]:
+    def _analyze_failure_patterns(self, metrics: dict[str, Any]) -> list[LearningInsight]:
         """Find recurring failure categories and high-failure agents."""
         insights: list[LearningInsight] = []
-        metrics = self._get_metrics()
         if not metrics:
             return insights
 
@@ -88,7 +91,7 @@ class LearningAnalyzer:
         summary = metrics.get("summary", {})
 
         # Check for high failure rate
-        success_rate = summary.get("success_rate", 100)
+        success_rate = summary.get("success_rate", 50)
         total = summary.get("total", 0)
         if total >= 3 and success_rate < 50:
             insights.append(LearningInsight(
@@ -142,16 +145,17 @@ class LearningAnalyzer:
 
         return insights
 
-    def _analyze_success_patterns(self) -> list[LearningInsight]:
+    def _analyze_success_patterns(
+        self, metrics: dict[str, Any], experiences: list[Any],
+    ) -> list[LearningInsight]:
         """Find what works well — patterns worth replicating."""
         insights: list[LearningInsight] = []
-        metrics = self._get_metrics()
         if not metrics:
             return insights
 
         summary = metrics.get("summary", {})
         total = summary.get("total", 0)
-        success_rate = summary.get("success_rate", 0)
+        success_rate = summary.get("success_rate", 50)
 
         if total >= 5 and success_rate >= 80:
             insights.append(LearningInsight(
@@ -167,10 +171,9 @@ class LearningAnalyzer:
             ))
 
         # Analyze experiences for success patterns
-        experiences = self._get_experiences()
         success_tasks: dict[str, int] = {}
         for exp in experiences:
-            if "succeeded" in exp.content.lower():
+            if _is_success(exp):
                 # Extract agent type
                 success_tasks[exp.agent_type] = success_tasks.get(exp.agent_type, 0) + 1
 
@@ -191,10 +194,9 @@ class LearningAnalyzer:
 
         return insights
 
-    def _analyze_agent_performance(self) -> list[LearningInsight]:
+    def _analyze_agent_performance(self, experiences: list[Any]) -> list[LearningInsight]:
         """Analyze per-agent performance from experience memories."""
         insights: list[LearningInsight] = []
-        experiences = self._get_experiences()
         if not experiences:
             return insights
 
@@ -202,9 +204,9 @@ class LearningAnalyzer:
         agent_stats: dict[str, dict[str, int]] = {}
         for exp in experiences:
             stats = agent_stats.setdefault(exp.agent_type, {"success": 0, "failed": 0})
-            if "succeeded" in exp.content.lower():
+            if _is_success(exp):
                 stats["success"] += 1
-            elif "failed" in exp.content.lower():
+            elif _is_failure(exp):
                 stats["failed"] += 1
 
         for agent_type, stats in agent_stats.items():
@@ -250,10 +252,9 @@ class LearningAnalyzer:
 
         return insights
 
-    def _analyze_planning_quality(self) -> list[LearningInsight]:
+    def _analyze_planning_quality(self, metrics: dict[str, Any]) -> list[LearningInsight]:
         """Analyze DAG planning quality from experiences and metrics."""
         insights: list[LearningInsight] = []
-        metrics = self._get_metrics()
         if not metrics:
             return insights
 
@@ -283,12 +284,13 @@ class LearningAnalyzer:
                     impact="medium",
                 ))
 
-        # Check for timeout-heavy failures
+        # Check for timeout-heavy failures (use higher threshold to avoid
+        # overlap with _analyze_failure_patterns which covers count >= 3)
         failures = metrics.get("failures", {})
         for error_entry in failures.get("top_errors", []):
             reason = error_entry.get("reason", "").lower()
             count = error_entry.get("count", 0)
-            if "timeout" in reason and count >= 2:
+            if "timeout" in reason and count >= 5:
                 insights.append(LearningInsight(
                     category=LearningCategory.PLANNING,
                     insight_type=InsightType.RECOMMENDATION,
@@ -302,3 +304,25 @@ class LearningAnalyzer:
                 ))
 
         return insights
+
+
+def _is_success(entry: Any) -> bool:
+    """Check if an experience entry represents a successful outcome."""
+    # Prefer structured metadata
+    if hasattr(entry, "metadata") and isinstance(entry.metadata, dict):
+        success = entry.metadata.get("success")
+        if success is not None:
+            return bool(success)
+    # Fallback to content string matching
+    content = getattr(entry, "content", "").lower()
+    return "succeeded" in content and "failed" not in content
+
+
+def _is_failure(entry: Any) -> bool:
+    """Check if an experience entry represents a failed outcome."""
+    if hasattr(entry, "metadata") and isinstance(entry.metadata, dict):
+        success = entry.metadata.get("success")
+        if success is not None:
+            return not bool(success)
+    content = getattr(entry, "content", "").lower()
+    return "failed" in content

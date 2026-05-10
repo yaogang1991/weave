@@ -45,6 +45,17 @@ python main.py reject <ticket_id>
 # Web console (M2.3)
 python main.py viz
 
+# DAG templates (M3.4)
+python main.py templates
+python main.py templates --name build_api
+python main.py run "Build API" --template build_api --var feature=Todo --var language=Python
+python main.py plan "Fix bug" --template fix_bug --var bug="null pointer"
+
+# Impact analysis (M3.5)
+python main.py impact-predict "Fix bug in DAG engine" --project .
+python main.py impact-graph --project .
+python main.py impact-history
+
 # With project-specific agents
 python main.py run "Add OAuth2 support" --project ./my-project --max-parallel 5
 
@@ -107,6 +118,10 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `learning/analyzer.py` — M3.3: Execution pattern analysis (failure/success/agent/planning)
 - `learning/optimizer.py` — M3.3: Insight → memory conversion, planning hints for orchestrator
 - `learning/scheduler.py` — M3.3: Periodic analysis trigger and state management
+- `templates/library.py` — M3.4: TemplateRegistry for reusable YAML DAG templates with variable substitution
+- `analysis/dependency_graph.py` — M3.5: File-level dependency graph using Python ast import parsing
+- `analysis/impact_predictor.py` — M3.5: Impact prediction engine (keyword matching + dependency expansion)
+- `analysis/change_verifier.py` — M3.5: Post-execution change verification with coverage metrics
 - `visualizer/server.py` — FastAPI web console (M2.3)
 - `visualizer/cli_renderer.py` — CLI DAG visualization
 - `visualizer/event_bridge.py` — WebSocket event bridge
@@ -137,3 +152,4 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `./data/reports/` — Markdown reports
 - `./data/queue/` — Job queue (pending/leased/dead)
 - `./data/memory/` — M3.2: Agent memory entries (global/agents/{type}/sessions/{id}/)
+- `./data/impact/` — M3.5: Impact analysis data

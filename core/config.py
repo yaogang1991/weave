@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _load_claude_settings() -> dict[str, str]:
@@ -134,23 +134,42 @@ class MemoryConfig(BaseModel):
     base_path: str = Field(
         default_factory=lambda: os.getenv("HARNESS_MEMORY_PATH", "./data/memory")
     )
-    max_entries_per_agent: int = 500
-    max_content_length: int = 1000      # Characters per entry
-    default_ttl_days: int = 90          # Default expiry for entries
-    retrieval_limit: int = 10           # Max memories injected per prompt
-    decay_half_life_days: float = 30.0  # Relevance score decay rate
+    max_entries_per_agent: int = Field(default=500, ge=1)
+    max_content_length: int = Field(default=1000, ge=100)       # Characters per entry
+    default_ttl_days: int = Field(default=90, ge=1)             # Default expiry for entries
+    retrieval_limit: int = Field(default=10, ge=1)              # Max memories injected per prompt
+    decay_half_life_days: float = Field(default=30.0, ge=1.0)   # Relevance score decay rate
     auto_store: bool = True             # Automatically store learnings after task
+
+    @model_validator(mode="after")
+    def _validate_memory_config(self) -> "MemoryConfig":
+        if self.retrieval_limit > self.max_entries_per_agent:
+            raise ValueError("retrieval_limit cannot exceed max_entries_per_agent")
+        return self
 
 
 class LearningConfig(BaseModel):
     """Configuration for the M3.3 Self-Learning system."""
     enabled: bool = True
-    analysis_interval_hours: float = 6.0
-    min_samples: int = 5                # Min executions before analysis
-    max_insights: int = 100
-    confidence_threshold: float = 0.7
+    analysis_interval_hours: float = Field(default=6.0, ge=0.1)
+    min_samples: int = Field(default=5, ge=1)                # Min executions before analysis
+    max_insights: int = Field(default=100, ge=1)
+    confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     base_path: str = Field(
         default_factory=lambda: os.getenv("HARNESS_LEARNING_PATH", "./data/learning")
+    )
+
+
+class ImpactConfig(BaseModel):
+    """Configuration for the M3.5 Impact Analysis system."""
+    enabled: bool = True
+    coverage_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    max_predicted_files: int = Field(default=50, ge=1)
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    base_path: str = Field(
+        default_factory=lambda: os.getenv(
+            "HARNESS_IMPACT_PATH", "./data/impact"
+        )
     )
 
 
@@ -206,6 +225,9 @@ class HarnessConfig(BaseModel):
     # M3.3: Self-Learning
     learning: LearningConfig = Field(default_factory=LearningConfig)
 
+    # M3.5: Impact Analysis
+    impact: ImpactConfig = Field(default_factory=ImpactConfig)
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r") as f:
@@ -244,5 +266,10 @@ class HarnessConfig(BaseModel):
                 default_ttl_days=int(os.getenv("HARNESS_MEMORY_TTL_DAYS", "90")),
                 retrieval_limit=int(os.getenv("HARNESS_MEMORY_RETRIEVAL_LIMIT", "10")),
                 decay_half_life_days=float(os.getenv("HARNESS_MEMORY_DECAY_DAYS", "30")),
+            ),
+            impact=ImpactConfig(
+                enabled=os.getenv("HARNESS_IMPACT_ENABLED", "true").lower()
+                not in ("false", "0", "no"),
+                base_path=os.getenv("HARNESS_IMPACT_PATH", "./data/impact"),
             ),
         )

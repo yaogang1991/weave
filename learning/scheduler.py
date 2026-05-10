@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,20 +42,49 @@ class LearningScheduler:
         self.analyzer = analyzer
         self.optimizer = optimizer
         self._state_path = Path(config.base_path) / ".last_analysis"
+        self._lock = threading.Lock()
 
     def maybe_run_analysis(self) -> dict[str, Any] | None:
         """Run analysis if enough time has passed and enough samples exist.
 
         Returns analysis results dict if analysis was run, None if skipped.
+        Thread-safe: concurrent calls will not trigger duplicate analyses.
         """
         if not self.config.enabled:
             return None
 
+        if not self._lock.acquire(blocking=False):
+            logger.debug("Skipping analysis: another analysis is already running")
+            return None
+
+        try:
+            return self._maybe_run_analysis_inner()
+        finally:
+            self._lock.release()
+
+    def _maybe_run_analysis_inner(self) -> dict[str, Any] | None:
+        """Internal implementation of maybe_run_analysis (called under lock)."""
         # Check interval
         last = self._get_last_analysis_time()
         if last is not None:
             hours_since = (_utc_now() - last).total_seconds() / 3600
             if hours_since < self.config.analysis_interval_hours:
+                return None
+
+        # Check minimum sample count
+        metrics = None
+        if self.analyzer.metrics_collector is not None:
+            try:
+                metrics = self.analyzer.metrics_collector.collect()
+            except Exception:
+                pass
+        if metrics:
+            total_jobs = metrics.get("summary", {}).get("total", 0)
+            if total_jobs < self.config.min_samples:
+                logger.debug(
+                    "Skipping analysis: %d jobs < min_samples %d",
+                    total_jobs, self.config.min_samples,
+                )
                 return None
 
         return self.run_analysis()
@@ -142,12 +172,13 @@ class LearningScheduler:
         try:
             data = json.loads(self._state_path.read_text(encoding="utf-8"))
             return data
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to load analysis state: %s", e)
             return None
 
     def _save_state(self, result: dict[str, Any]) -> None:
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._state_path.with_suffix(".json.tmp")
+        tmp = self._state_path.parent / ".last_analysis.tmp"
         try:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, default=str, ensure_ascii=False)
@@ -160,4 +191,4 @@ class LearningScheduler:
                     tmp.unlink()
                 except OSError:
                     pass
-            raise
+            logger.warning("Failed to save analysis state", exc_info=True)

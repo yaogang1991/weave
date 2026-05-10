@@ -1,0 +1,27 @@
+name: refactor
+description: Refactor code with test preservation
+version: "1.0"
+category: maintenance
+variables:
+  target: code module
+nodes:
+  - id: planner
+    agent_type: planner
+    task_description: "Plan the refactoring of {target}. Identify the current structure, dependencies, and the target structure."
+  - id: generator_refactor
+    agent_type: generator
+    task_description: "Refactor {target} following the plan. Preserve existing behavior and public interfaces."
+  - id: generator_tests
+    agent_type: generator
+    task_description: "Update or add tests to cover the refactored {target}. Ensure all existing tests still pass."
+  - id: evaluator
+    agent_type: evaluator
+    task_description: "Evaluate the refactoring of {target}: run all tests, check code quality, verify no behavioral changes."
+edges:
+  - from: planner
+    to: generator_refactor
+  - from: generator_refactor
+    to: generator_tests
+  - from: generator_tests
+    to: evaluator
+reasoning_template: "Refactoring {target}: plan -> refactor -> update tests -> evaluate"

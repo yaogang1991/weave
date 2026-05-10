@@ -273,13 +273,54 @@ class DAGExecutionEngine:
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
                             if backoff > 0:
                                 await asyncio.sleep(backoff)
-                            # Reset status so _execute_single_node will actually run
-                            dag.nodes[failed_id].status = NodeStatus.RETRYING
-                            dag.nodes[failed_id].error = ""
-                            await self._execute_single_node(dag, failed_id)
-                            if dag.nodes[failed_id].status == NodeStatus.FAILED:
-                                self._skip_remaining(dag, levels, level_idx + 1)
-                                return dag
+
+                            node = dag.nodes[failed_id]
+
+                            # ── Evaluator feedback loop ──────────────────────────
+                            # If an evaluator fails, retrying the evaluator alone is
+                            # useless — it will just re-run the same broken tests.
+                            # Instead, roll back to the target generator, feed it
+                            # the evaluation feedback, let it fix the code, then
+                            # re-run the evaluator.
+                            if node.agent_type == "evaluator":
+                                target_id = self._find_evaluator_target(dag, failed_id)
+                                if target_id and dag.nodes[target_id].agent_type == "generator":
+                                    await self._emit(ExecutionEvent(
+                                        node_id=target_id,
+                                        event_type="upstream_retry",
+                                        details={
+                                            "reason": "evaluator_failed",
+                                            "evaluator": failed_id,
+                                            "feedback": node.eval_feedback[:200],
+                                        },
+                                    ))
+                                    # Retry generator with feedback
+                                    dag.nodes[target_id].status = NodeStatus.RETRYING
+                                    dag.nodes[target_id].error = ""
+                                    dag.nodes[target_id].retry_count += 1
+                                    await self._execute_single_node(dag, target_id)
+
+                                    if dag.nodes[target_id].status == NodeStatus.SUCCESS:
+                                        # Re-run evaluator after generator fix
+                                        node.status = NodeStatus.RETRYING
+                                        node.error = ""
+                                        await self._execute_single_node(dag, failed_id)
+                                        if node.status == NodeStatus.SUCCESS:
+                                            # Both fixed — continue to next level
+                                            level_idx += 1
+                                            break
+                            else:
+                                # Normal retry: retry the failed node itself
+                                node.status = NodeStatus.RETRYING
+                                node.error = ""
+                                await self._execute_single_node(dag, failed_id)
+                                if node.status == NodeStatus.SUCCESS:
+                                    level_idx += 1
+                                    break
+
+                            # Retry did not resolve the failure
+                            self._skip_remaining(dag, levels, level_idx + 1)
+                            return dag
 
                         elif decision.action == "skip":
                             dag.nodes[failed_id].status = NodeStatus.SKIPPED
@@ -322,6 +363,37 @@ class DAGExecutionEngine:
             self._stop_watchdog()
             self._running_nodes = {}
             self._running_tasks = {}
+
+    def _find_evaluator_target(self, dag: DAG, eval_node_id: str) -> str | None:
+        """
+        Find the generator node that an evaluator is responsible for assessing.
+
+        Heuristic: look for a generator node that is a direct dependency
+        (i.e. has an edge → evaluator) and whose ID/domain matches the evaluator.
+        """
+        # Candidate 1: direct upstream generator with an edge to the evaluator
+        candidates = [
+            e.from_node for e in dag.edges
+            if e.to_node == eval_node_id
+            and dag.nodes[e.from_node].agent_type == "generator"
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # Candidate 2: name-based matching (eval_backend ↔ impl_backend)
+        eval_name = eval_node_id.lower().replace("eval_", "")
+        for nid, node in dag.nodes.items():
+            if node.agent_type != "generator":
+                continue
+            gen_name = nid.lower().replace("impl_", "").replace("gen_", "")
+            if gen_name == eval_name:
+                return nid
+
+        # Candidate 3: any direct upstream generator
+        if candidates:
+            return candidates[0]
+
+        return None
 
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""

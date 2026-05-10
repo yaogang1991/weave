@@ -1,0 +1,17 @@
+name: add_tests
+description: Add tests for existing code
+version: "1.0"
+category: quality
+variables:
+  target: module
+nodes:
+  - id: generator_tests
+    agent_type: generator
+    task_description: "Write comprehensive tests for {target}. Cover unit tests, edge cases, and integration scenarios."
+  - id: evaluator
+    agent_type: evaluator
+    task_description: "Run the tests for {target} and evaluate coverage and quality."
+edges:
+  - from: generator_tests
+    to: evaluator
+reasoning_template: "Adding tests for {target}: write tests -> evaluate"

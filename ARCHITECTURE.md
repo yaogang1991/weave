@@ -26,15 +26,23 @@
     │                     │     基于文件系统的任务队列 + Worker 消费者
     └──────────┬──────────┘
                │
-               │
                ▼
-    ┌─────────────────────┐
-    │  Intelligent        │  ← LLM 驱动的编排 Agent
-    │  Orchestrator       │     分析需求 → 分解任务 → 生成 DAG
-    └──────────┬──────────┘
-               │
-               │ 查询
-               ▼
+    ┌─────────────────────────────────────────────────────┐
+    │  Intelligent Orchestrator                            │
+    │  (orchestrator/)                                     │
+    │                                                      │
+    │  ┌──────────────┐  ┌──────────────┐                 │
+    │  │ LLM Planning │  │ Template     │  ← M3.4: 跳过  │
+    │  │ (默认路径)    │  │ Instantiation│     LLM 规划    │
+    │  └──────┬───────┘  └──────┬───────┘                 │
+    │         │  学习提示注入 ←──┘                         │
+    │         │     ↑                                      │
+    │         │     │ M3.3: Learning Optimizer              │
+    │         │     │ get_planning_hints()                  │
+    └─────────┼───────────────────────────────────────────┘
+              │
+              │ 查询
+              ▼
     ┌─────────────────────┐
     │   Agent Registry    │  ← 能力注册表
     │                     │     默认: planner/generator/evaluator
@@ -58,7 +66,16 @@
     ┌──────┐┌──────┐┌──────┐
     │Worker││Worker││Worker│  ← 独立上下文、独立工具
     │Agent ││Agent ││Agent │     通过 HandoffArtifact 交接
-    └──────┘└──────┘└──────┘
+    └──┬───┘└──┬───┘└──┬───┘
+       │       │       │
+       │ M3.2: 记忆注入/提取  │
+       │←──────────────────┘
+       ▼
+    ┌─────────────────────┐
+    │   Memory System     │  ← M3.2: Agent 记忆
+    │  (memory/)          │     PRIVATE → SESSION → GLOBAL
+    │                     │     记忆注入/提取/共享/维护
+    └──────────┬──────────┘
                │
         ┌──────┼──────┐
         │      │      │
@@ -67,6 +84,16 @@
     │Local ││Work- ││Docker│  ← M2: 执行后端抽象
     │      ││tree  ││(stub)│     配置驱动后端选择
     └──────┘└──────┘└──────┘
+               │
+        ┌──────┼──────────────────┐
+        │      │                  │
+        ▼      ▼                  ▼
+    ┌────────────────┐  ┌──────────────────────┐
+    │  Learning      │  │  Impact Analysis     │
+    │  (learning/)   │  │  (analysis/)         │
+    │  M3.3: 自学习   │  │  M3.5: 影响分析      │
+    │  分析→优化→记忆 │  │  预测→执行→验证      │
+    └────────────────┘  └──────────────────────┘
                │
                ▼
     ┌─────────────────────┐
@@ -177,6 +204,13 @@ Available Worker Agents:
 | `HandoffArtifact` | Agent 间结构化交接产物 |
 | `FailureDecision` | 编排 Agent 的失败处理决策 |
 | `NodeHealth` | M2: 节点健康状态枚举（HEALTHY/MISSED/UNHEALTHY/DEAD） |
+| `MemoryEntry` | M3.2: 记忆条目（scope, type, content, keywords, relevance） |
+| `MemoryScope` | M3.2: PRIVATE / SESSION / GLOBAL |
+| `MemoryType` | M3.2: FACT / EXPERIENCE / PREFERENCE / CONTEXT |
+| `LearningInsight` | M3.3: 学习洞察（category, insight_type, confidence, impact） |
+| `DAGTemplate` | M3.4: DAG 模板（name, variables, nodes, edges） |
+| `ImpactScope` | M3.5: 影响预测结果（predicted_files, risk_level, confidence） |
+| `VerificationResult` | M3.5: 变更验证结果（coverage, accuracy, passes） |
 
 ### 6. Control Plane (`control_plane/`)
 
@@ -222,6 +256,70 @@ Available Worker Agents:
 | `event_bridge.py` | 事件桥接（Session 事件 → WebSocket） |
 | `static/index.html` | 主仪表盘 — DAG 可视化、实时事件流 |
 | `static/console.html` | 管理控制台 — Jobs/Runs/Tickets/Alerts |
+
+### 10. Agent Memory (`memory/`) — M3.2
+
+**职责**：持久化跨任务、跨会话的 Agent 记忆
+
+| 组件 | 说明 |
+|------|------|
+| `store.py` | 原子写入持久化存储（文件级隔离 + 内存索引） |
+| `manager.py` | 高层 API：存储、检索、注入、自动提取 |
+| `sharing.py` | 跨 Agent 记忆共享（scope 提升） |
+
+记忆生命周期：
+```
+Agent 执行前 → get_context_for_agent() → 注入 system prompt
+Agent 执行后 → extract_and_store() → 自动提取 fact/experience
+DAG 节点间 → share_with_downstream() → 上游记忆共享给下游
+定期维护 → cleanup_expired + enforce_limits + recompute_relevance
+```
+
+### 11. Self-Learning (`learning/`) — M3.3
+
+**职责**：从执行历史中自动学习模式，优化编排策略
+
+| 组件 | 说明 |
+|------|------|
+| `analyzer.py` | 执行模式分析（失败/成功/Agent性能/规划质量） |
+| `optimizer.py` | 洞察 → 记忆转换 + 编排提示生成 |
+| `scheduler.py` | 定期分析调度（间隔/最小样本数控制） |
+
+数据流：
+```
+MetricsCollector + MemoryManager → Analyzer → Optimizer → MemoryManager
+                                                        → Orchestrator (plan hints)
+```
+
+### 12. DAG Templates (`templates/`) — M3.4
+
+**职责**：可复用 YAML 模板，跳过 LLM 规划
+
+| 组件 | 说明 |
+|------|------|
+| `library.py` | TemplateRegistry — 发现、加载、实例化 |
+| `*.yaml` | 7 个内置模板（build_api, fix_bug, add_feature 等） |
+
+使用：
+```bash
+python main.py run "Build API" --template build_api --var feature=Todo --var language=Python
+```
+
+### 13. Impact Analysis (`analysis/`) — M3.5
+
+**职责**：执行前预测影响范围，执行后验证变更匹配度
+
+| 组件 | 说明 |
+|------|------|
+| `dependency_graph.py` | Python ast 解析 import，构建双向文件依赖图 |
+| `impact_predictor.py` | 关键词匹配 + 依赖图扩展 + 历史记忆回查 |
+| `change_verifier.py` | 前后快照比对，计算覆盖率/准确度 |
+
+数据流：
+```
+Requirement → ImpactPredictor → ImpactScope → Execute DAG → ChangeVerifier → VerificationResult
+    ↓ 存入 job.metadata                                                        ↓ 存入记忆
+```
 
 ---
 
@@ -290,7 +388,67 @@ python main.py viz
 # http://localhost:8765/console.html — 管理控制台
 ```
 
-### 7. 使用项目自定义 Agent
+### 7. DAG 模板快速路径（M3.4）
+
+跳过 LLM 规划，直接从 YAML 模板实例化 DAG：
+
+```bash
+# 列出所有模板
+python main.py templates
+
+# 查看模板详情
+python main.py templates --name build_api
+
+# 使用模板执行
+python main.py run "Build Todo API" --template build_api --var feature=Todo --var language=Python
+
+# 使用模板规划
+python main.py plan "Fix login bug" --template fix_bug --var bug="null pointer on empty email"
+```
+
+### 8. Agent 记忆管理（M3.2）
+
+```bash
+# 搜索记忆
+python main.py memory-search "authentication flow"
+
+# 添加项目约定（全局记忆）
+python main.py memory-add "使用 pytest 异步测试模式" --type fact --scope global --keywords pytest async
+
+# 查看记忆统计
+python main.py memory-stats
+
+# 手动维护
+python main.py memory-cleanup
+```
+
+### 9. 学习系统（M3.3）
+
+```bash
+# 触发分析（自动在执行后按间隔触发）
+python main.py learning-analyze
+
+# 查看学习洞察
+python main.py learning-insights
+
+# 学习系统状态
+python main.py learning-status
+```
+
+### 10. 影响分析（M3.5）
+
+```bash
+# 预测影响范围
+python main.py impact-predict "重构 DAG 引擎" --project .
+
+# 查看依赖图
+python main.py impact-graph --project .
+
+# 查看历史预测
+python main.py impact-history
+```
+
+### 11. 使用项目自定义 Agent
 
 在项目根目录创建 `.harness/agents.yaml`：
 
@@ -316,15 +474,15 @@ python main.py run "设计登录页面" --project ./my-project
 ```
 harness/
 ├── core/                          # 核心模型与引擎
-│   ├── models.py                  # 所有数据模型（含 NodeHealth 心跳）
-│   ├── config.py                  # 配置管理
+│   ├── models.py                  # 所有数据模型（含 M3 记忆/学习/模板/影响分析模型）
+│   ├── config.py                  # 配置管理（含 M3 MemoryConfig/LearningConfig/ImpactConfig）
 │   ├── agent_registry.py          # Agent 能力注册表
 │   ├── llm_client.py              # 统一 LLM 客户端
-│   └── dag_engine.py              # DAG 引擎（含 Watchdog 协程）
+│   └── dag_engine.py              # DAG 引擎（含 Watchdog + 记忆共享）
 ├── control_plane/                 # M1: CLI 控制面
 │   ├── models.py                  # Job/Run 数据模型
 │   ├── repository.py              # 持久化存储
-│   ├── service.py                 # 执行服务
+│   ├── service.py                 # 执行服务（含 M3 记忆/学习/影响分析集成）
 │   ├── worker.py                  # Worker 队列消费者
 │   └── approval.py                # M1.1: 审批票据系统
 ├── backend/                       # M2: 执行后端
@@ -337,23 +495,44 @@ harness/
 │   ├── metrics.py                 # 指标聚合
 │   └── alerts.py                  # 告警系统（含健康告警）
 ├── visualizer/                    # M2.3: Web 控制台
-│   ├── server.py                  # FastAPI 服务
+│   ├── server.py                  # FastAPI 服务（含 M3 REST API）
 │   ├── cli_renderer.py            # CLI DAG 渲染
 │   ├── event_bridge.py            # WebSocket 事件桥
 │   └── static/
 │       ├── index.html             # 主仪表盘
 │       └── console.html           # 管理控制台
 ├── orchestrator/
-│   └── intelligent_orchestrator.py # 智能编排 Agent
+│   └── intelligent_orchestrator.py # 智能编排 Agent（含学习提示注入 + 模板规划）
 ├── agent/
 │   ├── worker.py                  # Agent Worker
-│   └── agent_pool.py              # Agent 实例池
+│   └── agent_pool.py              # Agent 实例池（含记忆注入/提取）
 ├── session/
 │   └── store.py                   # JSONL 事件存储
 ├── tools/
 │   └── registry.py                # 工具注册表
 ├── guardrails/
 │   └── policy.py                  # 安全策略
+├── memory/                        # M3.2: Agent 记忆系统
+│   ├── store.py                   # 持久化存储（原子写入 + 内存索引）
+│   ├── manager.py                 # 高层记忆操作接口
+│   └── sharing.py                 # 跨 Agent 记忆共享
+├── learning/                      # M3.3: 自学习系统
+│   ├── analyzer.py                # 执行模式分析引擎
+│   ├── optimizer.py               # 洞察 → 记忆转换
+│   └── scheduler.py               # 定期分析调度
+├── templates/                     # M3.4: DAG 模板系统
+│   ├── library.py                 # TemplateRegistry
+│   ├── build_api.yaml             # REST API 模板
+│   ├── add_feature.yaml           # 新功能模板
+│   ├── fix_bug.yaml               # Bug 修复模板
+│   ├── refactor.yaml              # 重构模板
+│   ├── add_tests.yaml             # 测试模板
+│   ├── add_auth.yaml              # 认证模板
+│   └── setup_project.yaml         # 项目脚手架模板
+├── analysis/                      # M3.5: 影响分析系统
+│   ├── dependency_graph.py        # 文件级依赖图
+│   ├── impact_predictor.py        # 影响预测引擎
+│   └── change_verifier.py         # 变更验证
 ├── evaluator/
 │   └── engine.py                  # 评估引擎
 ├── reporter/
@@ -362,11 +541,27 @@ harness/
 │   └── example/agents.yaml        # 自定义 Agent 示例
 ├── docs/
 │   ├── roadmap.md                 # 里程碑路线图
-│   └── m1_personal_spec.md        # M1 工程规格
+│   ├── m1_personal_spec.md        # M1 工程规格
+│   ├── config_reference.md        # 配置参考（含 M3 配置）
+│   ├── dev_guide.md               # 开发指南（含 M3 扩展指南）
+│   ├── knowledge_index.py         # M3.0: 知识索引
+│   ├── specs/                     # 模块规格文档
+│   │   ├── memory.md              # M3.2: Agent 记忆规格
+│   │   ├── learning.md            # M3.3: 自学习规格
+│   │   ├── templates.md           # M3.4: DAG 模板规格
+│   │   ├── impact_analysis.md     # M3.5: 影响分析规格
+│   │   └── ...                    # M1/M2 模块规格
+│   └── adrs/                      # 架构决策记录
+│       ├── 0009-memory-scope-promotion.md  # M3.2: 三层 scope
+│       ├── 0011-yaml-dag-templates.md      # M3.4: YAML 模板
+│       ├── 0012-static-impact-analysis.md  # M3.5: 静态影响分析
+│       └── ...                             # M1/M2 ADRs
 ├── tests/                         # 测试套件
 ├── main.py                        # CLI 入口
-├── README.md                      # 面向用户的说明（中文）
-└── ARCHITECTURE.md                # 本文档
+├── README.md                      # 面向用户的说明
+├── ARCHITECTURE.md                # 本文档
+├── AGENTS.md                      # Agent 开发指南
+└── CLAUDE.md                      # Claude Code 指引
 ```
 
 ---
@@ -390,4 +585,4 @@ python main.py run "设计登录页面" --project ./my-project
 ---
 
 *日期: 2026-05-10*
-*状态: M2 已完成*
+*状态: M3 已完成*

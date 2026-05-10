@@ -1,0 +1,22 @@
+name: add_feature
+description: Add a new feature with planning, implementation, and evaluation
+version: "1.0"
+category: general
+variables:
+  feature: new feature
+nodes:
+  - id: planner
+    agent_type: planner
+    task_description: "Analyze the codebase and plan the implementation of {feature}. Identify files to modify and the approach."
+  - id: generator
+    agent_type: generator
+    task_description: "Implement {feature} following the plan. Modify existing files or create new ones as needed."
+  - id: evaluator
+    agent_type: evaluator
+    task_description: "Evaluate the implementation of {feature}: run tests, check code quality, verify requirements."
+edges:
+  - from: planner
+    to: generator
+  - from: generator
+    to: evaluator
+reasoning_template: "Adding {feature}: plan -> implement -> evaluate"

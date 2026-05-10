@@ -252,3 +252,236 @@ Status transitions are strict — illegal moves raise `ValueError`. Always use t
 - **User-facing docs**: Chinese (README, ARCHITECTURE)
 - **Error handling**: Tools return `ToolResult`, never raise exceptions
 - **No circular imports**: Layer by responsibility (`core/` → `agent/` → `orchestrator/` → `tools/`)
+
+---
+
+## Configuring Multi-Model Routing (M3.1)
+
+### How it works
+
+Different agent types can use different LLM models. The `ModelRoutingConfig` maps agent types to model assignments, with a fallback chain for resilience.
+
+### Via environment variables
+
+```bash
+# Use a stronger model for planning
+export HARNESS_PLANNER_MODEL="claude-opus-4-6"
+
+# Use OpenAI for generation
+export HARNESS_GENERATOR_MODEL="gpt-4"
+
+# Fallback chain if primary model is unavailable
+export HARNESS_MODEL_FALLBACK="claude-sonnet-4-6,gpt-4"
+```
+
+### Via config.yaml
+
+```yaml
+model_routing:
+  routing:
+    planner:
+      provider: anthropic
+      model: claude-opus-4-6
+    generator:
+      provider: openai
+      model: gpt-4
+      temperature: 0.5
+  fallback_chain:
+    - claude-sonnet-4-6
+```
+
+### Supported agent type keys
+
+`planner`, `generator`, `evaluator`, `orchestrator` — plus any project-specific agent IDs registered in `.harness/agents.yaml`.
+
+---
+
+## Using the Memory System (M3.2)
+
+### Memory scopes
+
+```
+PRIVATE  → per-agent, not shared (e.g., generator's coding notes)
+SESSION  → shared within one execution session (across agents)
+GLOBAL   → cross-session persistent (e.g., learned project conventions)
+```
+
+### API: store memories
+
+```python
+from memory.manager import MemoryManager
+from core.models import MemoryType, MemoryScope
+
+manager = MemoryManager(config.memory)
+
+# Store a fact
+entry = manager.store_learning(
+    agent_type="generator",
+    content="Project uses Flask with blueprints pattern",
+    memory_type=MemoryType.FACT,
+    scope=MemoryScope.GLOBAL,
+)
+
+# Store a task outcome (auto-called by agent_pool after execution)
+manager.store_task_outcome(
+    agent_type="generator",
+    task_description="Implement user auth API",
+    result_summary="All 12 tests passing",
+    success=True,
+    session_id="session_abc",
+    node_id="node_1",
+)
+```
+
+### API: retrieve memories
+
+```python
+# Get relevant memories for an agent
+entries = manager.get_context_for_agent(
+    agent_type="generator",
+    task_description="Add rate limiting to the API",
+)
+
+# Format for prompt injection
+prompt_section = manager.format_memory_prompt(entries)
+# Output:
+# ## Relevant Memory
+# - [FACT] Project uses Flask with blueprints pattern
+# - [EXPERIENCE] Task 'Implement user auth API' succeeded. All 12 tests passing
+```
+
+### API: memory sharing
+
+```python
+from memory.sharing import MemorySharing
+
+sharing = MemorySharing(manager)
+
+# Share upstream agent's memories with downstream agent
+shared = sharing.share_with_downstream(
+    from_agent="planner",
+    to_agent="generator",
+    session_id="session_abc",
+    dag=dag,
+    node_id="node_2",
+)
+
+# Promote a session memory to global
+sharing.promote_to_global(memory_id="mem_abc123")
+```
+
+### Maintenance
+
+Memory maintenance runs automatically before each execution via `control_plane/service.py`. You can also run it manually:
+
+```bash
+python main.py memory-cleanup
+```
+
+This performs: expired entry cleanup → capacity enforcement → relevance recomputation.
+
+---
+
+## Creating DAG Templates (M3.4)
+
+### Template structure
+
+Templates are YAML files in `templates/` with variable placeholders `{var_name}`:
+
+```yaml
+# templates/my_feature.yaml
+name: my_feature
+description: "Add a new feature with implementation and testing"
+version: "1.0"
+category: development
+variables:
+  module: "app"
+  feature: "Feature"
+
+nodes:
+  - id: "impl_{module}_{feature}"
+    agent_type: "generator"
+    task_description: "Implement {feature} in {module} module"
+  - id: "test_{module}_{feature}"
+    agent_type: "generator"
+    task_description: "Write tests for {feature} in {module}"
+
+edges:
+  - from: "impl_{module}_{feature}"
+    to: "test_{module}_{feature}"
+
+reasoning_template: "Implement {feature} then test it"
+```
+
+### Using templates
+
+```bash
+# List available templates
+python main.py templates
+
+# Plan from template
+python main.py plan "Add search" --template my_feature --var module=user --var feature=Search
+
+# Run from template
+python main.py run "Add search" --template my_feature --var module=user --var feature=Search
+```
+
+### Built-in templates
+
+| Template | Nodes | Description |
+|----------|-------|-------------|
+| `build_api` | 4 | Build a REST API |
+| `add_feature` | 3 | Add a new feature |
+| `fix_bug` | 3 | Analyze and fix a bug |
+| `refactor` | 4 | Refactor code |
+| `add_tests` | 2 | Add test coverage |
+| `add_auth` | 4 | Add authentication |
+| `setup_project` | 3 | Project scaffolding |
+
+---
+
+## Extending Impact Analysis (M3.5)
+
+### How it works
+
+1. `DependencyGraph` — scans Python imports via `ast`, builds bidirectional file dependency graph
+2. `ImpactPredictor` — keyword matches requirement against file names, expands with dependencies
+3. `ChangeVerifier` — compares pre/post execution file snapshots, validates coverage
+
+### Customize the dependency graph
+
+The graph only handles Python files by default. To extend for other languages:
+
+```python
+from analysis.dependency_graph import DependencyGraph
+
+class TypeScriptDependencyGraph(DependencyGraph):
+    def _find_source_files(self) -> list[str]:
+        """Override to scan .ts/.tsx files."""
+        results = []
+        for path in self.project_path.rglob("*.ts"):
+            if "node_modules" in path.parts:
+                continue
+            results.append(str(path.relative_to(self.project_path)))
+        return sorted(results)
+
+    def _parse_imports(self, abs_path: Path) -> list[str]:
+        """Override for TypeScript import syntax."""
+        # Parse: import { X } from './module'
+        source = abs_path.read_text(encoding="utf-8", errors="replace")
+        import re
+        return re.findall(r"from\s+['\"](.+?)['\"]", source)
+```
+
+### Access analysis results
+
+```bash
+# Predict impact before execution
+python main.py impact-predict "Refactor the DAG engine" --project .
+
+# View dependency graph
+python main.py impact-graph --project .
+
+# Review past predictions
+python main.py impact-history
+```

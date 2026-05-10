@@ -193,11 +193,17 @@ def _reconstruct_dag_from_events(events: list[dict]) -> dict | None:
     Attempt to reconstruct a DAG from session events.
     Looks for DAG structure in plan files or session payloads.
     """
-    # Look for plan references in events
+    # Look for DAG stored via session.dag event
+    for event in events:
+        if event.get("type") == "session.dag":
+            payload = event.get("payload", {})
+            if isinstance(payload, dict) and "nodes" in payload and "edges" in payload:
+                return payload
+    
+    # Fallback: check any event payload for DAG-like data
     for event in events:
         payload = event.get("payload", {})
         if isinstance(payload, dict):
-            # Check if payload contains DAG-like data
             if "nodes" in payload and "edges" in payload:
                 return payload
     
@@ -623,6 +629,140 @@ async def api_learning_status():
     """Get learning system status."""
     scheduler = _get_learning_scheduler()
     return scheduler.get_status()
+
+
+# ── Template API (M3.4) ────────────────────────────────────────────
+
+
+class TemplateInstantiateRequest(PydanticModel):
+    variables: dict[str, str] = {}
+
+    class Config:
+        extra = "forbid"
+
+
+@app.get("/api/templates")
+async def api_list_templates():
+    """List available DAG templates."""
+    from templates.library import TemplateRegistry
+    registry = TemplateRegistry()
+    templates = registry.list_templates()
+    return {
+        "templates": [
+            {
+                "name": t.name,
+                "description": t.description,
+                "version": t.version,
+                "category": t.category,
+                "nodes": len(t.nodes),
+                "edges": len(t.edges),
+                "variables": list(t.variables.keys()),
+            }
+            for t in templates
+        ],
+        "count": len(templates),
+    }
+
+
+@app.post("/api/templates/{name}/instantiate")
+async def api_instantiate_template(name: str, request: TemplateInstantiateRequest):
+    """Instantiate a template with variable substitution."""
+    from templates.library import TemplateRegistry
+    registry = TemplateRegistry()
+    try:
+        dag = registry.instantiate(name, request.variables)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {
+        "nodes": {nid: {
+            "id": n.id,
+            "agent_type": n.agent_type,
+            "task_description": n.task_description,
+        } for nid, n in dag.nodes.items()},
+        "edges": [{"from": e.from_node, "to": e.to_node} for e in dag.edges],
+        "reasoning": dag.reasoning,
+    }
+
+
+# ── Impact Analysis API (M3.5) ─────────────────────────────────────
+
+
+class ImpactPredictRequest(PydanticModel):
+    requirement: str
+    project_path: str = "."
+
+
+@app.post("/api/impact/predict")
+async def api_impact_predict(body: ImpactPredictRequest):
+    """Run impact prediction for a requirement."""
+    from analysis.impact_predictor import ImpactPredictor
+    config = HarnessConfig.from_env()
+    predictor = ImpactPredictor(
+        llm_config=config.llm,
+    )
+    scope = await predictor.predict(
+        requirement=body.requirement,
+        project_path=body.project_path,
+    )
+    return {
+        "id": scope.id,
+        "predicted_files": scope.predicted_files,
+        "predicted_modules": scope.predicted_modules,
+        "risk_level": scope.risk_level.value,
+        "confidence": scope.confidence,
+        "reasoning": scope.reasoning,
+    }
+
+
+@app.get("/api/impact/graph")
+async def api_impact_graph(project_path: str = "."):
+    """Get dependency graph for a project."""
+    from analysis.dependency_graph import DependencyGraph
+    graph = DependencyGraph(project_path)
+    graph.build()
+    return {
+        "project_path": str(graph.project_path),
+        "files": len(graph._graph),
+        "graph": graph.to_dict(),
+    }
+
+
+@app.get("/api/impact/history")
+async def api_impact_history(limit: int = 20):
+    """List past impact predictions from memory."""
+    manager = _get_memory_manager()
+    entries = manager.store.search(
+        query="impact_analysis prediction",
+        limit=limit,
+    )
+    return {
+        "predictions": [
+            {
+                "id": e.id,
+                "content": e.content,
+                "keywords": e.keywords,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+        "count": len(entries),
+    }
+
+
+@app.get("/api/impact/jobs/{job_id}")
+async def api_impact_job(job_id: str):
+    """Get impact analysis data for a specific job."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "job_id": job.id,
+        "impact_scope_id": job.metadata.get("impact_scope_id"),
+        "predicted_files": job.metadata.get("predicted_files", []),
+        "verification_coverage": job.metadata.get("verification_coverage"),
+        "verification_passes": job.metadata.get("verification_passes"),
+    }
 
 
 # ── Integration helpers ──────────────────────────────────────────────

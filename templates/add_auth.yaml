@@ -1,0 +1,27 @@
+name: add_auth
+description: Add authentication/authorization to an application
+version: "1.0"
+category: security
+variables:
+  method: OAuth2
+nodes:
+  - id: planner
+    agent_type: planner
+    task_description: "Plan the implementation of {method} authentication. Identify integration points, middleware, and security considerations."
+  - id: generator_auth
+    agent_type: generator
+    task_description: "Implement {method} authentication: auth middleware, token handling, session management, and protected routes."
+  - id: generator_tests
+    agent_type: generator
+    task_description: "Write tests for the {method} authentication: login flow, token validation, unauthorized access, and edge cases."
+  - id: evaluator
+    agent_type: evaluator
+    task_description: "Evaluate the {method} authentication: run tests, check for security vulnerabilities, verify auth flows."
+edges:
+  - from: planner
+    to: generator_auth
+  - from: generator_auth
+    to: generator_tests
+  - from: generator_tests
+    to: evaluator
+reasoning_template: "Adding {method} auth: plan -> implement auth -> test -> evaluate"

@@ -31,6 +31,7 @@ from core.llm_client import LLMClient
 from core.llm_router import LLMRouter
 from session.store import SessionStore
 from orchestrator.plan_validator import PlanValidator, PlanValidationError
+from templates.library import TemplateRegistry
 
 
 class IntelligentOrchestrator:
@@ -277,6 +278,28 @@ Return a JSON object with this exact structure:
         # Step 7: Convert to DAG
         dag = self._plan_to_dag(plan)
 
+        return dag
+
+    async def plan_from_template(
+        self,
+        template_name: str,
+        variables: dict[str, str] | None = None,
+    ) -> DAG:
+        """
+        Generate a DAG from a named template with variable substitution.
+
+        This bypasses LLM planning for known task patterns.
+        """
+        registry = TemplateRegistry()
+        dag = registry.instantiate(template_name, variables)
+
+        # Validate agent types
+        for nid, node in dag.nodes.items():
+            if not self.agent_registry.has_agent(node.agent_type):
+                raise ValueError(
+                    f"Template references unregistered agent: {node.agent_type}. "
+                    f"Available: {[a.id for a in self.agent_registry.list_agents()]}"
+                )
         return dag
 
     async def adapt_to_failure(self, dag: DAG, failed_node_id: str, error: str = "") -> FailureDecision:

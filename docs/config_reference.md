@@ -43,6 +43,41 @@ Complete reference for all environment variables, configuration options, and CLI
 | `HARNESS_AGENT_TIMEOUT` | `120` | Timeout per agent execution in seconds |
 | `HARNESS_MAX_CONTEXT_TOKENS` | `100000` | Token threshold for context truncation |
 
+### Multi-Model Routing (M3.1)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARNESS_PLANNER_MODEL` | *(default model)* | Model for planner agent type |
+| `HARNESS_GENERATOR_MODEL` | *(default model)* | Model for generator agent type |
+| `HARNESS_EVALUATOR_MODEL` | *(default model)* | Model for evaluator agent type |
+| `HARNESS_ORCHESTRATOR_MODEL` | *(default model)* | Model for orchestrator agent type |
+| `HARNESS_MODEL_FALLBACK` | `claude-sonnet-4-6` | Comma-separated fallback chain |
+
+### Agent Memory (M3.2)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARNESS_MEMORY_ENABLED` | `true` | Enable/disable memory system |
+| `HARNESS_MEMORY_PATH` | `./data/memory` | Memory storage directory |
+| `HARNESS_MEMORY_MAX_ENTRIES` | `500` | Max entries per agent |
+| `HARNESS_MEMORY_MAX_LENGTH` | `1000` | Max characters per entry |
+| `HARNESS_MEMORY_TTL_DAYS` | `90` | Default entry expiry in days |
+| `HARNESS_MEMORY_RETRIEVAL_LIMIT` | `10` | Max memories injected per prompt |
+| `HARNESS_MEMORY_DECAY_DAYS` | `30` | Relevance decay half-life in days |
+
+### Self-Learning (M3.3)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARNESS_LEARNING_PATH` | `./data/learning` | Learning data directory |
+
+### Impact Analysis (M3.5)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HARNESS_IMPACT_ENABLED` | `true` | Enable/disable impact analysis |
+| `HARNESS_IMPACT_PATH` | `./data/impact` | Impact analysis data directory |
+
 ### External Config
 
 The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`.
@@ -102,6 +137,66 @@ The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANT
 | `risk_backend_map` | `dict` | *(see env vars)* | Risk level → backend mapping |
 | `non_interactive` | `bool` | `False` | Non-interactive mode |
 | `approval_timeout_sec` | `int` | `300` | Approval ticket timeout |
+| `model_routing` | `ModelRoutingConfig` | *(see below)* | M3.1: Multi-model routing |
+| `memory` | `MemoryConfig` | *(see below)* | M3.2: Agent memory |
+| `learning` | `LearningConfig` | *(see below)* | M3.3: Self-learning |
+| `impact` | `ImpactConfig` | *(see below)* | M3.5: Impact analysis |
+
+### ModelRoutingConfig (M3.1)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `routing` | `dict[str, ModelRoute]` | `{}` | Per-agent-type model assignment |
+| `fallback_chain` | `list[str]` | `["claude-sonnet-4-6"]` | Model fallback chain |
+
+**ModelRoute** fields: `provider` (str), `model` (str), `temperature` (float | None), `max_tokens` (int | None)
+
+```yaml
+model_routing:
+  routing:
+    planner:
+      provider: anthropic
+      model: claude-opus-4-6
+    generator:
+      provider: anthropic
+      model: claude-sonnet-4-6
+  fallback_chain:
+    - claude-sonnet-4-6
+```
+
+### MemoryConfig (M3.2)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable memory system |
+| `base_path` | `str` | `"./data/memory"` | Storage directory |
+| `max_entries_per_agent` | `int` | `500` | Max entries per agent (≥1) |
+| `max_content_length` | `int` | `1000` | Max chars per entry (≥100) |
+| `default_ttl_days` | `int` | `90` | Default entry expiry (≥1) |
+| `retrieval_limit` | `int` | `10` | Max memories per prompt (≥1) |
+| `decay_half_life_days` | `float` | `30.0` | Relevance decay half-life (≥1.0) |
+| `auto_store` | `bool` | `True` | Auto-extract learnings after task |
+
+### LearningConfig (M3.3)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable self-learning |
+| `analysis_interval_hours` | `float` | `6.0` | Min hours between analyses (≥0.1) |
+| `min_samples` | `int` | `5` | Min executions before analysis (≥1) |
+| `max_insights` | `int` | `100` | Max insights per analysis (≥1) |
+| `confidence_threshold` | `float` | `0.7` | Min confidence to store (0.0–1.0) |
+| `base_path` | `str` | `"./data/learning"` | Learning data directory |
+
+### ImpactConfig (M3.5)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable impact analysis |
+| `coverage_threshold` | `float` | `0.7` | Pass threshold for verification (0.0–1.0) |
+| `max_predicted_files` | `int` | `50` | Max predicted files (≥1) |
+| `confidence_threshold` | `float` | `0.5` | Min confidence threshold (0.0–1.0) |
+| `base_path` | `str` | `"./data/impact"` | Analysis data directory |
 
 ### Config Loading
 
@@ -157,6 +252,45 @@ config = HarnessConfig(llm=LLMConfig(model="gpt-4", provider="openai"))
 | `approve` | `ticket_id` | `--reason` | Approve a ticket |
 | `reject` | `ticket_id` | `--reason` | Reject a ticket |
 
+### Memory Commands (M3.2)
+
+| Command | Arguments | Options | Description |
+|---------|-----------|---------|-------------|
+| `memory-search` | `query` | `--agent`, `--scope`, `--type`, `--limit` | Search agent memory |
+| `memory-list` | — | `--agent`, `--scope`, `--type` | List memory entries |
+| `memory-stats` | — | — | Show memory system statistics |
+| `memory-add` | `content` | `--type`, `--scope`, `--agent`, `--keywords` | Add manual memory entry |
+| `memory-cleanup` | — | — | Run memory maintenance |
+
+### Learning Commands (M3.3)
+
+| Command | Arguments | Options | Description |
+|---------|-----------|---------|-------------|
+| `learning-analyze` | — | — | Trigger a learning analysis run |
+| `learning-insights` | — | `--limit` | List stored learning insights |
+| `learning-status` | — | — | Show learning system status |
+
+### Template Commands (M3.4)
+
+| Command | Arguments | Options | Description |
+|---------|-----------|---------|-------------|
+| `templates` | — | `--name` | List templates or show template details |
+
+Template variables are passed via the `plan` or `run` command:
+
+```bash
+python main.py run "Build API" --template build_api --var feature=Todo --var language=Python
+python main.py plan "Fix bug" --template fix_bug --var bug="null pointer"
+```
+
+### Impact Analysis Commands (M3.5)
+
+| Command | Arguments | Options | Description |
+|---------|-----------|---------|-------------|
+| `impact-predict` | `requirement` | `--project` | Predict impact of a requirement |
+| `impact-graph` | — | `--project` | Show project dependency graph |
+| `impact-history` | — | `--limit` | List past impact predictions |
+
 ---
 
 ## Project Configuration Files
@@ -189,6 +323,42 @@ sandbox:
 event_store_path: ./data/events
 default_backend: worktree
 non_interactive: false
+# M3.1: Multi-model routing
+model_routing:
+  routing:
+    planner:
+      provider: anthropic
+      model: claude-opus-4-6
+    generator:
+      provider: anthropic
+      model: claude-sonnet-4-6
+  fallback_chain:
+    - claude-sonnet-4-6
+# M3.2: Agent memory
+memory:
+  enabled: true
+  base_path: ./data/memory
+  max_entries_per_agent: 500
+  max_content_length: 1000
+  default_ttl_days: 90
+  retrieval_limit: 10
+  decay_half_life_days: 30.0
+  auto_store: true
+# M3.3: Self-learning
+learning:
+  enabled: true
+  analysis_interval_hours: 6.0
+  min_samples: 5
+  max_insights: 100
+  confidence_threshold: 0.7
+  base_path: ./data/learning
+# M3.5: Impact analysis
+impact:
+  enabled: true
+  coverage_threshold: 0.7
+  max_predicted_files: 50
+  confidence_threshold: 0.5
+  base_path: ./data/impact
 ```
 
 ---
@@ -205,3 +375,9 @@ non_interactive: false
 | `./data/queue/leased/` | Leased job files |
 | `./data/queue/dead/` | Dead-letter job files |
 | `./data/backends/` | Backend data (worktrees, etc.) |
+| `./data/memory/` | M3.2: Agent memory entries |
+| `./data/memory/global/` | Cross-session global memories |
+| `./data/memory/agents/{type}/` | Per-agent private memories |
+| `./data/memory/sessions/{id}/` | Per-session shared memories |
+| `./data/learning/` | M3.3: Learning analysis state |
+| `./data/impact/` | M3.5: Impact analysis data |

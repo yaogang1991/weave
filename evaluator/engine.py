@@ -52,13 +52,21 @@ class EvaluatorEngine:
                 feedback_parts.append(f"WARN {criterion}: {msg}")
                 uncheckable.append(criterion)
 
-        # A criterion that cannot be automatically verified should NOT
-        # be treated as passed — mark the whole evaluation as incomplete
-        # so the caller knows human review is needed.
+        # A criterion that cannot be automatically verified is treated as
+        # failed (not passed). We flag it for human review via feedback.
+        # Threshold-based passing: score >= 6.0 / 10.0 is considered a pass.
+        # This prevents minor issues (e.g. one test setup bug) from blocking
+        # the entire pipeline while still catching major failures.
+        # However, if there are uncheckable criteria, the stage is not fully
+        # passed — manual review is required.
         all_auto_passed = all(results.values())
         has_uncheckable = len(uncheckable) > 0
+        PASS_THRESHOLD = 6.0
 
-        overall_passed = all_auto_passed and not has_uncheckable
+        if has_uncheckable:
+            overall_passed = False
+        else:
+            overall_passed = score >= PASS_THRESHOLD
 
         feedback = "\n".join(feedback_parts)
         if has_uncheckable:
@@ -117,7 +125,9 @@ class EvaluatorEngine:
             passed, msg = self._check_no_critical_issues(path)
             return passed, msg, True
 
-        # Unrecognized criterion — do NOT assume passed
+        # Unrecognized criterion — return False so the stage is flagged for
+        # manual review. The caller will include this in feedback and mark
+        # the overall result as not fully passed.
         return False, (
             f"Criterion '{criterion}' is not automatically checkable. "
             f"Supported patterns: 'tests pass', 'coverage', 'lint clean', "

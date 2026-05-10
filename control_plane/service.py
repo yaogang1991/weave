@@ -615,6 +615,26 @@ class RunService:
             except Exception:
                 pass
 
+        # M3.5: Pre-execution impact prediction
+        impact_scope = None
+        before_snapshot = None
+        if getattr(self, "_impact_predictor", None) and work_dir:
+            try:
+                impact_scope = await self._impact_predictor.predict(
+                    requirement=job.requirement,
+                    project_path=str(work_dir),
+                )
+                from analysis.change_verifier import ChangeVerifier
+                verifier = ChangeVerifier(
+                    project_path=str(work_dir),
+                )
+                before_snapshot = verifier.capture_snapshot()
+                job.metadata["impact_scope_id"] = impact_scope.id
+                job.metadata["predicted_files"] = impact_scope.predicted_files
+                self.repository.update_job(job)
+            except Exception:
+                pass  # Impact prediction must not block execution
+
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
@@ -633,6 +653,41 @@ class RunService:
             work_dir=work_dir,
         )
         result_dag = await engine.execute(dag)
+
+        # M3.5: Post-execution change verification
+        if impact_scope and before_snapshot and work_dir:
+            try:
+                from analysis.change_verifier import ChangeVerifier
+                from core.models import MemoryType, MemoryScope
+                verifier = ChangeVerifier(
+                    project_path=str(work_dir),
+                )
+                verification = verifier.verify(impact_scope, before_snapshot)
+                if getattr(self, "_memory_manager", None):
+                    self._memory_manager.store_learning(
+                        agent_type="impact_analyzer",
+                        content=(
+                            f"Impact prediction for "
+                            f"'{job.requirement[:100]}': "
+                            f"coverage={verification.coverage:.2f}, "
+                            f"accuracy={verification.prediction_accuracy:.2f}, "
+                            f"unexpected={len(verification.unexpected_files)}"
+                        ),
+                        memory_type=MemoryType.EXPERIENCE,
+                        scope=MemoryScope.GLOBAL,
+                        keywords=[
+                            "impact_analysis", "prediction",
+                            impact_scope.risk_level.value,
+                        ],
+                        metadata={
+                            "predicted_files": impact_scope.predicted_files[:20],
+                        },
+                    )
+                job.metadata["verification_coverage"] = verification.coverage
+                job.metadata["verification_passes"] = verification.passes
+                self.repository.update_job(job)
+            except Exception:
+                pass  # Verification must not block result reporting
 
         return result_dag
 
@@ -671,6 +726,9 @@ class RunService:
         # M3.3: Initialize learning system
         self._init_learning_system()
 
+        # M3.5: Initialize impact analyzer
+        self._init_impact_analyzer()
+
     def _init_learning_system(self) -> None:
         """M3.3: Initialize LearningScheduler from config."""
         self._learning_scheduler = None
@@ -706,7 +764,36 @@ class RunService:
             self._learning_scheduler = scheduler
         except Exception as exc:
             import logging
-            logging.getLogger(__name__).debug("Learning system init skipped: %s", exc)
+            logging.getLogger(__name__).debug(
+                "Learning system init skipped: %s", exc,
+            )
+
+    def _init_impact_analyzer(self) -> None:
+        """M3.5: Initialize ImpactPredictor from config."""
+        self._impact_predictor = None
+        self._change_verifier = None
+        try:
+            from core.config import HarnessConfig
+            from analysis.impact_predictor import ImpactPredictor
+            from analysis.change_verifier import ChangeVerifier
+
+            config = HarnessConfig.from_env()
+            if not config.impact.enabled:
+                return
+
+            self._impact_predictor = ImpactPredictor(
+                llm_config=self.llm_config,
+                memory_manager=getattr(self, "_memory_manager", None),
+            )
+            self._change_verifier = ChangeVerifier(
+                project_path=".",
+                coverage_threshold=config.impact.coverage_threshold,
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug(
+                "Impact analyzer init skipped: %s", exc,
+            )
 
     def _create_execution_engine(
         self,

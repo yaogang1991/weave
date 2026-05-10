@@ -140,14 +140,33 @@ class TestNodeHealth:
 
 class TestWatchdog:
     @pytest.mark.asyncio
-    async def test_watchdog_kills_hanging_node(self, engine):
+    async def test_watchdog_kills_hanging_node(self):
         """挂起节点应在阈值内被 watchdog 杀死"""
+
+        async def mock_failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort")
+
+        engine = DAGExecutionEngine(
+            agent_executor=None,
+            failure_handler=mock_failure_handler,
+            heartbeat_interval_sec=0.05,
+            heartbeat_miss_threshold=2,
+            enable_watchdog=True,
+        )
 
         async def hanging_executor(node, artifacts):
             # 不发送 heartbeat，模拟挂起
-            await asyncio.sleep(10)  # Will be killed by watchdog before this
+            await asyncio.sleep(10)
 
         engine.agent_executor = hanging_executor
+
+        # Override _execute_with_heartbeat to NOT record automatic heartbeats.
+        # This simulates a truly hung process where the event loop is blocked
+        # and cannot record progress heartbeats.
+        async def no_heartbeat_wrapper(node, input_artifacts):
+            return await engine.agent_executor(node, input_artifacts)
+        engine._execute_with_heartbeat = no_heartbeat_wrapper
 
         dag = DAG(
             nodes={
