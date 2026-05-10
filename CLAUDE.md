@@ -77,8 +77,8 @@ Execution Layer (Backend abstraction, Git, Reporter)
 **Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `AgentPool` → Watchdog monitors heartbeats (M2) → failures go back to orchestrator via `adapt_to_failure()`.
 
 **Key module responsibilities**:
-- `core/models.py` — All data models: DAG, DAGNode, AgentCapability, HandoffArtifact, events, session state, guardrails, NodeHealth, MemoryEntry, MemoryScope, MemoryType
-- `core/config.py` — HarnessConfig, LLMConfig, SandboxConfig, MemoryConfig
+- `core/models.py` — All data models: DAG, DAGNode, AgentCapability, HandoffArtifact, events, session state, guardrails, NodeHealth, MemoryEntry, MemoryScope, MemoryType, LearningInsight
+- `core/config.py` — HarnessConfig, LLMConfig, SandboxConfig, MemoryConfig, LearningConfig
 - `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.harness/agents.yaml`)
 - `core/dag_engine.py` — Topological sort, parallel execution with `asyncio.gather`, failure callback, Watchdog coroutine (M2)
 - `core/llm_client.py` — Unified LLM client (Anthropic/OpenAI)
@@ -104,6 +104,9 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `memory/store.py` — M3.2: Persistent memory store with atomic writes (file-per-entry)
 - `memory/manager.py` — M3.2: High-level memory operations (store/retrieve/inject/extract)
 - `memory/sharing.py` — M3.2: Cross-agent memory sharing (PRIVATE→SESSION→GLOBAL promotion)
+- `learning/analyzer.py` — M3.3: Execution pattern analysis (failure/success/agent/planning)
+- `learning/optimizer.py` — M3.3: Insight → memory conversion, planning hints for orchestrator
+- `learning/scheduler.py` — M3.3: Periodic analysis trigger and state management
 - `visualizer/server.py` — FastAPI web console (M2.3)
 - `visualizer/cli_renderer.py` — CLI DAG visualization
 - `visualizer/event_bridge.py` — WebSocket event bridge

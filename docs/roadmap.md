@@ -17,6 +17,7 @@
 | **M3.0** | 知识系统 — SPECs, ADRs, 知识索引 | ✅ 已完成 | 2026-05-10 |
 | **M3.1** | 多模型路由 — 按 Agent 类型分配模型 | ✅ 已完成 | 2026-05-10 |
 | **M3.2** | Agent 记忆 — 持久化跨任务/跨会话记忆系统 | ✅ 已完成 | 2026-05-10 |
+| **M3.3** | 自学习 — 执行模式分析 + 自动优化 | ✅ 已完成 | 2026-05-10 |
 
 ---
 
@@ -194,6 +195,48 @@ DAG 节点间: share_with_downstream() → 上游记忆共享给下游 Agent
 
 ---
 
+## M3.3 — Self-Learning
+
+**目标:** 从执行历史中自动学习模式，优化编排策略。
+
+### 核心模块
+
+- ✅ `core/models.py` — LearningInsight, LearningCategory, InsightType 模型 + EventType 扩展
+- ✅ `core/config.py` — LearningConfig 配置（分析间隔、置信度阈值、最大洞察数）
+- ✅ `learning/analyzer.py` — 执行模式分析引擎
+  - 失败模式分析（高频错误类别、低成功率 Agent）
+  - 成功模式分析（有效策略识别）
+  - Agent 性能分析（每 Agent 成功率、耗时）
+  - 规划质量分析（DAG 结构 vs 成功率）
+- ✅ `learning/optimizer.py` — 洞察 → 记忆转换
+  - 高置信度洞察 → GLOBAL FACT 记忆
+  - 反模式 → GLOBAL EXPERIENCE 记忆
+  - Agent 特定洞察 → PRIVATE 记忆
+  - `get_planning_hints()` — 编排器规划提示注入
+- ✅ `learning/scheduler.py` — 定期分析调度
+  - 基于间隔的自动分析触发
+  - `run_analysis()` → analyze + optimize + store
+  - 状态持久化
+- ✅ `orchestrator/intelligent_orchestrator.py` — 学习提示注入到规划流程
+- ✅ `control_plane/service.py` — LearningScheduler 初始化与调用
+- ✅ `main.py` — 3 个 CLI 命令: learning-analyze/insights/status
+- ✅ `visualizer/server.py` — 3 个 REST API 端点
+- ✅ `tests/test_learning.py` — 33 个测试，覆盖率 91%
+
+### 数据流
+
+```
+MetricsCollector + MemoryManager → Analyzer → Optimizer → MemoryManager
+                                                        → Orchestrator (plan hints)
+```
+
+### 环境变量
+
+- `HARNESS_LEARNING_PATH` — 学习数据路径（默认 ./data/learning）
+- `HARNESS_LEARNING_ENABLED` — 启用/禁用（默认 true）
+
+---
+
 ## 完整文件清单
 
 ```
@@ -241,6 +284,10 @@ harness/
 │   ├── store.py                   # 持久化存储（原子写入）
 │   ├── manager.py                 # 高层记忆操作接口
 │   └── sharing.py                 # 跨 Agent 记忆共享
+├── learning/                      # M3.3: 自学习系统
+│   ├── analyzer.py                # 执行模式分析引擎
+│   ├── optimizer.py               # 洞察 → 记忆转换
+│   └── scheduler.py               # 定期分析调度
 ├── evaluator/
 │   └── engine.py                  # 评估引擎
 ├── reporter/

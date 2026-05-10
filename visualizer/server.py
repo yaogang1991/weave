@@ -567,6 +567,64 @@ async def api_memory_cleanup():
     return manager.run_maintenance()
 
 
+# ── Learning API (M3.3) ──────────────────────────────────────────────
+
+
+def _get_learning_scheduler():
+    """Create a LearningScheduler from config."""
+    from learning.analyzer import LearningAnalyzer
+    from learning.optimizer import LearningOptimizer
+    from learning.scheduler import LearningScheduler
+    from control_plane.repository import JobRepository
+    from monitoring.metrics import MetricsCollector
+
+    config = HarnessConfig.from_env()
+    memory_manager = _get_memory_manager()
+    job_repo = JobRepository()
+    metrics_collector = MetricsCollector(job_repo)
+
+    analyzer = LearningAnalyzer(metrics_collector, memory_manager)
+    optimizer = LearningOptimizer(memory_manager)
+    return LearningScheduler(config.learning, analyzer, optimizer)
+
+
+@app.get("/api/learning/insights")
+async def api_learning_insights(limit: int = 20):
+    """List learning insights stored as memories."""
+    manager = _get_memory_manager()
+    entries = manager.store.search(
+        query="recommendation pattern anti_pattern",
+        limit=limit,
+    )
+    return {
+        "insights": [
+            {
+                "id": e.id,
+                "content": e.content,
+                "keywords": e.keywords,
+                "relevance_score": e.relevance_score,
+                "created_at": e.created_at.isoformat(),
+            }
+            for e in entries
+        ],
+        "count": len(entries),
+    }
+
+
+@app.post("/api/learning/analyze")
+async def api_learning_analyze():
+    """Trigger a learning analysis run."""
+    scheduler = _get_learning_scheduler()
+    return scheduler.run_analysis()
+
+
+@app.get("/api/learning/status")
+async def api_learning_status():
+    """Get learning system status."""
+    scheduler = _get_learning_scheduler()
+    return scheduler.get_status()
+
+
 # ── Integration helpers ──────────────────────────────────────────────
 
 def get_event_bridge() -> WebSocketEventBridge:

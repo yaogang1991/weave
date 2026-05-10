@@ -210,7 +210,7 @@ class ExecutionEvent(BaseModel):
     event_type: Literal[
         "started", "completed", "failed", "retrying", "skipped",
         "heartbeat", "heartbeat_missed", "unhealthy_killed", "health_recovered",
-        "health_alert", "failure_decision",
+        "health_alert", "failure_decision", "upstream_retry",
     ]
     details: dict[str, Any] = Field(default_factory=dict)
 
@@ -294,6 +294,11 @@ class EventType(str, Enum):
     MEMORY_SHARED = "memory.shared"
     MEMORY_EXPIRED = "memory.expired"
     MEMORY_PRUNED = "memory.pruned"
+
+    # Learning events (M3.3)
+    LEARNING_ANALYSIS_START = "learning.analysis_start"
+    LEARNING_INSIGHT_GENERATED = "learning.insight_generated"
+    LEARNING_OPTIMIZATION_APPLIED = "learning.optimization_applied"
 
 
 class Event(BaseModel):
@@ -444,4 +449,38 @@ class MemoryEntry(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     last_accessed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     expires_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# =============================================================================
+# M3.3: Self-Learning models
+# =============================================================================
+
+
+class LearningCategory(str, Enum):
+    """Category of a learning insight."""
+    PLANNING = "planning"
+    EXECUTION = "execution"
+    EVALUATION = "evaluation"
+    AGENT_SELECTION = "agent_selection"
+
+
+class InsightType(str, Enum):
+    """Type of learning insight."""
+    PATTERN = "pattern"              # Positive pattern to replicate
+    RECOMMENDATION = "recommendation"  # Suggested improvement
+    ANTI_PATTERN = "anti_pattern"     # Negative pattern to avoid
+
+
+class LearningInsight(BaseModel):
+    """A learning insight extracted from execution history analysis."""
+    id: str = Field(default_factory=lambda: f"ins_{uuid.uuid4().hex[:12]}")
+    category: LearningCategory
+    insight_type: InsightType
+    description: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 1.0          # 0.0 to 1.0
+    impact: Literal["low", "medium", "high"] = "medium"
+    applies_to: list[str] = Field(default_factory=list)  # Agent types
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)

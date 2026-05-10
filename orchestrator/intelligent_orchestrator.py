@@ -30,6 +30,7 @@ from core.config import LLMConfig
 from core.llm_client import LLMClient
 from core.llm_router import LLMRouter
 from session.store import SessionStore
+from orchestrator.plan_validator import PlanValidator, PlanValidationError
 
 
 class IntelligentOrchestrator:
@@ -109,7 +110,7 @@ DAG Status:
 {dag_status}
 
 Available Actions:
-- **retry**: Retry the same node (if error seems transient)
+- **retry**: Retry the same node (most common for evaluation failures)
 - **skip**: Skip this node and continue (if failure is acceptable)
 - **abort**: Stop execution entirely (if failure is critical)
 - **replan**: Create a new plan (if current plan is fundamentally flawed)
@@ -120,23 +121,16 @@ Return JSON:
   "reasoning": "Why you chose this action..."
 }}
 
-Choose "replan" if:
-- The task was incorrectly decomposed
-- The wrong agent type was assigned
-- The dependency structure is wrong
+CRITICAL RULES:
+1. If the failure reason is "evaluation_failed" and the feedback contains specific,
+   actionable issues (e.g. "tests failed because table not created", "missing import"),
+   you MUST choose "retry". The generator agent will receive the feedback and fix
+   the issues on the next attempt.
+2. Choose "replan" ONLY if the task decomposition or agent assignment is wrong.
+3. Choose "abort" ONLY for critical security issues or data loss risks.
+4. Choose "skip" ONLY for non-critical optional nodes.
 
-Choose "abort" if:
-- Critical security issue detected
-- Data loss risk
-- The failure is unrecoverable
-
-Choose "skip" if:
-- The node is non-critical (e.g., optional optimization)
-- The failure is expected and acceptable
-
-Choose "retry" if:
-- Transient error (network, timeout)
-- The agent can succeed with another attempt
+Default behavior for evaluation failures: retry.
 """
 
     REPLAN_PROMPT_TEMPLATE = """You are the Orchestrator Agent for a multi-agent software development harness.
@@ -208,10 +202,12 @@ Return a JSON object with this exact structure:
         session_store: SessionStore,
         agent_registry: AgentRegistry,
         llm_router: LLMRouter | None = None,
+        learning_optimizer: Any | None = None,
     ):
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
+        self.learning_optimizer = learning_optimizer
         if llm_router:
             self.llm = llm_router.get_client("orchestrator")
         else:
@@ -239,6 +235,15 @@ Return a JSON object with this exact structure:
         if project_context:
             user_prompt += f"\n\nProject context: {json.dumps(project_context, indent=2, default=str)}"
 
+        # M3.3: Inject learning hints if available
+        if self.learning_optimizer:
+            try:
+                hints = self.learning_optimizer.get_planning_hints(requirement)
+                if hints:
+                    user_prompt += f"\n\n{hints}"
+            except Exception:
+                pass  # Learning hints must not break planning
+
         # Step 3: Call LLM for planning
         messages = [
             {"role": "system", "content": system_prompt},
@@ -261,7 +266,15 @@ Return a JSON object with this exact structure:
                     f"Available: {[a.id for a in self.agent_registry.list_agents()]}"
                 )
 
-        # Step 6: Convert to DAG
+        # Step 6: Structural validation & auto-fix (NEW)
+        validator = PlanValidator(auto_fix=True)
+        fixed_plan_data = validator.validate(plan.model_dump())
+        if validator.warnings:
+            for w in validator.warnings:
+                print(f"[PlanValidator] {w}")
+        plan = OrchestratorPlan(**fixed_plan_data)
+
+        # Step 7: Convert to DAG
         dag = self._plan_to_dag(plan)
 
         return dag
