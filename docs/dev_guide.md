@@ -1,0 +1,254 @@
+# Developer Guide
+
+How to extend, debug, and maintain the Harness.
+
+---
+
+## Adding a New Agent Type
+
+### 1. Register the agent
+
+Edit `core/agent_registry.py` in `_register_defaults()` (for built-in) or add to `.harness/agents.yaml` (for project-specific):
+
+```python
+# Built-in agent (core/agent_registry.py)
+self.register(AgentCapability(
+    id="security_auditor",
+    name="Security Auditor",
+    description="Reviews code for security vulnerabilities",
+    skills=["security_audit", "dependency_scan", "owasp_top10"],
+    constraints=["Only reads code, does not modify"],
+    input_schema={"type": "object", "properties": {"code_path": {"type": "string"}}},
+    output_schema={"type": "object", "properties": {"findings": {"type": "array"}}},
+))
+```
+
+```yaml
+# Project-specific (.harness/agents.yaml)
+agents:
+  - id: security_auditor
+    name: Security Auditor
+    skills: [security_audit, dependency_scan]
+    constraints: [Read-only access]
+```
+
+### 2. Add system prompt
+
+Edit `agent/agent_pool.py` — add entry to `SYSTEM_PROMPTS` dict:
+
+```python
+SYSTEM_PROMPTS = {
+    # ... existing prompts ...
+    "security_auditor": (
+        "You are a Security Auditor agent. Your job is to review code for "
+        "security vulnerabilities following OWASP guidelines. "
+        "You have read-only access to the codebase.\n"
+        "Always output findings as a structured list with severity levels."
+    ),
+}
+```
+
+### 3. Update orchestrator prompt
+
+The orchestrator automatically discovers agents via `AgentRegistry.to_prompt_description()`, but you may want to add planning rules in `orchestrator/intelligent_orchestrator.py`:
+
+```python
+# In the planning prompt template, add guidance:
+"- For security review tasks, assign 'security_auditor' agent"
+```
+
+---
+
+## Adding a New Tool
+
+### 1. Implement the tool function
+
+Edit `tools/registry.py`. Tool functions are called with `**kwargs` (each argument from the tool call) and should return a string or `ToolResult`:
+
+```python
+def _tool_search_code(pattern: str, path: str = ".") -> str:
+    """Search code using regex patterns."""
+    try:
+        # ... implementation ...
+        return result_text
+    except Exception as e:
+        return f"Error: {e}"
+```
+
+### 2. Register in ToolRegistry
+
+```python
+self.register("search_code", _tool_search_code, schema={
+    "type": "object",
+    "properties": {
+        "pattern": {"type": "string", "description": "Regex pattern"},
+        "path": {"type": "string", "description": "Directory to search"},
+    },
+    "required": ["pattern"],
+})
+```
+
+### 3. Add risk classification
+
+Edit `guardrails/policy.py` — add to `RISK_MAP`:
+
+```python
+RISK_MAP = {
+    # ... existing entries ...
+    "search_code": RiskLevel.LOW,  # Read-only operation
+}
+```
+
+---
+
+## Adding a New Execution Backend
+
+### 1. Implement the backend
+
+Create a new file in `backend/`, extending `ExecutionBackend`:
+
+```python
+# backend/my_backend.py
+from backend.base import ExecutionBackend
+
+class MyBackend(ExecutionBackend):
+    def setup(self, job_id: str, run_id: str) -> Path:
+        """Set up the execution environment. Returns work directory path."""
+        ...
+
+    def get_work_dir(self, job_id: str, run_id: str) -> Path:
+        """Return the current working directory for agent tools."""
+        ...
+
+    def cleanup(self, job_id: str, run_id: str) -> None:
+        """Clean up after successful execution."""
+        ...
+
+    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path | None:
+        """Preserve the environment for debugging. Returns archive path."""
+        ...
+```
+
+### 2. Register in BackendManager
+
+Edit `backend/lifecycle.py` — add your backend to `_get_workspace_backend()`:
+
+```python
+from backend.my_backend import MyBackend
+
+def _get_workspace_backend(self, ws_type: WorkspaceIsolation) -> ExecutionBackend:
+    if ws_type == WorkspaceIsolation.WORKTREE:
+        ...
+    elif ws_type == WorkspaceIsolation.LOCAL:
+        ...
+    return backend
+```
+
+### 3. Configure
+
+Add a new `WorkspaceIsolation` enum value or map risk levels in `workspace_by_risk`. Note: `HARNESS_DEFAULT_BACKEND` only accepts `local` or `worktree` (the built-in `WorkspaceIsolation` values).
+
+---
+
+## Debugging a Failed DAG Execution
+
+### 1. Check job status
+
+```bash
+python main.py status <job_id>
+```
+
+Look for `status`, `last_error`, and `runs[].status` / `runs[].session_id` fields.
+
+### 2. Read the event log
+
+Use `session_id` from the status output (under `runs[].session_id`):
+
+```bash
+cat ./data/events/<session_id>.jsonl | python -m json.tool
+```
+
+Key event types to look for:
+- `started` / `completed` / `failed` — Individual node outcomes
+- `heartbeat_missed` / `unhealthy_killed` — Health issues
+- `health_alert` — Watchdog alerts
+
+### 3. Check node error details
+
+Failed nodes store error info in the event log. Search for failed events:
+
+```bash
+grep '"failed"' ./data/events/<session_id>.jsonl | python -m json.tool
+```
+
+### 4. Inspect dead-letter jobs
+
+```bash
+python main.py list --status dead_letter
+```
+
+Dead-letter jobs are stored in `./data/jobs/` with status `dead_letter`. To inspect:
+
+```bash
+cat ./data/jobs/<job_id>.json | python -m json.tool
+```
+
+Dead letter files contain: original requirement, failure history, last error, attempt count.
+
+### 5. Check approval tickets
+
+```bash
+python main.py tickets --status pending
+```
+
+Pending tickets may indicate the job is blocked waiting for approval.
+
+---
+
+## Common Patterns
+
+### Atomic File Writes
+
+Follow the pattern from `control_plane/repository.py`:
+
+```python
+import os
+import json
+from pathlib import Path
+
+def atomic_write(path: str, data: dict) -> None:
+    """Write JSON atomically via temp file + rename."""
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2, default=str)
+    os.replace(tmp, path)
+```
+
+### Event Emission
+
+Follow the pattern from `session/store.py`:
+
+```python
+event = {
+    "timestamp": datetime.utcnow().isoformat(),
+    "event_type": "domain.action",
+    "data": {...}
+}
+store.append(event)
+```
+
+### Status Transitions
+
+Status transitions are strict — illegal moves raise `ValueError`. Always use the defined transitions in `control_plane/models.py`.
+
+---
+
+## Project Structure Conventions
+
+- **Data models**: All in `core/models.py` (single source of truth)
+- **Event naming**: `{domain}.{action}` (e.g., `workflow.stage_start`, `node.heartbeat`)
+- **Type annotations**: Python 3.10+ syntax (`str | None`, `list[dict]`)
+- **Docstrings**: English, Google-style
+- **User-facing docs**: Chinese (README, ARCHITECTURE)
+- **Error handling**: Tools return `ToolResult`, never raise exceptions
+- **No circular imports**: Layer by responsibility (`core/` → `agent/` → `orchestrator/` → `tools/`)
