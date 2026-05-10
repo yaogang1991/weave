@@ -379,6 +379,19 @@ class ApprovalRepository:
         """Return all pending tickets for a given job."""
         return self.list_tickets(status=TicketStatus.PENDING, job_id=job_id)
 
+    def consume_ticket(self, ticket: ApprovalTicket) -> None:
+        """Mark an approved ticket as consumed so it cannot be reused.
+
+        Transitions the ticket to EXPIRED status with a 'consumed' marker
+        in the reason field.
+        """
+        if ticket.status != TicketStatus.APPROVED:
+            return
+        ticket.status = TicketStatus.EXPIRED
+        ticket.reason = (ticket.reason or "") + " [consumed]"
+        ticket.updated_at = datetime.now(timezone.utc)
+        self._persist_ticket(ticket)
+
     def find_approved_ticket(
         self,
         job_id: str,

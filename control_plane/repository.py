@@ -55,6 +55,7 @@ _VALID_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
         JobStatus.RUNNING,      # approval granted, resume execution
         JobStatus.FAILED,       # approval rejected or ticket expired
         JobStatus.CANCELED,     # external cancel while awaiting approval
+        JobStatus.QUEUED,       # re-queue when no worker is active
     },
     JobStatus.FAILED: {
         JobStatus.QUEUED,       # retry
@@ -402,6 +403,11 @@ class JobRepository:
 
         # Running jobs with an expired lease (worker died mid-run)
         for job in self.list_jobs(status=JobStatus.RUNNING):
+            if job.lease_expires_at is not None and job.lease_expires_at < now:
+                orphaned.append(job)
+
+        # Pending-approval jobs with an expired lease (worker died while polling)
+        for job in self.list_jobs(status=JobStatus.PENDING_APPROVAL):
             if job.lease_expires_at is not None and job.lease_expires_at < now:
                 orphaned.append(job)
 

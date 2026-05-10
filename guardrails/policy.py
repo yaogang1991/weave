@@ -295,6 +295,9 @@ class Guardrails:
                 node_id=node_id,
             )
             if approved:
+                # Consume the approved ticket so it cannot be reused
+                approved.reason = (approved.reason or "") + " [consumed on execution]"
+                approval_repo.consume_ticket(approved)
                 return self.tool_registry.execute(tool_name, arguments)
 
             # No prior approval — create a new ticket.

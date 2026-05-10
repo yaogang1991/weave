@@ -547,15 +547,36 @@ class RunService:
             return None
 
         # PENDING_APPROVAL jobs are handled by the Worker's poll loop.
+        # If no worker is active (no in-flight task), re-queue so a
+        # new worker pick-up triggers execution with the approved ticket.
         if job.status == JobStatus.PENDING_APPROVAL:
-            self._emit_event("approval_resumed_poll", job_id, {
-                "ticket_id": ticket_id,
-                "job_id": job_id,
-                "message": "Worker poll loop will detect approval and resume",
-            })
-            runs = self.repository.list_runs_by_job(job_id)
-            active_runs = [r for r in runs if r.status in {RunStatus.RUNNING, RunStatus.PENDING_APPROVAL}]
-            return active_runs[-1] if active_runs else None
+            running_task = self._running_tasks.get(job.id)
+            if running_task and not running_task.done():
+                # Worker is alive — it will detect approval via poll
+                self._emit_event("approval_resumed_poll", job_id, {
+                    "ticket_id": ticket_id,
+                    "job_id": job_id,
+                    "message": "Worker poll loop will detect approval and resume",
+                })
+                runs = self.repository.list_runs_by_job(job_id)
+                active_runs = [r for r in runs if r.status in {RunStatus.RUNNING, RunStatus.PENDING_APPROVAL}]
+                return active_runs[-1] if active_runs else None
+            else:
+                # No worker alive — transition back to QUEUED so a new worker
+                # picks it up. The approved ticket will be found by
+                # Guardrails.check_and_execute() via find_approved_ticket().
+                self._emit_event("approval_resumed_requeue", job_id, {
+                    "ticket_id": ticket_id,
+                    "job_id": job_id,
+                    "message": "No active worker — re-queuing for new worker pickup",
+                })
+                self.repository.transition_job_status(
+                    job.id, JobStatus.QUEUED,
+                    error="Re-queued after approval (no active worker)",
+                )
+                runs = self.repository.list_runs_by_job(job_id)
+                active_runs = [r for r in runs if r.status in {RunStatus.RUNNING, RunStatus.PENDING_APPROVAL}]
+                return active_runs[-1] if active_runs else None
 
         # Legacy path for RUNNING/LEASED jobs
         runs = self.repository.list_runs_by_job(job_id)
