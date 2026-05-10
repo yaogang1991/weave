@@ -49,6 +49,12 @@ _VALID_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
         JobStatus.SUCCEEDED,
         JobStatus.FAILED,
         JobStatus.CANCELED,
+        JobStatus.PENDING_APPROVAL,  # agent hit a high-risk tool
+    },
+    JobStatus.PENDING_APPROVAL: {
+        JobStatus.RUNNING,      # approval granted, resume execution
+        JobStatus.FAILED,       # approval rejected or ticket expired
+        JobStatus.CANCELED,     # external cancel while awaiting approval
     },
     JobStatus.FAILED: {
         JobStatus.QUEUED,       # retry
@@ -373,9 +379,9 @@ class JobRepository:
     # =================================================================
 
     def list_active_jobs(self) -> list[Job]:
-        """Return jobs that are queued, leased, or running."""
+        """Return jobs that are queued, leased, running, or pending approval."""
         active: list[Job] = []
-        for status in (JobStatus.QUEUED, JobStatus.LEASED, JobStatus.RUNNING):
+        for status in (JobStatus.QUEUED, JobStatus.LEASED, JobStatus.RUNNING, JobStatus.PENDING_APPROVAL):
             active.extend(self.list_jobs(status=status))
         active.sort(key=lambda j: j.created_at)
         return active

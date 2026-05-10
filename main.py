@@ -306,7 +306,15 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     """Create a RunService with LLM config from environment."""
     harness_config = HarnessConfig.from_env()
     approval_repo = ApprovalRepository()
-    return RunService(
+
+    # M3.1: Create LLM router if model routing is configured (including fallback-only)
+    llm_router = None
+    routing_cfg = harness_config.model_routing
+    if routing_cfg.routing or routing_cfg.fallback_chain != ["claude-sonnet-4-6"]:
+        from core.llm_router import LLMRouter
+        llm_router = LLMRouter(routing_cfg, harness_config.llm)
+
+    service = RunService(
         repository=repository,
         llm_config=harness_config.llm,
         default_backend=harness_config.workspace_isolation,
@@ -315,6 +323,9 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
         non_interactive=non_interactive,
         approval_timeout_sec=harness_config.approval_timeout_sec,
     )
+    if llm_router:
+        service.llm_router = llm_router
+    return service
 
 
 async def cmd_submit(args):
@@ -574,6 +585,113 @@ async def cmd_reject(args):
     }, indent=2, default=str))
 
 
+# =============================================================================
+# Memory CLI commands (M3.2)
+# =============================================================================
+
+
+def _make_memory_manager():
+    """Create a MemoryManager from config."""
+    from memory.manager import MemoryManager
+    config = HarnessConfig.from_env()
+    return MemoryManager(config.memory)
+
+
+async def cmd_memory_search(args):
+    """Search agent memory."""
+    from core.models import MemoryScope, MemoryType
+    manager = _make_memory_manager()
+    scope = MemoryScope(args.scope) if args.scope else None
+    memory_type = MemoryType(args.type) if args.type else None
+
+    entries = manager.store.search(
+        query=args.query,
+        scope=scope,
+        agent_type=args.agent,
+        memory_type=memory_type,
+        limit=args.limit,
+    )
+    result = [
+        {
+            "id": e.id,
+            "agent_type": e.agent_type,
+            "scope": e.scope.value,
+            "type": e.memory_type.value,
+            "content": e.content,
+            "keywords": e.keywords,
+            "relevance_score": e.relevance_score,
+            "access_count": e.access_count,
+            "created_at": e.created_at.isoformat(),
+        }
+        for e in entries
+    ]
+    print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_memory_list(args):
+    """List agent memory entries."""
+    from core.models import MemoryScope, MemoryType
+    manager = _make_memory_manager()
+    scope = MemoryScope(args.scope) if args.scope else None
+    memory_type = MemoryType(args.type) if args.type else None
+
+    entries = manager.store.list_entries(
+        scope=scope,
+        agent_type=args.agent,
+        memory_type=memory_type,
+    )
+    result = [
+        {
+            "id": e.id,
+            "agent_type": e.agent_type,
+            "scope": e.scope.value,
+            "type": e.memory_type.value,
+            "content": e.content[:200],
+            "keywords": e.keywords,
+            "relevance_score": e.relevance_score,
+            "access_count": e.access_count,
+            "created_at": e.created_at.isoformat(),
+        }
+        for e in entries
+    ]
+    print(json.dumps(result, indent=2, default=str))
+
+
+async def cmd_memory_stats(args):
+    """Show memory system statistics."""
+    manager = _make_memory_manager()
+    stats = manager.get_stats()
+    print(json.dumps(stats, indent=2, default=str))
+
+
+async def cmd_memory_add(args):
+    """Add a manual memory entry."""
+    from core.models import MemoryScope, MemoryType
+    manager = _make_memory_manager()
+
+    entry = manager.store_learning(
+        agent_type=args.agent,
+        content=args.content,
+        memory_type=MemoryType(args.type),
+        scope=MemoryScope(args.scope),
+        keywords=args.keywords if args.keywords else None,
+    )
+    print(json.dumps({
+        "id": entry.id,
+        "agent_type": entry.agent_type,
+        "scope": entry.scope.value,
+        "type": entry.memory_type.value,
+        "message": "Memory entry added",
+    }, indent=2, default=str))
+
+
+async def cmd_memory_cleanup(args):
+    """Run memory maintenance."""
+    manager = _make_memory_manager()
+    result = manager.run_maintenance()
+    print(json.dumps(result, indent=2, default=str))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Harness - Intelligent Multi-Agent Orchestration",
@@ -713,6 +831,43 @@ Examples:
     reject_parser.add_argument("--reason", default="", help="Rejection reason")
     reject_parser.set_defaults(func=cmd_reject)
 
+    # ------------------------------------------------------------------
+    # Memory commands (M3.2)
+    # ------------------------------------------------------------------
+
+    # memory-search command
+    mem_search_parser = subparsers.add_parser("memory-search", help="Search agent memory")
+    mem_search_parser.add_argument("query", help="Search query")
+    mem_search_parser.add_argument("--agent", help="Filter by agent type")
+    mem_search_parser.add_argument("--scope", choices=["private", "session", "global"])
+    mem_search_parser.add_argument("--type", choices=["fact", "experience", "preference", "context"])
+    mem_search_parser.add_argument("--limit", type=int, default=10)
+    mem_search_parser.set_defaults(func=cmd_memory_search)
+
+    # memory-list command
+    mem_list_parser = subparsers.add_parser("memory-list", help="List agent memory entries")
+    mem_list_parser.add_argument("--agent", help="Filter by agent type")
+    mem_list_parser.add_argument("--scope", choices=["private", "session", "global"])
+    mem_list_parser.add_argument("--type", choices=["fact", "experience", "preference", "context"])
+    mem_list_parser.set_defaults(func=cmd_memory_list)
+
+    # memory-stats command
+    mem_stats_parser = subparsers.add_parser("memory-stats", help="Memory system statistics")
+    mem_stats_parser.set_defaults(func=cmd_memory_stats)
+
+    # memory-add command
+    mem_add_parser = subparsers.add_parser("memory-add", help="Add a manual memory entry")
+    mem_add_parser.add_argument("content", help="Memory content")
+    mem_add_parser.add_argument("--type", choices=["fact", "experience", "preference", "context"], default="fact")
+    mem_add_parser.add_argument("--scope", choices=["private", "session", "global"], default="global")
+    mem_add_parser.add_argument("--agent", default="shared")
+    mem_add_parser.add_argument("--keywords", nargs="+", default=[])
+    mem_add_parser.set_defaults(func=cmd_memory_add)
+
+    # memory-cleanup command
+    mem_cleanup_parser = subparsers.add_parser("memory-cleanup", help="Run memory maintenance")
+    mem_cleanup_parser.set_defaults(func=cmd_memory_cleanup)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -720,9 +875,16 @@ Examples:
         sys.exit(1)
 
     # Ensure API key (skip for commands that don't need LLM)
-    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject"}
+    _NO_API_KEY_COMMANDS = {"viz", "status", "list", "cancel", "recover", "console", "tickets", "approve", "reject", "memory-search", "memory-list", "memory-stats", "memory-add", "memory-cleanup"}
     if args.command not in _NO_API_KEY_COMMANDS:
-        if not os.getenv("ANTHROPIC_API_KEY") and not os.getenv("ANTHROPIC_AUTH_TOKEN") and not os.getenv("OPENAI_API_KEY"):
+        from core.config import _CLAUDE_ENV
+        has_key = (
+            os.getenv("ANTHROPIC_API_KEY")
+            or os.getenv("ANTHROPIC_AUTH_TOKEN")
+            or os.getenv("OPENAI_API_KEY")
+            or _CLAUDE_ENV.get("ANTHROPIC_AUTH_TOKEN")
+        )
+        if not has_key:
             sys.stderr.write(json.dumps({
                 "error": "ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or OPENAI_API_KEY must be set",
                 "code": "E_NO_API_KEY",

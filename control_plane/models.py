@@ -33,6 +33,7 @@ class JobStatus(str, Enum):
     QUEUED = "queued"
     LEASED = "leased"       # acquired by a worker but not yet running
     RUNNING = "running"     # worker is actively executing the job
+    PENDING_APPROVAL = "pending_approval"  # paused, awaiting human approval
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELED = "canceled"
@@ -43,6 +44,7 @@ class RunStatus(str, Enum):
     """Lifecycle states of a Run (a single execution attempt)."""
 
     RUNNING = "running"
+    PENDING_APPROVAL = "pending_approval"  # paused for human approval
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     ABORTED = "aborted"
@@ -139,7 +141,7 @@ class Job(BaseModel):
     @field_validator("error_category")
     @classmethod
     def _valid_error_category(cls, v: str) -> str:
-        allowed = {"", "timeout", "eval_failed", "tool_blocked", "unknown", "watchdog"}
+        allowed = {"", "timeout", "eval_failed", "tool_blocked", "unknown", "watchdog", "approval_timeout"}
         if v not in allowed:
             raise ValueError(f"Invalid error_category: {v!r}")
         return v
@@ -163,6 +165,7 @@ class Job(BaseModel):
             JobStatus.QUEUED,
             JobStatus.LEASED,
             JobStatus.RUNNING,
+            JobStatus.PENDING_APPROVAL,
         }
 
 
@@ -193,4 +196,11 @@ class Run(BaseModel):
             RunStatus.FAILED,
             RunStatus.ABORTED,
             RunStatus.TIMED_OUT,
+        }
+
+    def is_active(self) -> bool:
+        """Return True if the run is still in progress (including pending approval)."""
+        return self.status in {
+            RunStatus.RUNNING,
+            RunStatus.PENDING_APPROVAL,
         }

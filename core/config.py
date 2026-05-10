@@ -4,6 +4,7 @@ Configuration management for the Harness.
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -12,11 +13,54 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
+def _load_claude_settings() -> dict[str, str]:
+    """Load env vars from ~/.claude/settings-kimi.json if present."""
+    settings_path = Path.home() / ".claude" / "settings-kimi.json"
+    if settings_path.exists():
+        try:
+            with open(settings_path, "r") as f:
+                data = json.load(f)
+            return data.get("env", {})
+        except Exception:
+            pass
+    return {}
+
+
+# Cache so we don't re-read the file for every field default.
+_CLAUDE_ENV = _load_claude_settings()
+
+
+def infer_provider(model: str, default: str = "anthropic") -> str:
+    """Infer LLM provider from model name.
+
+    Handles known prefixes: gpt*, chatgpt*, o-series (o1, o3, o4, etc.),
+    and claude*.
+    """
+    if model.startswith("gpt") or model.startswith("chatgpt"):
+        return "openai"
+    # o-series models: o1, o3, o4, etc. (starts with 'o' followed by digit)
+    if len(model) > 1 and model[0] == "o" and model[1].isdigit():
+        return "openai"
+    if model.startswith("claude"):
+        return "anthropic"
+    return default
+
+
 class LLMConfig(BaseModel):
     provider: str = "anthropic"  # anthropic, openai
     model: str = "claude-sonnet-4-6"
-    api_key: str = Field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
-    base_url: str = ""
+    api_key: str = Field(
+        default_factory=lambda: os.getenv(
+            "ANTHROPIC_API_KEY",
+            os.getenv("ANTHROPIC_AUTH_TOKEN", _CLAUDE_ENV.get("ANTHROPIC_AUTH_TOKEN", "")),
+        )
+    )
+    base_url: str = Field(
+        default_factory=lambda: os.getenv(
+            "ANTHROPIC_BASE_URL",
+            _CLAUDE_ENV.get("ANTHROPIC_BASE_URL", ""),
+        )
+    )
     max_tokens: int = 4096
     temperature: float = 0.3
     timeout: int = 120
@@ -36,6 +80,81 @@ class SandboxConfig(BaseModel):
 class MCPConfig(BaseModel):
     servers: list[dict[str, Any]] = Field(default_factory=list)
     auto_discover: bool = False
+
+
+class ModelRoute(BaseModel):
+    """Model assignment for a specific agent type or role."""
+
+    provider: str = ""
+    model: str = ""
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+class ModelRoutingConfig(BaseModel):
+    """Configuration for per-agent-type model selection.
+
+    When routing is empty, all agents use the default model from LLMConfig.
+    """
+
+    routing: dict[str, ModelRoute] = Field(default_factory=dict)
+    fallback_chain: list[str] = Field(
+        default_factory=lambda: ["claude-sonnet-4-6"]
+    )
+
+    @classmethod
+    def from_env(cls) -> ModelRoutingConfig:
+        """Create routing config from HARNESS_*_MODEL environment variables."""
+        routing: dict[str, ModelRoute] = {}
+        for agent_type, env_var in [
+            ("planner", "HARNESS_PLANNER_MODEL"),
+            ("generator", "HARNESS_GENERATOR_MODEL"),
+            ("evaluator", "HARNESS_EVALUATOR_MODEL"),
+            ("orchestrator", "HARNESS_ORCHESTRATOR_MODEL"),
+        ]:
+            model = os.getenv(env_var, "")
+            if model:
+                routing[agent_type] = ModelRoute(
+                    provider=infer_provider(model), model=model
+                )
+
+        fallback_str = os.getenv(
+            "HARNESS_MODEL_FALLBACK", "claude-sonnet-4-6"
+        )
+        fallback_chain = [m.strip() for m in fallback_str.split(",") if m.strip()]
+
+        return cls(routing=routing, fallback_chain=fallback_chain)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> ModelRoutingConfig:
+        """Load routing config from a YAML file."""
+        with open(path, "r") as f:
+            data = yaml.safe_load(f) or {}
+        routing = {}
+        for key, val in data.get("routing", {}).items():
+            if isinstance(val, dict):
+                routing[key] = ModelRoute(**val)
+            elif isinstance(val, str):
+                provider = infer_provider(val)
+                routing[key] = ModelRoute(provider=provider, model=val)
+        return cls(
+            routing=routing,
+            fallback_chain=data.get("fallback_chain", ["claude-sonnet-4-6"]),
+        )
+
+
+class MemoryConfig(BaseModel):
+    """Configuration for the M3.2 Agent Memory system."""
+    enabled: bool = True
+    base_path: str = Field(
+        default_factory=lambda: os.getenv("HARNESS_MEMORY_PATH", "./data/memory")
+    )
+    max_entries_per_agent: int = 500
+    max_content_length: int = 1000      # Characters per entry
+    default_ttl_days: int = 90          # Default expiry for entries
+    retrieval_limit: int = 10           # Max memories injected per prompt
+    decay_half_life_days: float = 30.0  # Relevance score decay rate
+    auto_store: bool = True             # Automatically store learnings after task
 
 
 class HarnessConfig(BaseModel):
@@ -99,6 +218,12 @@ class HarnessConfig(BaseModel):
         pattern=r"^(always|on_success|never)$",
     )
 
+    # M3.1: Multi-model routing
+    model_routing: ModelRoutingConfig = Field(default_factory=ModelRoutingConfig)
+
+    # M3.2: Agent Memory
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r") as f:
@@ -107,12 +232,18 @@ class HarnessConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> HarnessConfig:
-        """Create config from environment variables."""
+        """Create config from environment variables (with ~/.claude/settings-kimi.json fallback)."""
         return cls(
             llm=LLMConfig(
-                api_key=os.getenv("ANTHROPIC_API_KEY", os.getenv("ANTHROPIC_AUTH_TOKEN", "")),
-                model=os.getenv("HARNESS_MODEL", os.getenv("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")),
-                base_url=os.getenv("ANTHROPIC_BASE_URL", ""),
+                api_key=os.getenv(
+                    "ANTHROPIC_API_KEY",
+                    os.getenv("ANTHROPIC_AUTH_TOKEN", _CLAUDE_ENV.get("ANTHROPIC_AUTH_TOKEN", "")),
+                ),
+                model=os.getenv(
+                    "HARNESS_MODEL",
+                    os.getenv("ANTHROPIC_DEFAULT_SONNET_MODEL", _CLAUDE_ENV.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")),
+                ),
+                base_url=os.getenv("ANTHROPIC_BASE_URL", _CLAUDE_ENV.get("ANTHROPIC_BASE_URL", "")),
             ),
             event_store_path=os.getenv("HARNESS_EVENT_STORE", "./data/events"),
             artifact_path=os.getenv("HARNESS_ARTIFACT_PATH", "./data/artifacts"),
@@ -122,4 +253,15 @@ class HarnessConfig(BaseModel):
             in ("true", "1", "yes"),
             approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
             cleanup_policy=os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
+            model_routing=ModelRoutingConfig.from_env(),
+            memory=MemoryConfig(
+                enabled=os.getenv("HARNESS_MEMORY_ENABLED", "true").lower()
+                not in ("false", "0", "no"),
+                base_path=os.getenv("HARNESS_MEMORY_PATH", "./data/memory"),
+                max_entries_per_agent=int(os.getenv("HARNESS_MEMORY_MAX_ENTRIES", "500")),
+                max_content_length=int(os.getenv("HARNESS_MEMORY_MAX_LENGTH", "1000")),
+                default_ttl_days=int(os.getenv("HARNESS_MEMORY_TTL_DAYS", "90")),
+                retrieval_limit=int(os.getenv("HARNESS_MEMORY_RETRIEVAL_LIMIT", "10")),
+                decay_half_life_days=float(os.getenv("HARNESS_MEMORY_DECAY_DAYS", "30")),
+            ),
         )
