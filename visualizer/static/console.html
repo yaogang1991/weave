@@ -568,13 +568,13 @@
             `).join('');
         }
 
-        // Auto refresh
+        // Auto refresh -- M2-D: 2 second refresh for operations visibility
         setInterval(() => {
             const activePage = document.querySelector('.page.active').id;
             if (activePage === 'page-jobs') loadJobs();
             if (activePage === 'page-tickets') loadTickets();
             if (activePage === 'page-health') loadHealth();
-        }, 10000);
+        }, 2000);
 
         // Init
         loadJobs();

@@ -39,7 +39,7 @@ class LocalBackend(ExecutionBackend):
         if work_dir.exists():
             shutil.rmtree(work_dir)
 
-    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path:
+    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path | None:
         """Preserve scene (move to preserve directory)."""
         if self.repo_root:
             return self.repo_root

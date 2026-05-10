@@ -217,6 +217,7 @@ class RunService:
                 repo_root=str(project_root),
                 base_path=self.backend_base_path,
                 workspace_by_risk=harness_config.workspace_isolation_by_risk,
+                cleanup_policy=harness_config.cleanup_policy,
             )
             work_dir = backend_manager.setup(
                 job_id=job.id,

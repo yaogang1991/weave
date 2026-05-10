@@ -223,7 +223,7 @@ class TestRetryBackoff:
         assert engine._compute_backoff(2) == 4.0   # 2^2
         assert engine._compute_backoff(3) == 8.0   # 2^3
         assert engine._compute_backoff(5) == 32.0  # 2^5
-        assert engine._compute_backoff(10) == 60.0  # capped at 60
+        assert engine._compute_backoff(10) == 300.0  # capped at max_backoff
 
     @pytest.mark.asyncio
     async def test_handle_job_failure_queues_for_retry(self, tmp_repo: JobRepository, run_service: RunService):

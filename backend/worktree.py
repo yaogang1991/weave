@@ -90,17 +90,20 @@ class WorktreeBackend(ExecutionBackend):
             run_id, self.base_path / job_id / run_id
         )
 
-        # Write preserve marker
-        marker = worktree_path / ".PRESERVED"
-        marker.write_text(
-            f"Preserved at: {datetime.now(timezone.utc).isoformat()}\n"
-            f"Reason: {reason}\n"
-        )
-
         # Remove from active worktrees but do not execute git worktree remove
         self.worktrees.pop(run_id, None)
 
-        return worktree_path
+        # Only write marker if directory exists
+        if worktree_path.exists():
+            marker = worktree_path / ".PRESERVED"
+            marker.write_text(
+                f"Preserved at: {datetime.now(timezone.utc).isoformat()}\n"
+                f"Reason: {reason}\n"
+            )
+            return worktree_path
+
+        # Directory does not exist — nothing to preserve
+        return None
 
     def is_available(self) -> bool:
         """Check if git worktree is available."""

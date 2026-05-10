@@ -209,7 +209,7 @@ class ExecutionEvent(BaseModel):
     event_type: Literal[
         "started", "completed", "failed", "retrying", "skipped",
         "heartbeat", "heartbeat_missed", "unhealthy_killed", "health_recovered",
-        "health_alert",
+        "health_alert", "failure_decision",
     ]
     details: dict[str, Any] = Field(default_factory=dict)
 

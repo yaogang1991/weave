@@ -263,6 +263,18 @@ class DAGExecutionEngine:
                             dag, failed_id, dag.nodes[failed_id].error,
                         )
 
+                        # Emit failure decision event for audit trail
+                        await self._emit(ExecutionEvent(
+                            node_id=failed_id,
+                            event_type="failure_decision",
+                            details={
+                                "action": decision.action,
+                                "reasoning": decision.reasoning,
+                                "error": dag.nodes[failed_id].error[:200],
+                                "health_status": dag.nodes[failed_id].health_status.value,
+                            },
+                        ))
+
                         if decision.action == "abort":
                             self._skip_remaining(dag, levels, level_idx + 1)
                             return dag

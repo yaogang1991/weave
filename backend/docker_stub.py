@@ -37,7 +37,7 @@ class DockerBackend(ExecutionBackend):
             "DockerBackend not yet implemented (planned for M3)"
         )
 
-    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path:
+    def preserve(self, job_id: str, run_id: str, reason: str = "") -> Path | None:
         raise NotImplementedError(
             "DockerBackend not yet implemented (planned for M3)"
         )
