@@ -674,11 +674,11 @@ async def api_instantiate_template(name: str, request: TemplateInstantiateReques
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {
-        "nodes": {nid: {
+        "nodes": [{
             "id": n.id,
             "agent_type": n.agent_type,
-            "task_description": n.task_description,
-        } for nid, n in dag.nodes.items()},
+            "task": n.task_description,
+        } for n in dag.nodes.values()],
         "edges": [{"from": e.from_node, "to": e.to_node} for e in dag.edges],
         "reasoning": dag.reasoning,
     }

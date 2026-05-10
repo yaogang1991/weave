@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 BUILTIN_TEMPLATES_DIR = Path(__file__).parent
 
 _VAR_PATTERN = re.compile(r"\{(\w+)\}")
+_SAFE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class TemplateRegistry:
@@ -50,6 +51,10 @@ class TemplateRegistry:
 
     def get_template(self, name: str) -> DAGTemplate | None:
         """Load a template by name (filename stem or declared YAML name)."""
+        # Prevent path traversal
+        if not _SAFE_NAME_PATTERN.match(name):
+            logger.warning("Invalid template name rejected: %s", name)
+            return None
         if name in self._cache:
             return self._cache[name]
         # Try by filename stem first
@@ -143,6 +148,10 @@ class TemplateRegistry:
             text_fields.append(node.task_description)
             if node.agent_type:
                 text_fields.append(node.agent_type)
+            # Scan success_criteria and other list fields
+            for sc in (node.success_criteria or []):
+                if isinstance(sc, str):
+                    text_fields.append(sc)
         text_fields.append(dag.reasoning or "")
 
         for text in text_fields:

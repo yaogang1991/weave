@@ -120,6 +120,9 @@ async def cmd_plan(args):
     # Use template if specified
     if args.template:
         variables = _parse_template_vars(args.var)
+        # Incorporate the user's requirement as the 'requirement' variable if not set
+        if args.requirement and "requirement" not in variables:
+            variables["requirement"] = args.requirement
         print(f"Using template: {args.template} (vars: {variables})")
         dag = await orchestrator.plan_from_template(
             template_name=args.template,
