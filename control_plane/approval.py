@@ -382,12 +382,11 @@ class ApprovalRepository:
     def consume_ticket(self, ticket: ApprovalTicket) -> None:
         """Mark an approved ticket as consumed so it cannot be reused.
 
-        Transitions the ticket to EXPIRED status with a 'consumed' marker
-        in the reason field.
+        Keeps the ticket as APPROVED but adds a consumed marker to the reason
+        field. :meth:`find_approved_ticket` skips consumed tickets.
         """
         if ticket.status != TicketStatus.APPROVED:
             return
-        ticket.status = TicketStatus.EXPIRED
         ticket.reason = (ticket.reason or "") + " [consumed]"
         ticket.updated_at = datetime.now(timezone.utc)
         self._persist_ticket(ticket)
@@ -408,6 +407,9 @@ class ApprovalRepository:
         args_hash = _compute_args_hash(args)
         for ticket in self.list_tickets(status=TicketStatus.APPROVED, job_id=job_id):
             if ticket.tool_name != tool_name:
+                continue
+            # Skip consumed tickets (single-use approval)
+            if ticket.reason and "[consumed]" in ticket.reason:
                 continue
             if ticket.args_hash != args_hash:
                 continue

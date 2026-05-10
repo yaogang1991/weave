@@ -546,26 +546,15 @@ class RunService:
         if not job:
             return None
 
-        # PENDING_APPROVAL jobs: always re-queue. The Worker's poll loop may
-        # be in a different process, so we cannot reliably check _running_tasks.
-        # Re-queuing is safe: if a worker IS polling, it will see the approved
-        # ticket and resume. If not, a new worker will pick it up.
+        # PENDING_APPROVAL jobs: the Worker's poll loop detects approved tickets
+        # and resumes execution. Do NOT re-queue — that races with the poll loop.
+        # If no worker is active, orphan recovery will handle it on next startup.
         if job.status == JobStatus.PENDING_APPROVAL:
-            self._emit_event("approval_resumed_requeue", job_id, {
+            self._emit_event("approval_resumed_poll", job_id, {
                 "ticket_id": ticket_id,
                 "job_id": job_id,
-                "message": "Re-queuing for worker pickup after approval",
+                "message": "Worker poll loop will detect approval and resume",
             })
-            self.repository.transition_job_status(
-                job.id, JobStatus.QUEUED,
-                error="Re-queued after approval",
-            )
-            # Clear stale lease fields so a new worker can acquire the job
-            job = self.repository.get_job(job_id)
-            if job:
-                job.lease_owner = None
-                job.lease_expires_at = None
-                self.repository.update_job(job)
             runs = self.repository.list_runs_by_job(job_id)
             active_runs = [r for r in runs if r.status in {RunStatus.RUNNING, RunStatus.PENDING_APPROVAL}]
             return active_runs[-1] if active_runs else None

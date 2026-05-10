@@ -684,70 +684,61 @@ class TaskWorker:
                     job_id=job_id,
                     status=JobStatus.RUNNING.value,
                 )
-                try:
-                    run = await self.run_service.run_job(job_id)
-                    if run.status == RunStatus.SUCCEEDED:
+                # Finalize the prior pending_approval run before starting a new one
+                self._finalize_pending_approval_run(
+                    job_id, "failed", "Superseded by post-approval re-execution",
+                )
+                # Loop to handle multi-approval (re-approval after each granted ticket)
+                while True:
+                    try:
+                        run = await self.run_service.run_job(job_id)
+                        if run.status == RunStatus.SUCCEEDED:
+                            await asyncio.to_thread(
+                                self.repository.transition_job_status,
+                                job_id, JobStatus.SUCCEEDED,
+                            )
+                            _json_log(
+                                "INFO", "Job completed after approval",
+                                job_id=job_id, status=JobStatus.SUCCEEDED.value,
+                            )
+                        else:
+                            await self._handle_failure(
+                                job_id,
+                                f"Run ended with status {run.status.value}",
+                                "unknown",
+                            )
+                        break
+                    except PendingApprovalError as pa_exc:
+                        # Multi-approval: another tool needs approval — loop back.
+                        _json_log(
+                            "INFO",
+                            f"Post-approval execution requires another approval (ticket: {pa_exc.ticket_id})",
+                            job_id=job_id,
+                            status=JobStatus.PENDING_APPROVAL.value,
+                            extra={"ticket_id": pa_exc.ticket_id},
+                        )
+                        self._finalize_pending_approval_run(
+                            job_id, "failed", "Superseded by next approval cycle",
+                        )
                         await asyncio.to_thread(
                             self.repository.transition_job_status,
-                            job_id, JobStatus.SUCCEEDED,
+                            job_id, JobStatus.PENDING_APPROVAL,
                         )
-                        _json_log(
-                            "INFO", "Job completed after approval",
-                            job_id=job_id, status=JobStatus.SUCCEEDED.value,
+                        final_status = await self._poll_for_approval(job_id, pa_exc.ticket_id)
+                        if final_status != JobStatus.RUNNING:
+                            # Poll handler set terminal state (rejected/expired/canceled)
+                            break
+                        # Finalize and loop back for another run attempt
+                        self._finalize_pending_approval_run(
+                            job_id, "failed", "Superseded by next approval cycle",
                         )
-                    else:
-                        await self._handle_failure(
-                            job_id,
-                            f"Run ended with status {run.status.value}",
-                            "unknown",
-                        )
-                except PendingApprovalError as pa_exc:
-                    # Multi-approval job: another tool needs approval.
-                    # Re-enter the approval wait loop instead of failing.
-                    _json_log(
-                        "INFO",
-                        f"Post-approval execution requires another approval (ticket: {pa_exc.ticket_id})",
-                        job_id=job_id,
-                        status=JobStatus.PENDING_APPROVAL.value,
-                        extra={"ticket_id": pa_exc.ticket_id},
-                    )
-                    await asyncio.to_thread(
-                        self.repository.transition_job_status,
-                        job_id, JobStatus.PENDING_APPROVAL,
-                    )
-                    final_status = await self._poll_for_approval(job_id, pa_exc.ticket_id)
-                    if final_status == JobStatus.RUNNING:
-                        # Approval granted — job is already RUNNING (set by poll).
-                        # Call run_service.run_job directly to avoid double transition
-                        # (don't use _execute_job which does LEASED→RUNNING).
-                        try:
-                            run = await self.run_service.run_job(job_id)
-                            if run.status == RunStatus.SUCCEEDED:
-                                await asyncio.to_thread(
-                                    self.repository.transition_job_status,
-                                    job_id, JobStatus.SUCCEEDED,
-                                )
-                            else:
-                                await self._handle_failure(
-                                    job_id,
-                                    f"Run ended with status {run.status.value}",
-                                    "unknown",
-                                )
-                        except PendingApprovalError:
-                            # Yet another approval needed — re-raise to re-enter outer handler
-                            raise
-                        except Exception as exc3:
-                            await self._handle_failure(
-                                job_id, str(exc3), self._classify_error(exc3),
-                            )
-                        return
-                    # If not RUNNING, the poll handler already set terminal state.
-                except Exception as exc2:
-                    error_msg = str(exc2)
-                    error_category = self._classify_error(exc2)
-                    _json_log("ERROR", f"Post-approval execution failed: {error_msg}",
-                              job_id=job_id, extra={"error_category": error_category})
-                    await self._handle_failure(job_id, error_msg, error_category)
+                    except Exception as exc2:
+                        error_msg = str(exc2)
+                        error_category = self._classify_error(exc2)
+                        _json_log("ERROR", f"Post-approval execution failed: {error_msg}",
+                                  job_id=job_id, extra={"error_category": error_category})
+                        await self._handle_failure(job_id, error_msg, error_category)
+                        break
 
         except Exception as exc:
             error_msg = str(exc)
@@ -812,16 +803,26 @@ class TaskWorker:
     # ------------------------------------------------------------------
 
     def _finalize_pending_approval_run(
-        self, job_id: str, run_final_status: str, error_msg: str,
+        self, job_id: str, run_final_status: str, detail_msg: str,
     ) -> None:
-        """Finalize any run stuck in PENDING_APPROVAL status."""
+        """Finalize any run stuck in PENDING_APPROVAL status.
+
+        Args:
+            run_final_status: Target RunStatus value ("failed", "aborted", etc.)
+            detail_msg: Reason for the status change.
+        """
+        try:
+            from control_plane.models import RunStatus as RS
+            target_status = RS(run_final_status)
+        except ValueError:
+            target_status = RunStatus.FAILED
         try:
             runs = self.repository.list_runs_by_job(job_id)
             for run in runs:
                 if run.status == RunStatus.PENDING_APPROVAL:
-                    run.status = RunStatus.FAILED
+                    run.status = target_status
                     run.completed_at = datetime.now(timezone.utc)
-                    run.dag_result = {"error": error_msg}
+                    run.dag_result = {"error": detail_msg}
                     self.repository.update_run(run)
         except Exception as exc:
             _json_log(
@@ -872,7 +873,7 @@ class TaskWorker:
                         status=JobStatus.CANCELED.value,
                     )
                     self._finalize_pending_approval_run(
-                        job_id, "failed", "Job canceled during approval wait",
+                        job_id, "aborted", "Job canceled during approval wait",
                     )
                     return JobStatus.CANCELED
                 # Transition PENDING_APPROVAL -> RUNNING
