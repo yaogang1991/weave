@@ -5,8 +5,35 @@ import pytest
 import tempfile
 from pathlib import Path
 
-from core.config import LLMConfig, ModelRoute, ModelRoutingConfig, HarnessConfig
+from core.config import LLMConfig, ModelRoute, ModelRoutingConfig, HarnessConfig, infer_provider
 from core.llm_router import LLMRouter
+
+
+class TestInferProvider:
+    """Test provider inference from model names."""
+
+    def test_gpt_models(self):
+        assert infer_provider("gpt-4o") == "openai"
+        assert infer_provider("gpt-4o-mini") == "openai"
+        assert infer_provider("gpt-3.5-turbo") == "openai"
+
+    def test_o_series_models(self):
+        assert infer_provider("o1") == "openai"
+        assert infer_provider("o1-mini") == "openai"
+        assert infer_provider("o1-pro") == "openai"
+        assert infer_provider("o3-mini") == "openai"
+        assert infer_provider("o4-mini") == "openai"
+
+    def test_claude_models(self):
+        assert infer_provider("claude-sonnet-4-6") == "anthropic"
+        assert infer_provider("claude-opus-4-6") == "anthropic"
+        assert infer_provider("claude-haiku-4-5") == "anthropic"
+
+    def test_unknown_defaults_to_anthropic(self):
+        assert infer_provider("unknown-model") == "anthropic"
+
+    def test_custom_default(self):
+        assert infer_provider("unknown-model", default="openai") == "openai"
 
 
 class TestModelRoute:
@@ -63,6 +90,15 @@ class TestModelRoutingConfig:
         assert config.routing["generator"].model == "gpt-4o-mini"
         assert config.routing["generator"].provider == "openai"
 
+    def test_from_env_o_series(self, monkeypatch):
+        monkeypatch.setenv("HARNESS_PLANNER_MODEL", "o3-mini")
+        monkeypatch.setenv("HARNESS_GENERATOR_MODEL", "o4-mini")
+        config = ModelRoutingConfig.from_env()
+        assert config.routing["planner"].model == "o3-mini"
+        assert config.routing["planner"].provider == "openai"
+        assert config.routing["generator"].model == "o4-mini"
+        assert config.routing["generator"].provider == "openai"
+
     def test_from_env_fallback(self, monkeypatch):
         monkeypatch.setenv("HARNESS_MODEL_FALLBACK", "claude-opus-4-6,gpt-4o")
         config = ModelRoutingConfig.from_env()
@@ -88,6 +124,20 @@ fallback_chain:
         assert config.routing["generator"].model == "gpt-4o"
         assert config.routing["generator"].provider == "openai"
         assert len(config.fallback_chain) == 2
+
+    def test_from_yaml_o_series(self, tmp_path):
+        yaml_content = """
+routing:
+  planner: o3-mini
+  generator: o4-mini
+"""
+        yaml_file = tmp_path / "routing.yaml"
+        yaml_file.write_text(yaml_content)
+        config = ModelRoutingConfig.from_yaml(str(yaml_file))
+        assert config.routing["planner"].model == "o3-mini"
+        assert config.routing["planner"].provider == "openai"
+        assert config.routing["generator"].model == "o4-mini"
+        assert config.routing["generator"].provider == "openai"
 
 
 class TestHarnessConfigIntegration:
@@ -151,7 +201,7 @@ class TestLLMRouter:
         assert client.config.model == "claude-sonnet-4-6"
 
     def test_client_caching(self):
-        """Same (provider, model) pair returns cached client."""
+        """Same (provider, model) pair with same overrides returns cached client."""
         config = ModelRoutingConfig(
             routing={
                 "planner": ModelRoute(provider="anthropic", model="claude-opus-4-6"),
@@ -162,8 +212,28 @@ class TestLLMRouter:
 
         planner_client = router.get_client("planner")
         evaluator_client = router.get_client("evaluator")
-        # Same model -> same cached client instance
+        # Same model + same (no) overrides -> same cached client instance
         assert planner_client is evaluator_client
+
+    def test_different_overrides_separate_clients(self):
+        """Different temperature overrides produce separate clients."""
+        config = ModelRoutingConfig(
+            routing={
+                "planner": ModelRoute(
+                    provider="anthropic", model="claude-opus-4-6", temperature=0.1,
+                ),
+                "evaluator": ModelRoute(
+                    provider="anthropic", model="claude-opus-4-6", temperature=0.7,
+                ),
+            }
+        )
+        router = LLMRouter(config, self._make_base_config())
+
+        planner_client = router.get_client("planner")
+        evaluator_client = router.get_client("evaluator")
+        assert planner_client is not evaluator_client
+        assert planner_client.config.temperature == 0.1
+        assert evaluator_client.config.temperature == 0.7
 
     def test_temperature_override(self):
         """Temperature from route overrides base config."""
@@ -191,6 +261,45 @@ class TestLLMRouter:
         client = router.get_client("generator")
         assert client.config.provider == "openai"
         assert client.config.model == "gpt-4o"
+
+    def test_provider_inference_o_series(self):
+        """o-series models (o1, o3, o4) are inferred as openai provider."""
+        config = ModelRoutingConfig(
+            routing={
+                "planner": ModelRoute(model="o3-mini"),
+                "generator": ModelRoute(model="o4-mini"),
+            }
+        )
+        router = LLMRouter(config, self._make_base_config())
+
+        planner = router.get_client("planner")
+        assert planner.config.provider == "openai"
+        assert planner.config.model == "o3-mini"
+
+        generator = router.get_client("generator")
+        assert generator.config.provider == "openai"
+        assert generator.config.model == "o4-mini"
+
+    def test_cross_provider_credentials(self, monkeypatch):
+        """Cross-provider routes use provider-specific API keys."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test-key")
+
+        config = ModelRoutingConfig(
+            routing={
+                "generator": ModelRoute(model="gpt-4o"),
+            }
+        )
+        base = LLMConfig(provider="anthropic", model="claude-sonnet-4-6", api_key="sk-ant-key")
+        router = LLMRouter(config, base)
+
+        generator = router.get_client("generator")
+        assert generator.config.provider == "openai"
+        assert generator.config.api_key == "sk-openai-test-key"
+
+        # Default client should still use anthropic key
+        default = router.get_client("planner")
+        assert default.config.provider == "anthropic"
+        assert default.config.api_key == "sk-ant-key"
 
     def test_fallback_chain(self):
         """Fallback returns next model in chain."""
