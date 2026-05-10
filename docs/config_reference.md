@@ -201,7 +201,5 @@ non_interactive: false
 | `./data/plans/` | Generated DAG plans (JSON) |
 | `./data/artifacts/` | Session artifacts |
 | `./data/reports/` | Markdown reports |
-| `./data/queue/pending/` | Queued job files |
-| `./data/queue/leased/` | Leased job files |
-| `./data/queue/dead/` | Dead-letter job files |
+| `./data/jobs/` | Job storage (all statuses including dead_letter) |
 | `./data/backends/` | Backend data (worktrees, etc.) |

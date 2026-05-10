@@ -164,26 +164,27 @@ Set `HARNESS_DEFAULT_BACKEND=my_backend` or add to risk mapping.
 python main.py status <job_id>
 ```
 
-Look for `status`, `run_status`, and `progress` fields.
+Look for `status`, `last_error`, and `runs[].status` / `runs[].session_id` fields.
 
 ### 2. Read the event log
 
+Use `session_id` from the status output (under `runs[].session_id`):
+
 ```bash
-cat ./data/events/<job_id>.jsonl | python -m json.tool
+cat ./data/events/<session_id>.jsonl | python -m json.tool
 ```
 
 Key event types to look for:
-- `workflow.stage_start` / `workflow.stage_end` — DAG level transitions
-- `node.started` / `node.completed` / `node.failed` — Individual node outcomes
-- `node.heartbeat` / `node.unhealthy_killed` — Health issues
-- `workflow.health_alert` — Watchdog alerts
+- `started` / `completed` / `failed` — Individual node outcomes
+- `heartbeat_missed` / `unhealthy_killed` — Health issues
+- `health_alert` — Watchdog alerts
 
 ### 3. Check node error details
 
-Failed nodes store error info in the DAG execution result. Check the event log for details:
+Failed nodes store error info in the event log. Search for failed events:
 
 ```bash
-python main.py status <job_id>
+grep '"failed"' ./data/events/<session_id>.jsonl | python -m json.tool
 ```
 
 ### 4. Inspect dead-letter jobs
