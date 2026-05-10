@@ -11,6 +11,7 @@ Each Worker Agent gets:
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from core.models import AgentMessage
@@ -253,6 +254,14 @@ class AgentPool:
         self.llm_router = llm_router
         self._instances: dict[str, WorkerAgent] = {}
 
+    def _is_api_error(self, exc: Exception) -> bool:
+        """Check if an exception is likely an LLM API error (auth, rate limit, etc.)."""
+        exc_name = type(exc).__name__
+        return any(
+            substr in exc_name
+            for substr in ("Authentication", "Permission", "RateLimit", "API", "Connection", "ServiceUnavailable")
+        )
+
     def get_or_create(self, agent_type: str) -> WorkerAgent:
         """Get or create a WorkerAgent instance for the given type."""
         if agent_type not in self._instances:
@@ -284,10 +293,50 @@ class AgentPool:
         Return a callable that the DAG engine can use to execute nodes.
 
         Signature: async def executor(node, artifacts) -> result_dict
+
+        When the LLM router is available, failures are retried with the
+        next model in the fallback chain before propagating to the DAG engine.
         """
+        _log = logging.getLogger(__name__)
+
         async def _executor(node: DAGNode, artifacts: list[HandoffArtifact]) -> dict:
             worker = self.get_or_create(node.agent_type)
-            return await worker.execute(node.task_description, artifacts, session_id)
+            try:
+                return await worker.execute(node.task_description, artifacts, session_id)
+            except Exception as exc:
+                if not self.llm_router or not self._is_api_error(exc):
+                    raise
+
+                # Walk the fallback chain
+                failed_model = worker.llm_config.model
+                while True:
+                    fallback = self.llm_router.get_fallback_client(failed_model)
+                    if fallback is None:
+                        raise
+                    _log.warning(
+                        "Model %s failed (%s), trying fallback %s",
+                        failed_model, exc, fallback.config.model,
+                    )
+                    capability = self.agent_registry.get(node.agent_type)
+                    fallback_worker = WorkerAgent(
+                        capability=capability,
+                        llm_config=fallback.config,
+                        session_store=self.session_store,
+                        tool_registry=self.tool_registry,
+                        guardrails=self.guardrails,
+                        max_iterations=self.max_iterations,
+                        timeout=self.timeout,
+                        max_context_tokens=self.max_context_tokens,
+                    )
+                    try:
+                        return await fallback_worker.execute(
+                            node.task_description, artifacts, session_id,
+                        )
+                    except Exception as retry_exc:
+                        if not self._is_api_error(retry_exc):
+                            raise
+                        failed_model = fallback.config.model
+                        continue
 
         return _executor
 

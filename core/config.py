@@ -30,6 +30,22 @@ def _load_claude_settings() -> dict[str, str]:
 _CLAUDE_ENV = _load_claude_settings()
 
 
+def infer_provider(model: str, default: str = "anthropic") -> str:
+    """Infer LLM provider from model name.
+
+    Handles known prefixes: gpt*, chatgpt*, o-series (o1, o3, o4, etc.),
+    and claude*.
+    """
+    if model.startswith("gpt") or model.startswith("chatgpt"):
+        return "openai"
+    # o-series models: o1, o3, o4, etc. (starts with 'o' followed by digit)
+    if len(model) > 1 and model[0] == "o" and model[1].isdigit():
+        return "openai"
+    if model.startswith("claude"):
+        return "anthropic"
+    return default
+
+
 class LLMConfig(BaseModel):
     provider: str = "anthropic"  # anthropic, openai
     model: str = "claude-sonnet-4-6"
@@ -98,9 +114,8 @@ class ModelRoutingConfig(BaseModel):
         ]:
             model = os.getenv(env_var, "")
             if model:
-                provider = "openai" if model.startswith("gpt") else "anthropic"
                 routing[agent_type] = ModelRoute(
-                    provider=provider, model=model
+                    provider=infer_provider(model), model=model
                 )
 
         fallback_str = os.getenv(
@@ -120,7 +135,7 @@ class ModelRoutingConfig(BaseModel):
             if isinstance(val, dict):
                 routing[key] = ModelRoute(**val)
             elif isinstance(val, str):
-                provider = "openai" if val.startswith("gpt") else "anthropic"
+                provider = infer_provider(val)
                 routing[key] = ModelRoute(provider=provider, model=val)
         return cls(
             routing=routing,
