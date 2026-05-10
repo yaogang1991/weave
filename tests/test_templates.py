@@ -357,9 +357,11 @@ class TestCLIIntegration:
     def test_templates_command_no_args(self):
         """templates command without --name lists all templates."""
         import subprocess
+        import sys
+        import os
         result = subprocess.run(
-            [".venv/bin/python", "main.py", "templates"],
-            capture_output=True, text=True, cwd="/Users/yaogang/project/harness",
+            [sys.executable, "main.py", "templates"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -369,9 +371,11 @@ class TestCLIIntegration:
     def test_templates_command_with_name(self):
         """templates --name shows specific template details."""
         import subprocess
+        import sys
+        import os
         result = subprocess.run(
-            [".venv/bin/python", "main.py", "templates", "--name", "fix_bug"],
-            capture_output=True, text=True, cwd="/Users/yaogang/project/harness",
+            [sys.executable, "main.py", "templates", "--name", "fix_bug"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0
         data = json.loads(result.stdout)
@@ -381,9 +385,11 @@ class TestCLIIntegration:
     def test_templates_command_not_found(self):
         """templates --name with nonexistent template errors."""
         import subprocess
+        import sys
+        import os
         result = subprocess.run(
-            [".venv/bin/python", "main.py", "templates", "--name", "nope"],
-            capture_output=True, text=True, cwd="/Users/yaogang/project/harness",
+            [sys.executable, "main.py", "templates", "--name", "nope"],
+            capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode != 0
 

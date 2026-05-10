@@ -79,7 +79,7 @@ def _parse_template_vars(var_list: list[str]) -> dict[str, str]:
             key, value = item.split("=", 1)
             variables[key.strip()] = value.strip()
         else:
-            sys.stderr.write(f"Invalid --var format: {item} (expected KEY=VALUE)\n")
+            raise ValueError(f"Invalid --var format: {item} (expected KEY=VALUE)")
     return variables
 
 
@@ -398,7 +398,7 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     service = RunService(
         repository=repository,
         llm_config=harness_config.llm,
-        default_backend=harness_config.default_backend,
+        default_backend=harness_config.workspace_isolation,
         backend_base_path=harness_config.backend_base_path,
         approval_repo=approval_repo,
         non_interactive=non_interactive,
@@ -882,67 +882,8 @@ async def cmd_templates(args):
 
 
 # =============================================================================
-# Impact Analysis CLI commands (M3.5)
+# Impact Analysis CLI commands (M3.5) — deferred until analysis/ module lands
 # =============================================================================
-
-
-async def cmd_impact_predict(args):
-    """Predict the impact of a requirement on a project."""
-    from analysis.impact_predictor import ImpactPredictor
-    config = HarnessConfig.from_env()
-    predictor = ImpactPredictor(
-        llm_config=config.llm,
-        memory_manager=_make_memory_manager() if config.memory.enabled else None,
-    )
-    scope = await predictor.predict(
-        requirement=args.requirement,
-        project_path=args.project or ".",
-    )
-    result = {
-        "id": scope.id,
-        "requirement": scope.requirement,
-        "predicted_files": scope.predicted_files,
-        "predicted_modules": scope.predicted_modules,
-        "risk_level": scope.risk_level.value,
-        "confidence": scope.confidence,
-        "reasoning": scope.reasoning,
-    }
-    print(json.dumps(result, indent=2, default=str))
-
-
-async def cmd_impact_graph(args):
-    """Build and display the dependency graph for a project."""
-    from analysis.dependency_graph import DependencyGraph
-    graph = DependencyGraph(args.project or ".")
-    graph.build()
-    result = {
-        "project_path": str(graph.project_path),
-        "files": len(graph._graph),
-        "graph": graph.to_dict(),
-    }
-    print(json.dumps(result, indent=2, default=str))
-
-
-async def cmd_impact_history(args):
-    """List past impact predictions from memory."""
-    manager = _make_memory_manager()
-    entries = manager.store.search(
-        query="impact_analysis prediction",
-        limit=args.limit,
-    )
-    result = {
-        "predictions": [
-            {
-                "id": e.id,
-                "content": e.content,
-                "keywords": e.keywords,
-                "created_at": e.created_at.isoformat(),
-            }
-            for e in entries
-        ],
-        "count": len(entries),
-    }
-    print(json.dumps(result, indent=2, default=str))
 
 
 def main():
@@ -1166,32 +1107,6 @@ Examples:
     templates_parser.add_argument("--name", help="Show details of a specific template")
     templates_parser.set_defaults(func=cmd_templates)
 
-    # ------------------------------------------------------------------
-    # Impact Analysis commands (M3.5)
-    # ------------------------------------------------------------------
-
-    # impact-predict command
-    impact_predict_parser = subparsers.add_parser(
-        "impact-predict", help="Predict impact of a requirement",
-    )
-    impact_predict_parser.add_argument("requirement", help="Requirement text")
-    impact_predict_parser.add_argument("--project", help="Project path")
-    impact_predict_parser.set_defaults(func=cmd_impact_predict)
-
-    # impact-graph command
-    impact_graph_parser = subparsers.add_parser(
-        "impact-graph", help="Show project dependency graph",
-    )
-    impact_graph_parser.add_argument("--project", help="Project path")
-    impact_graph_parser.set_defaults(func=cmd_impact_graph)
-
-    # impact-history command
-    impact_history_parser = subparsers.add_parser(
-        "impact-history", help="List past impact predictions",
-    )
-    impact_history_parser.add_argument("--limit", type=int, default=20)
-    impact_history_parser.set_defaults(func=cmd_impact_history)
-
     args = parser.parse_args()
 
     if not args.command:
@@ -1206,8 +1121,10 @@ Examples:
         "memory-add", "memory-cleanup",
         "learning-analyze", "learning-insights", "learning-status",
         "templates",
-        "impact-predict", "impact-graph", "impact-history",
     }
+    # Template-based plan/run doesn't need an LLM key
+    if args.command in ("plan", "run") and getattr(args, "template", None):
+        _NO_API_KEY_COMMANDS.add(args.command)
     if args.command not in _NO_API_KEY_COMMANDS:
         from core.config import _CLAUDE_ENV
         has_key = (

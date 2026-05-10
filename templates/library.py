@@ -49,9 +49,10 @@ class TemplateRegistry:
         return templates
 
     def get_template(self, name: str) -> DAGTemplate | None:
-        """Load a template by name (without extension)."""
+        """Load a template by name (filename stem or declared YAML name)."""
         if name in self._cache:
             return self._cache[name]
+        # Try by filename stem first
         for ext in (".yaml", ".yml"):
             path = self.templates_dir / f"{name}{ext}"
             if path.exists():
@@ -61,6 +62,11 @@ class TemplateRegistry:
                     return tpl
                 except Exception as e:
                     logger.warning("Failed to load template %s: %s", name, e)
+        # Fallback: scan all templates and match by declared name
+        for tpl in self.list_templates():
+            if tpl.name == name:
+                self._cache[name] = tpl
+                return tpl
         return None
 
     def instantiate(
@@ -95,6 +101,14 @@ class TemplateRegistry:
                 raise ValueError(
                     f"Edge in template '{template_name}' has empty "
                     f"from/to node: from='{from_node}', to='{to_node}'"
+                )
+            if from_node not in nodes_dict:
+                raise ValueError(
+                    f"Edge references unknown node '{from_node}' in template '{template_name}'"
+                )
+            if to_node not in nodes_dict:
+                raise ValueError(
+                    f"Edge references unknown node '{to_node}' in template '{template_name}'"
                 )
             edges.append(DAGEdge(from_node=from_node, to_node=to_node))
 
