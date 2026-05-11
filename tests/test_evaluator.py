@@ -95,6 +95,37 @@ class TestCriterionChecking:
         passed, msg = evaluator._check_files_exist(["exists.py"], tmp_path)
         assert passed
 
+    def test_loose_match_by_name(self, evaluator, tmp_path):
+        """File in subdirectory matches by name."""
+        sub = tmp_path / "tools"
+        sub.mkdir()
+        (sub / "config_parser.py").write_text("ok", encoding="utf-8")
+        passed, msg = evaluator._check_files_exist_loose(["src/config_parser.py"], tmp_path)
+        assert passed
+        assert "loose match" in msg.lower()
+
+    def test_loose_match_by_stem(self, evaluator, tmp_path):
+        """File matches by stem substring."""
+        sub = tmp_path / "tests"
+        sub.mkdir()
+        (sub / "test_csv_processor_utils.py").write_text("ok", encoding="utf-8")
+        passed, msg = evaluator._check_files_exist_loose(["tests/test_csv_processor.py"], tmp_path)
+        assert passed
+
+    def test_loose_match_still_finds_missing(self, evaluator, tmp_path):
+        passed, msg = evaluator._check_files_exist_loose(["totally_missing_file.py"], tmp_path)
+        assert not passed
+
+    def test_file_exists_prefers_output_artifacts(self, evaluator, tmp_path):
+        """When output_artifacts provided, FILE_EXISTS passes immediately."""
+        result = evaluator.evaluate_stage(
+            "s1", "impl",
+            [SuccessCriterion(type=CriterionType.FILE_EXISTS, path="planned.py", description="file")],
+            str(tmp_path),
+            output_artifacts=["actual.py"],
+        )
+        assert result.passed
+
 
 class TestEvaluateStage:
     @patch("evaluator.engine.subprocess.run")

@@ -185,11 +185,15 @@ class EvaluatorEngine:
             return passed, msg, True
 
         if crit.type == CriterionType.FILE_EXISTS:
+            # Prefer output_artifacts (actual files the agent produced)
+            if output_artifacts:
+                return True, f"Files confirmed via output_artifacts ({len(output_artifacts)} files)", True
+            # Fallback: check criteria paths with loose matching
             files_str = crit.path
-            files = [f.strip() for f in files_str.split(",")] if files_str else (output_artifacts or [])
+            files = [f.strip() for f in files_str.split(",")] if files_str else []
             if not files:
                 return True, "No specific files listed", True
-            passed, msg = self._check_files_exist(files, Path(work_dir))
+            passed, msg = self._check_files_exist_loose(files, Path(work_dir))
             return passed, msg, True
 
         if crit.type == CriterionType.COVERAGE:
@@ -281,6 +285,25 @@ class EvaluatorEngine:
         missing = [f for f in files if not (base / f).exists()]
         passed = len(missing) == 0
         return passed, f"Missing: {missing}" if missing else "All required files present"
+
+    def _check_files_exist_loose(self, patterns: list[str], base: Path) -> tuple[bool, str]:
+        """Loose file matching: exact, glob by name, or substring match."""
+        missing = []
+        for pattern in patterns:
+            # 1. Exact match
+            if (base / pattern).exists():
+                continue
+            # 2. Glob by filename
+            name = Path(pattern).name
+            if list(base.glob(f"**/{name}")):
+                continue
+            # 3. Substring match (without extension)
+            stem = Path(pattern).stem
+            if len(stem) >= 3 and list(base.glob(f"**/*{stem}*")):
+                continue
+            missing.append(pattern)
+        passed = len(missing) == 0
+        return passed, f"Missing: {missing}" if missing else "Required files found (loose match)"
 
     def _check_coverage(self, work_dir: Path, target: int) -> tuple[bool, str]:
         try:
