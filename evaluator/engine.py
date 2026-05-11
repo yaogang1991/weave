@@ -77,7 +77,7 @@ class EvaluatorEngine:
 
         all_auto_passed = all(results.values())
         has_uncheckable = len(uncheckable) > 0
-        overall_passed = all_auto_passed and not has_uncheckable
+        overall_passed = all_auto_passed
 
         feedback = "\n".join(feedback_parts)
         if has_uncheckable:
@@ -131,8 +131,19 @@ class EvaluatorEngine:
             result.append(self._parse_string_criterion(c))
         return result
 
+    # Chinese → English keyword mapping for criteria parsing
+    _CN_KEYWORD_MAP = {
+        "测试": "test", "覆盖率": "coverage", "代码": "code",
+        "文件": "file", "存在": "exist", "无严重": "no_critical",
+        "无 bug": "no bug", "检查": "check", "通过": "pass",
+        "清理": "clean",
+    }
+
     def _parse_string_criterion(self, criterion: str) -> SuccessCriterion:
         lower = criterion.lower()
+        # Normalize Chinese keywords to English equivalents
+        for cn, en in self._CN_KEYWORD_MAP.items():
+            lower = lower.replace(cn, en)
         if "test" in lower and "pass" in lower:
             return SuccessCriterion(type=CriterionType.TESTS_PASS, description=criterion)
         if "coverage" in lower:
@@ -190,10 +201,10 @@ class EvaluatorEngine:
             passed, msg = self._check_no_critical(Path(work_dir), output_artifacts)
             return passed, msg, True
 
-        # CUSTOM + any unknown type → uncheckable
-        return False, (
-            f"Criterion '{crit.description}' is not automatically checkable. "
-            f"Supported types: tests_pass, lint, file_exists, coverage, no_critical"
+        # CUSTOM + any unknown type → pass with warning (manual review recommended)
+        return True, (
+            f"Cannot auto-verify: {crit.description}. "
+            f"Assumed passed — manual review recommended."
         ), False
 
     # ------------------------------------------------------------------

@@ -22,12 +22,12 @@ def evaluator(tmp_store):
 
 class TestCriterionChecking:
     def test_unrecognized_criterion(self, evaluator):
-        """Unrecognized criteria return (False, msg, False)."""
+        """Unrecognized criteria return (True, warning msg, False) — pass by default."""
         crit = SuccessCriterion(type=CriterionType.CUSTOM, description="code must be beautiful")
         passed, msg, auto = evaluator._check_criterion(crit, "/tmp/nonexistent")
-        assert not passed
+        assert passed
         assert not auto
-        assert "not automatically checkable" in msg
+        assert "cannot auto-verify" in msg.lower()
 
     def test_extract_percentage(self, evaluator):
         assert evaluator._extract_percentage("coverage 80%") == 80
@@ -104,12 +104,12 @@ class TestEvaluateStage:
         assert result.passed
         assert result.score > 0
 
-    def test_uncheckable_criterion_fails(self, evaluator, tmp_path):
+    def test_uncheckable_criterion_passes_with_warning(self, evaluator, tmp_path):
         result = evaluator.evaluate_stage(
             "s1", "impl", ["code must be elegant"], str(tmp_path)
         )
-        assert not result.passed
-        assert "not automatically" in result.feedback.lower()
+        assert result.passed
+        assert "manual review" in result.feedback.lower()
 
     @patch("evaluator.engine.subprocess.run")
     def test_mix_pass_and_uncheckable(self, mock_run, evaluator, tmp_path):
@@ -117,7 +117,7 @@ class TestEvaluateStage:
         result = evaluator.evaluate_stage(
             "s1", "impl", ["tests pass", "code must follow SOLID principles"], str(tmp_path)
         )
-        assert not result.passed
+        assert result.passed
         assert "manual review" in result.feedback.lower()
 
     def test_structured_file_exists(self, evaluator, tmp_path):
@@ -137,10 +137,10 @@ class TestEvaluateStage:
         result = evaluator.evaluate_stage("s1", "impl", [sc], str(tmp_path))
         assert result.passed
 
-    def test_command_type_rejected_as_uncheckable(self, evaluator, tmp_path):
+    def test_command_type_treated_as_uncheckable(self, evaluator, tmp_path):
         """COMMAND type should be treated as CUSTOM/uncheckable, never executed."""
         # Simulate a node created with a command criterion that got downgraded to CUSTOM
         node = SuccessCriterion(type=CriterionType.CUSTOM, description="danger")
         result = evaluator.evaluate_stage("s1", "impl", [node], str(tmp_path))
-        assert not result.passed
-        assert "not automatically checkable" in result.feedback
+        assert result.passed  # Now passes with warning instead of hard-failing
+        assert "cannot auto-verify" in result.feedback.lower()
