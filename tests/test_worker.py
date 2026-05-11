@@ -105,6 +105,42 @@ class TestRetry:
         assert worker.llm.call.call_count == 4  # 1 + 3 retries
 
 
+class TestRateLimitParsing:
+    def test_parse_reset_datetime(self):
+        """Parse 'will reset at YYYY-MM-DD HH:MM:SS' pattern."""
+        from datetime import datetime, timezone, timedelta
+        future = datetime.now(timezone.utc) + timedelta(seconds=120)
+        msg = f"429 - rate limit exceeded, will reset at {future.strftime('%Y-%m-%d %H:%M:%S')}"
+        wait = AgentWorker._parse_rate_limit_wait(msg)
+        assert wait is not None
+        assert 100 < wait < 130
+
+    def test_parse_retry_after_seconds(self):
+        msg = "429 rate limit, retry-after: 60"
+        wait = AgentWorker._parse_rate_limit_wait(msg)
+        assert wait == 60.0
+
+    def test_parse_retry_in_seconds(self):
+        msg = "rate limited, retry in 30 seconds"
+        wait = AgentWorker._parse_rate_limit_wait(msg)
+        assert wait == 30.0
+
+    def test_parse_no_match_returns_none(self):
+        assert AgentWorker._parse_rate_limit_wait("some other error") is None
+
+    def test_rate_limit_uses_parsed_wait(self, worker, mock_tool_executor):
+        """429 error should sleep for parsed duration, not short backoff."""
+        worker.llm.call = MagicMock(side_effect=[
+            RuntimeError("429 rate limit, retry-after: 60"),
+            {"role": "assistant", "content": "done"},
+        ])
+        with patch("agent.worker.time.sleep") as mock_sleep:
+            msgs = list(worker.run("s1", "sys", "do it", [], mock_tool_executor))
+        # Should sleep ~61 seconds (parsed + 1 buffer), not 2^0 = 1 second
+        assert mock_sleep.call_count == 1
+        assert mock_sleep.call_args[0][0] > 30
+
+
 class TestArtifactTracking:
     def test_tracks_write(self, worker):
         mock_exec = MagicMock()
