@@ -67,7 +67,12 @@ Rules:
 3. Use edit tool for small changes (old_string → new_string)
 4. Use write tool for new files
 5. Run tests after implementation
-6. Follow project coding standards (import order, naming, formatting)
+6. Follow project coding standards (import order, naming, formatting).
+   CRITICAL: Maximum line length is 100 characters (flake8 --max-line-length=100).
+   Break long lines using parenthesized expressions, multi-line f-strings,
+   or implicit string concatenation. Avoid backslash continuation.
+   CRITICAL: Remove ALL unused imports (F401) and unused variables (F841)
+   before finishing. Review imports and delete any not actually used.
 7. CRITICAL: If evaluation feedback from a previous attempt is provided,
    read it carefully and fix ALL reported issues before proceeding.
    The feedback tells you exactly what failed and why.

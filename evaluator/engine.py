@@ -251,6 +251,10 @@ class EvaluatorEngine:
 
         Only lints specific files — does NOT recursively scan directories.
         This prevents cross-node pollution in parallel DAG execution.
+
+        Auto-fixes F401 (unused imports) and F841 (unused variables) via
+        autoflake before linting to eliminate the most common first-failure
+        cause without requiring a generator retry round.
         """
         resolved = []
         for t in targets:
@@ -265,6 +269,24 @@ class EvaluatorEngine:
                 resolved.append(str(Path(t)))
         if not resolved:
             return True, "No targets to lint"
+
+        # Auto-fix unused imports / variables before linting (graceful
+        # degradation if autoflake is not installed).
+        try:
+            subprocess.run(
+                [
+                    "python", "-m", "autoflake",
+                    "--remove-all-unused-imports",
+                    "--remove-unused-variables",
+                    "--in-place",
+                ] + resolved,
+                capture_output=True, text=True, timeout=30,
+            )
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
         try:
             result = subprocess.run(
                 ["python", "-m", "flake8"] + resolved + ["--max-line-length=100"],
