@@ -21,6 +21,7 @@ Key design decisions:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import uuid
@@ -109,16 +110,25 @@ class JobRepository:
     # Path helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _encode_id(raw_id: str) -> str:
+        """Collision-free filename encoding using base64url.
+
+        Different raw IDs always produce different encoded values,
+        so 'a:b' and 'a-b' map to distinct filenames.
+        """
+        return base64.urlsafe_b64encode(raw_id.encode()).decode().rstrip("=")
+
     def _job_path(self, job_id: str) -> Path:
-        return self.base_path / f"{job_id}.json"
+        return self.base_path / f"{self._encode_id(job_id)}.json"
 
     def _run_dir(self, job_id: str) -> Path:
-        d = self.base_path / job_id
+        d = self.base_path / self._encode_id(job_id)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def _run_path(self, job_id: str, run_id: str) -> Path:
-        return self._run_dir(job_id) / f"{run_id}.json"
+        return self._run_dir(job_id) / f"{self._encode_id(run_id)}.json"
 
     # ------------------------------------------------------------------
     # Serialization helpers
