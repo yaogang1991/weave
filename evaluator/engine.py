@@ -157,7 +157,14 @@ class EvaluatorEngine:
         output_artifacts: list[str] | None = None,
     ) -> tuple[bool, str, bool]:
         if crit.type == CriterionType.TESTS_PASS:
-            passed, msg = self._run_tests(Path(work_dir), crit.test_path or None)
+            test_targets = None
+            if crit.test_path:
+                test_targets = crit.test_path
+            elif output_artifacts:
+                test_targets = [a for a in output_artifacts if "test" in Path(a).name.lower()]
+            if not test_targets:
+                return True, "No test files to run (passed by default)", True
+            passed, msg = self._run_tests(Path(work_dir), test_targets)
             return passed, msg, True
 
         if crit.type == CriterionType.LINT:
@@ -193,12 +200,15 @@ class EvaluatorEngine:
     # Internal checkers — all return 2-tuple (bool, str)
     # ------------------------------------------------------------------
 
-    def _run_tests(self, work_dir: Path, test_path: str | None = None) -> tuple[bool, str]:
+    def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None) -> tuple[bool, str]:
         """Run pytest with a fixed command. Never executes arbitrary commands."""
         try:
             cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
             if test_path:
-                cmd.append(test_path)
+                if isinstance(test_path, list):
+                    cmd.extend(str(work_dir / t) if not Path(t).is_absolute() else t for t in test_path)
+                else:
+                    cmd.append(test_path)
             result = subprocess.run(
                 cmd,
                 capture_output=True, text=True,
