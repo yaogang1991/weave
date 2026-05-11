@@ -98,7 +98,7 @@ class RunService:
         repository: JobRepository,
         llm_config: LLMConfig,
         max_parallel: int = 3,
-        agent_timeout: int = 120,
+        agent_timeout: int = 300,
         max_context_tokens: int = 100000,
         artifact_path: str = "./data/artifacts",
         event_store_path: str = "./data/events",
