@@ -57,8 +57,8 @@ class DAGExecutionEngine:
         artifact_path: str = "./data/artifacts",
         job_timeout: float | None = None,
         # M2.0: Watchdog configuration
-        heartbeat_interval_sec: float = 5.0,
-        heartbeat_miss_threshold: int = 3,
+        heartbeat_interval_sec: float = 30.0,
+        heartbeat_miss_threshold: int = 5,
         enable_watchdog: bool = True,
         # M3.2: Memory integration
         memory_manager: Any | None = None,
