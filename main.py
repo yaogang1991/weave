@@ -20,6 +20,11 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Force UTF-8 mode on Windows (default is GBK/cp936).
+# This covers all file I/O (open()), subprocess output, and env vars.
+# Must be set before any other imports that may read files.
+os.environ.setdefault("PYTHONUTF8", "1")
+
 # Ensure UTF-8 encoding on Windows (default is GBK/cp936)
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
