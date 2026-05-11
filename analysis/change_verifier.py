@@ -42,7 +42,7 @@ class ChangeVerifier:
                 if any(p in self._SKIP_DIRS for p in parts):
                     continue
                 try:
-                    rel = str(tracked_file.relative_to(self.project_path))
+                    rel = tracked_file.relative_to(self.project_path).as_posix()
                     stat = tracked_file.stat()
                     snapshot[rel] = (stat.st_mtime, stat.st_size)
                 except OSError:
