@@ -124,14 +124,9 @@ class RunService:
         self.approval_timeout_sec = approval_timeout_sec
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
-        # Shared subsystems (initialized once, safe for concurrent jobs)
-        self._subsystems_initialized = False
-        self._memory_manager = None
-        self._learning_scheduler = None
-        self._learning_optimizer = None
-        self._impact_predictor = None
-        self._change_verifier = None
-        self._impact_coverage_threshold = 0.7
+        # Execution hooks — subsystems register lifecycle callbacks
+        self._hooks: list[Any] = []
+        self._register_hooks()
 
         # M2.1/M2.2: Backend manager for isolated execution
         from backend.lifecycle import BackendManager
@@ -721,26 +716,30 @@ class RunService:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _ensure_subsystems(self) -> None:
-        """One-time init of shared memory/learning/impact subsystems.
+    def _register_hooks(self) -> None:
+        """Register execution lifecycle hooks with dependency injection."""
+        from control_plane.hooks import MemoryHook, LearningHook, ImpactHook
+        self._hooks = [
+            MemoryHook(),
+            LearningHook(repository=self.repository),
+            ImpactHook(llm_config=self.llm_config),
+        ]
 
-        Called lazily on first use. Flag is set AFTER successful init
-        so transient failures can be retried on the next job.
-        """
-        if self._subsystems_initialized:
-            return
-        try:
-            from core.config import HarnessConfig
-            from memory.manager import MemoryManager
-            config = HarnessConfig.from_env()
-            if config.memory.enabled:
-                self._memory_manager = MemoryManager(config=config.memory)
-                self._memory_manager.run_maintenance()
-        except Exception as exc:
-            logger.debug("Memory manager init skipped: %s", exc)
-        self._init_learning_system()
-        self._init_impact_analyzer()
-        self._subsystems_initialized = True
+    async def _run_before_hooks(self, ctx: Any) -> None:
+        """Run all before_execution hooks. Errors are logged, never raised."""
+        for hook in self._hooks:
+            try:
+                await hook.before_execution(ctx)
+            except Exception as exc:
+                logger.debug("Hook %s.before_execution failed: %s", type(hook).__name__, exc)
+
+    async def _run_after_hooks(self, ctx: Any, result_dag: Any) -> None:
+        """Run all after_execution hooks. Errors are logged, never raised."""
+        for hook in self._hooks:
+            try:
+                await hook.after_execution(ctx, result_dag)
+            except Exception as exc:
+                logger.debug("Hook %s.after_execution failed: %s", type(hook).__name__, exc)
 
     async def _execute_plan_and_run(
         self,
@@ -750,49 +749,28 @@ class RunService:
         work_dir: Path,
         run_id: str | None = None,
     ) -> Any:
-        """
-        Plan a DAG and execute it.
+        """Plan a DAG and execute it. Subsystems run via hooks."""
+        from control_plane.hooks import ExecutionContext
 
-        Returns the executed DAG object.
-        """
-        # M3.2: Initialize memory manager for this execution (local, not self)
-        memory_manager = self._build_memory_manager(store)
-
-        # M3.3: Run learning analysis if due
-        if getattr(self, "_learning_scheduler", None):
-            try:
-                self._learning_scheduler.maybe_run_analysis()
-            except Exception:
-                pass
-
-        # M3.5: Pre-execution impact prediction
-        impact_scope = None
-        before_snapshot = None
-        # Use canonical project root for prediction (not ephemeral work_dir)
-        # so historical lookups match across runs with different worktree paths.
-        impact_project_path = (
-            job.project_path
-            if job.project_path
-            else str(work_dir)
+        ctx = ExecutionContext(
+            job=job,
+            session_id=session_id,
+            store=store,
+            work_dir=work_dir,
+            run_id=run_id,
+            llm_config=self.llm_config,
+            repository=self.repository,
         )
-        if getattr(self, "_impact_predictor", None) and work_dir:
-            try:
-                impact_scope = await self._impact_predictor.predict(
-                    requirement=job.requirement,
-                    project_path=impact_project_path,
-                )
-                from analysis.change_verifier import ChangeVerifier
-                verifier = ChangeVerifier(
-                    project_path=str(work_dir),
-                )
-                before_snapshot = verifier.capture_snapshot()
-                job.metadata["impact_scope_id"] = impact_scope.id
-                job.metadata["predicted_files"] = impact_scope.predicted_files
-                self.repository.update_job(job)
-            except Exception:
-                pass  # Impact prediction must not block execution
 
-        # 1. Create orchestrator and plan DAG
+        # Before-hooks: memory, learning, impact prediction
+        await self._run_before_hooks(ctx)
+
+        # Persist prediction metadata immediately (before execution may fail/cancel)
+        if ctx.metadata:
+            ctx.job.metadata.update(ctx.metadata)
+            self.repository.update_job(ctx.job)
+
+        # Core: plan + execute
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
         project_context = {"project_path": project_path} if project_path else None
@@ -801,93 +779,26 @@ class RunService:
             project_context=project_context,
         )
 
-        # 2. Create execution engine (with replan handler) and execute
         engine = self._create_execution_engine(
             session_id, store,
             replan_handler=lambda dag_ref, failed_id: orchestrator.replan(
                 dag_ref, failed_id, job.requirement,
             ),
             work_dir=work_dir,
-            memory_manager=memory_manager,
+            memory_manager=ctx.memory_manager,
             job_id=job.id,
             approval_repo=self.approval_repo,
             run_id=run_id,
         )
         result_dag = await engine.execute(dag)
 
-        # M3.5: Post-execution change verification
-        if impact_scope and work_dir:
-            try:
-                from analysis.change_verifier import ChangeVerifier
-                from core.models import MemoryType, MemoryScope
-                # Skip verification if baseline snapshot capture failed
-                if before_snapshot is None:
-                    logger.info("Skipping impact verification: no baseline snapshot")
-                    return result_dag
-                # Use coverage_threshold from initialized impact analyzer config
-                threshold = getattr(
-                    self, "_impact_coverage_threshold", 0.7,
-                )
-                verifier = ChangeVerifier(
-                    project_path=str(work_dir),
-                    coverage_threshold=threshold,
-                )
-                verification = verifier.verify(impact_scope, before_snapshot)
-                if memory_manager:
-                    memory_manager.store_learning(
-                        agent_type="impact_analyzer",
-                        content=(
-                            f"Impact prediction for "
-                            f"'{job.requirement[:100]}': "
-                            f"coverage={verification.coverage:.2f}, "
-                            f"accuracy={verification.prediction_accuracy:.2f}, "
-                            f"unexpected={len(verification.unexpected_files)}"
-                        ),
-                        memory_type=MemoryType.EXPERIENCE,
-                        scope=MemoryScope.GLOBAL,
-                        keywords=[
-                            "impact_analysis", "prediction",
-                            impact_scope.risk_level.value,
-                        ],
-                        metadata={
-                            "predicted_files": impact_scope.predicted_files[:20],
-                            "project_path": impact_project_path,
-                            "confidence": verification.prediction_accuracy,
-                        },
-                    )
-                job.metadata["verification_coverage"] = verification.coverage
-                job.metadata["verification_passes"] = verification.passes
-                self.repository.update_job(job)
+        # After-hooks: impact verification, memory storage
+        await self._run_after_hooks(ctx, result_dag)
 
-                # Persist impact analysis record to history storage
-                try:
-                    from core.config import HarnessConfig
-                    _impact_cfg = HarnessConfig.from_env().impact
-                    _record_dir = Path(_impact_cfg.base_path)
-                    _record_dir.mkdir(parents=True, exist_ok=True)
-                    _record = {
-                        "job_id": job.id,
-                        "requirement": job.requirement[:200],
-                        "project_path": job.project_path,
-                        "predicted_files": impact_scope.predicted_files[:20],
-                        "risk_level": impact_scope.risk_level.value,
-                        "verification_coverage": verification.coverage,
-                        "verification_accuracy": verification.prediction_accuracy,
-                        "verification_passes": verification.passes,
-                        "unexpected_files": verification.unexpected_files[:10],
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-                    _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                    _uid = run_id[:8] if run_id else uuid.uuid4().hex[:8]
-                    _record_path = _record_dir / f"impact_{_ts}_{_uid}.json"
-                    _record_path.write_text(
-                        json.dumps(_record, indent=2, default=str, ensure_ascii=False),
-                        encoding="utf-8",
-                    )
-                except Exception:
-                    pass  # Record persistence must not block result reporting
-            except Exception:
-                pass  # Verification must not block result reporting
+        # Merge hook metadata into job
+        if ctx.metadata:
+            job.metadata.update(ctx.metadata)
+            self.repository.update_job(job)
 
         return result_dag
 
@@ -935,99 +846,19 @@ class RunService:
     def _create_orchestrator(self, store: SessionStore) -> IntelligentOrchestrator:
         """Build an IntelligentOrchestrator with default registries."""
         registry = AgentRegistry()
+        # Get learning optimizer from LearningHook (if registered)
+        learning_optimizer = None
+        for hook in self._hooks:
+            if hasattr(hook, "optimizer"):
+                learning_optimizer = hook.optimizer
+                break
         return IntelligentOrchestrator(
             llm_config=self.llm_config,
             session_store=store,
             agent_registry=registry,
             llm_router=getattr(self, "llm_router", None),
-            learning_optimizer=getattr(self, "_learning_optimizer", None),
+            learning_optimizer=learning_optimizer,
         )
-
-    def _build_memory_manager(self, store: SessionStore) -> Any:
-        """M3.2: Build a per-job MemoryManager. Returns None if disabled.
-
-        Does NOT mutate shared self._memory_manager. Shared subsystems
-        are initialized separately via _ensure_subsystems().
-        """
-        self._ensure_subsystems()
-        if self._memory_manager is None:
-            return None
-        try:
-            from core.config import HarnessConfig
-            from memory.manager import MemoryManager
-            config = HarnessConfig.from_env()
-            return MemoryManager(config=config.memory, session_store=store)
-        except Exception as exc:
-            logger.debug("Per-job memory manager creation skipped: %s", exc)
-            return None
-
-    def _init_learning_system(self) -> None:
-        """M3.3: Initialize LearningScheduler from config."""
-        self._learning_scheduler = None
-        self._learning_optimizer = None
-        if not getattr(self, "_memory_manager", None):
-            return
-        try:
-            from core.config import HarnessConfig
-            from monitoring.metrics import MetricsCollector
-            from learning.analyzer import LearningAnalyzer
-            from learning.optimizer import LearningOptimizer
-            from learning.scheduler import LearningScheduler
-
-            config = HarnessConfig.from_env()
-            if not config.learning.enabled:
-                return
-
-            job_repo = getattr(self, "repository", None)
-            metrics_collector = MetricsCollector(job_repo) if job_repo else None
-
-            analyzer = LearningAnalyzer(
-                metrics_collector=metrics_collector,
-                memory_manager=self._memory_manager,
-            )
-            optimizer = LearningOptimizer(self._memory_manager)
-            scheduler = LearningScheduler(
-                config=config.learning,
-                analyzer=analyzer,
-                optimizer=optimizer,
-            )
-
-            self._learning_optimizer = optimizer
-            self._learning_scheduler = scheduler
-        except Exception as exc:
-            logger.debug(
-                "Learning system init skipped: %s", exc,
-            )
-
-    def _init_impact_analyzer(self) -> None:
-        """M3.5: Initialize ImpactPredictor from config."""
-        self._impact_predictor = None
-        self._change_verifier = None
-        self._impact_coverage_threshold = 0.7
-        try:
-            from core.config import HarnessConfig
-            from analysis.impact_predictor import ImpactPredictor
-            from analysis.change_verifier import ChangeVerifier
-
-            config = HarnessConfig.from_env()
-            if not config.impact.enabled:
-                return
-
-            self._impact_coverage_threshold = config.impact.coverage_threshold
-            self._impact_predictor = ImpactPredictor(
-                llm_config=self.llm_config,
-                memory_manager=getattr(self, "_memory_manager", None),
-                max_predicted_files=config.impact.max_predicted_files,
-                confidence_threshold=config.impact.confidence_threshold,
-            )
-            self._change_verifier = ChangeVerifier(
-                project_path=".",
-                coverage_threshold=config.impact.coverage_threshold,
-            )
-        except Exception as exc:
-            logger.debug(
-                "Impact analyzer init skipped: %s", exc,
-            )
 
     def _create_execution_engine(
         self,
