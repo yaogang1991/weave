@@ -78,14 +78,13 @@ class LearningScheduler:
                 metrics = self.analyzer.metrics_collector.collect()
             except Exception:
                 pass
-        if metrics:
-            total_jobs = metrics.get("summary", {}).get("total", 0)
-            if total_jobs < self.config.min_samples:
-                logger.debug(
-                    "Skipping analysis: %d jobs < min_samples %d",
-                    total_jobs, self.config.min_samples,
-                )
-                return None
+        total_jobs = (metrics or {}).get("summary", {}).get("total", 0)
+        if total_jobs < self.config.min_samples:
+            logger.debug(
+                "Skipping analysis: %d jobs < min_samples %d",
+                total_jobs, self.config.min_samples,
+            )
+            return None
 
         return self.run_analysis()
 

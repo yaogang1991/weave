@@ -821,7 +821,7 @@ class RunService:
                         ],
                         metadata={
                             "predicted_files": impact_scope.predicted_files[:20],
-                            "project_path": job.project_path or "",
+                            "project_path": impact_project_path,
                             "confidence": verification.prediction_accuracy,
                         },
                     )

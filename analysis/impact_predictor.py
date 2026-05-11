@@ -160,16 +160,17 @@ class ImpactPredictor:
         dep_graph: DependencyGraph,
         depth: int = 1,
     ) -> list[str]:
-        """Expand initial matches with dependency graph traversal."""
+        """Expand initial matches with dependency graph traversal (depth-controlled)."""
         result = list(files)
         current = set(files)
         for _ in range(depth):
             next_level: set[str] = set()
             for f in current:
-                deps = dep_graph.get_dependencies(f)
+                # Use direct (non-transitive) dependencies for depth control
+                deps = dep_graph.get_direct_dependencies(f)
                 deps = {d for d in deps if d not in current}
                 next_level.update(deps)
-                dependents = dep_graph.get_dependents(f)
+                dependents = dep_graph.get_direct_dependents(f)
                 dependents = {d for d in dependents if d not in current}
                 next_level.update(dependents)
             result.extend(sorted(next_level))

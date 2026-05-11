@@ -99,10 +99,20 @@ class MemoryStore:
         return d / f"{entry.id}.json"
 
     def _find_entry_path(self, memory_id: str) -> Path | None:
-        """Find an entry file using the in-memory index."""
+        """Find an entry file using the in-memory index.
+
+        On cache miss, rebuilds the index once to pick up entries
+        created by external processes since the last scan.
+        """
         if not self._index_loaded:
             self._build_index()
-        return self._id_to_path.get(memory_id)
+            return self._id_to_path.get(memory_id)
+        result = self._id_to_path.get(memory_id)
+        if result is None:
+            # Cache miss — refresh from disk to catch external writes
+            self._build_index()
+            result = self._id_to_path.get(memory_id)
+        return result
 
     def _build_index(self) -> None:
         """Build in-memory index mapping memory_id -> file path."""

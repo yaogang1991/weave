@@ -78,6 +78,14 @@ class DependencyGraph:
         visited.discard(file_path)
         return visited
 
+    def get_direct_dependents(self, file_path: str) -> set[str]:
+        """Get files that directly depend on the given file (non-transitive)."""
+        return set(self._reverse.get(file_path, set()))
+
+    def get_direct_dependencies(self, file_path: str) -> set[str]:
+        """Get files the given file directly depends on (non-transitive)."""
+        return set(self._graph.get(file_path, set()))
+
     def get_module_files(self, module_name: str) -> list[str]:
         """Map a module name to file paths in the project."""
         results: list[str] = []
