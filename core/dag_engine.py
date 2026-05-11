@@ -671,10 +671,16 @@ class DAGExecutionEngine:
         # Include evaluation feedback from previous attempt (retry scenario)
         node = dag.nodes[node_id]
         if node.eval_feedback:
+            retry_hint = (
+                f"RETRY ATTEMPT #{node.retry_count}: Your previous attempt FAILED evaluation.\n\n"
+                f"Evaluation feedback:\n{node.eval_feedback}\n\n"
+                f"IMPORTANT: Do NOT repeat the same approach. Analyze what went wrong "
+                f"and try a DIFFERENT strategy."
+            )
             artifacts.append(HandoffArtifact(
                 from_agent="evaluator",
                 to_agent=node.agent_type,
-                content=f"Evaluation feedback from previous attempt:\n{node.eval_feedback}",
+                content=retry_hint,
                 metadata={"type": "eval_feedback", "attempt": node.retry_count},
             ))
 

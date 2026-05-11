@@ -212,6 +212,22 @@ Evaluate against:
         # Build context from input artifacts
         artifact_context = self._format_artifacts(input_artifacts)
 
+        # Detect retry and inject differentiation instruction
+        retry_instruction = ""
+        for a in input_artifacts:
+            if (
+                hasattr(a, "metadata")
+                and a.metadata
+                and a.metadata.get("type") == "eval_feedback"
+            ):
+                retry_instruction = (
+                    "\n## IMPORTANT: This is a RETRY attempt.\n"
+                    "Your previous attempt was evaluated and FAILED. "
+                    "You MUST analyze the feedback above and try a DIFFERENT approach.\n"
+                    "Do NOT repeat the same tool calls that failed before.\n"
+                )
+                break
+
         # M3.2: Inject memory context if memory manager is available
         memory_section = ""
         if self.memory_manager and self.memory_manager.config.enabled:
@@ -223,7 +239,7 @@ Evaluate against:
             memory_section = self.memory_manager.format_memory_prompt(memory_entries)
 
         full_prompt = f"""{artifact_context}
-
+{retry_instruction}
 {memory_section}
 Your task: {task}
 
