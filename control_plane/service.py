@@ -788,7 +788,7 @@ class RunService:
                     nid: {
                         "task": n.task_description,
                         "agent_type": n.agent_type,
-                        "dependencies": list(n.dependencies),
+                        "dependencies": [e.from_node for e in dag.edges if e.to_node == nid],
                     }
                     for nid, n in dag.nodes.items()
                 },
