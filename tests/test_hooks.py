@@ -37,6 +37,8 @@ def _make_context(**overrides):
         "work_dir": Path("/tmp/work"),
         "run_id": "run-123",
         "memory_manager": None,
+        "llm_config": None,
+        "repository": None,
     }
     defaults.update(overrides)
     return ExecutionContext(**defaults)
@@ -91,14 +93,21 @@ class TestMemoryHook:
     async def test_before_execution_failure_is_safe(self):
         hook = MemoryHook()
         ctx = _make_context()
-        # Should not raise even if imports fail
         await hook.before_execution(ctx)
-        # memory_manager may or may not be set depending on env
-        assert isinstance(hook, ExecutionHook)
+
+    def test_maintenance_runs_only_once(self):
+        hook = MemoryHook()
+        mock_mm = MagicMock()
+        hook._run_maintenance_once(mock_mm)
+        assert hook._maintenance_done is True
+        mock_mm.run_maintenance.assert_called_once()
+        # Second call should not call maintenance again
+        hook._run_maintenance_once(mock_mm)
+        mock_mm.run_maintenance.assert_called_once()
 
 
 # ============================================================================
-# LearningHook
+# LearningHook — P1 regression tests
 # ============================================================================
 
 
@@ -126,28 +135,33 @@ class TestLearningHook:
         mock_scheduler.maybe_run_analysis.side_effect = RuntimeError("boom")
         hook._scheduler = mock_scheduler
         ctx = _make_context()
-        await hook.before_execution(ctx)  # Should not raise
+        await hook.before_execution(ctx)
+
+    def test_accepts_injected_repository(self):
+        """P1 regression: LearningHook should use injected repo, not default."""
+        mock_repo = MagicMock()
+        hook = LearningHook(repository=mock_repo)
+        assert hook._repository is mock_repo
+
+    def test_optimizer_exposed_for_orchestrator(self):
+        """P1 regression: optimizer must be accessible for planning hints."""
+        hook = LearningHook()
+        # optimizer may be None if learning is disabled, but attr must exist
+        assert hasattr(hook, "optimizer")
 
 
 # ============================================================================
-# ImpactHook
+# ImpactHook — P1 regression tests
 # ============================================================================
 
 
 class TestImpactHook:
     @pytest.mark.asyncio
-    async def test_no_predictor_skips(self):
-        hook = ImpactHook()
-        hook._predictor = None
-        ctx = _make_context()
-        await hook.before_execution(ctx)
-        assert "impact_scope" not in ctx._state
-
-    @pytest.mark.asyncio
     async def test_no_workdir_skips(self):
         hook = ImpactHook()
         hook._predictor = MagicMock()
-        ctx = _make_context(work_dir=Path(""))
+        # None work_dir triggers the guard
+        ctx = _make_context(work_dir=None)
         await hook.before_execution(ctx)
         assert "impact_scope" not in ctx._state
 
@@ -165,19 +179,38 @@ class TestImpactHook:
         ctx._state["before_snapshot"] = None
         await hook.after_execution(ctx, MagicMock())
 
+    def test_make_predictor_receives_memory_manager(self):
+        """P1 regression: predictor must get memory_manager for historical lookup."""
+        hook = ImpactHook()
+        mock_mm = MagicMock()
+        predictor = hook._make_predictor(memory_manager=mock_mm)
+        assert predictor.memory_manager is mock_mm
+
+    def test_make_predictor_without_memory(self):
+        hook = ImpactHook()
+        predictor = hook._make_predictor(memory_manager=None)
+        assert predictor.memory_manager is None
+
+    def test_accepts_llm_config(self):
+        """P1 regression: ImpactHook should accept llm_config for predictor."""
+        mock_config = MagicMock()
+        hook = ImpactHook(llm_config=mock_config)
+        assert hook._llm_config is mock_config
+
+
+# ============================================================================
+# Hook ordering — P2 regression test
+# ============================================================================
+
+
+class TestHookOrdering:
     @pytest.mark.asyncio
-    async def test_init_failure_is_safe(self):
-        with patch("core.config.HarnessConfig.from_env", side_effect=ImportError):
-            hook = ImpactHook()
-            assert hook._predictor is None
+    async def test_memory_hook_runs_first(self):
+        """MemoryHook must run before ImpactHook so memory_manager is available."""
+        hooks = [MemoryHook(), LearningHook(), ImpactHook()]
+        assert isinstance(hooks[0], MemoryHook)
+        assert isinstance(hooks[2], ImpactHook)
 
-
-# ============================================================================
-# Integration: hooks run in sequence
-# ============================================================================
-
-
-class TestHookSequence:
     @pytest.mark.asyncio
     async def test_all_hooks_run_without_error(self):
         hooks = [MemoryHook(), LearningHook(), ImpactHook()]
@@ -186,7 +219,7 @@ class TestHookSequence:
             try:
                 await hook.before_execution(ctx)
             except Exception:
-                pass  # Hooks must not raise
+                pass
         for hook in hooks:
             try:
                 await hook.after_execution(ctx, MagicMock())

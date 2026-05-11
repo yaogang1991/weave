@@ -717,9 +717,13 @@ class RunService:
     # ------------------------------------------------------------------
 
     def _register_hooks(self) -> None:
-        """Register execution lifecycle hooks."""
+        """Register execution lifecycle hooks with dependency injection."""
         from control_plane.hooks import MemoryHook, LearningHook, ImpactHook
-        self._hooks = [MemoryHook(), LearningHook(), ImpactHook()]
+        self._hooks = [
+            MemoryHook(),
+            LearningHook(repository=self.repository),
+            ImpactHook(llm_config=self.llm_config),
+        ]
 
     async def _run_before_hooks(self, ctx: Any) -> None:
         """Run all before_execution hooks. Errors are logged, never raised."""
@@ -758,6 +762,11 @@ class RunService:
 
         # Before-hooks: memory, learning, impact prediction
         await self._run_before_hooks(ctx)
+
+        # Persist prediction metadata immediately (before execution may fail/cancel)
+        if ctx.metadata:
+            ctx.job.metadata.update(ctx.metadata)
+            self.repository.update_job(ctx.job)
 
         # Core: plan + execute
         orchestrator = self._create_orchestrator(store)
@@ -835,12 +844,18 @@ class RunService:
     def _create_orchestrator(self, store: SessionStore) -> IntelligentOrchestrator:
         """Build an IntelligentOrchestrator with default registries."""
         registry = AgentRegistry()
+        # Get learning optimizer from LearningHook (if registered)
+        learning_optimizer = None
+        for hook in self._hooks:
+            if hasattr(hook, "optimizer"):
+                learning_optimizer = hook.optimizer
+                break
         return IntelligentOrchestrator(
             llm_config=self.llm_config,
             session_store=store,
             agent_registry=registry,
             llm_router=getattr(self, "llm_router", None),
-            learning_optimizer=getattr(self, "_learning_optimizer", None),
+            learning_optimizer=learning_optimizer,
         )
 
     def _create_execution_engine(
