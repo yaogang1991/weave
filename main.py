@@ -346,6 +346,14 @@ async def cmd_execute(args, dag: DAG | None = None):
     # Execute
     try:
         result_dag = await engine.execute(dag)
+    except PendingApprovalError as exc:
+        store.emit_event(session_id, EventType.SESSION_ERROR, {
+            "error": f"Approval required: {exc.ticket_id}",
+        })
+        print(f"\nAgent requested approval for a high-risk operation (ticket: {exc.ticket_id}).")
+        print("Interactive approval is not supported in CLI run mode.")
+        print("Set HARNESS_NON_INTERACTIVE=true to auto-approve, or use worker mode.")
+        return None
     except Exception as exc:
         store.emit_event(session_id, EventType.SESSION_ERROR, {
             "error": f"{type(exc).__name__}: {exc}",
