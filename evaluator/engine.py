@@ -235,11 +235,22 @@ class EvaluatorEngine:
             return False, f"Test execution error: {e}"
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        """Run flake8/ruff on all targets in a single batch call."""
+        """Run flake8/ruff on all targets in a single batch call.
+
+        Only lints specific files — does NOT recursively scan directories.
+        This prevents cross-node pollution in parallel DAG execution.
+        """
         resolved = []
         for t in targets:
-            p = work_dir / t if (work_dir / t).exists() else Path(t)
-            resolved.append(str(p))
+            p = work_dir / t
+            if p.is_file():
+                resolved.append(str(p))
+            elif p.is_dir():
+                # Only include direct .py children, don't recurse
+                for f in p.glob("*.py"):
+                    resolved.append(str(f))
+            elif Path(t).is_file():
+                resolved.append(str(Path(t)))
         if not resolved:
             return True, "No targets to lint"
         try:

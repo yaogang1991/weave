@@ -62,22 +62,25 @@ class TestCriterionChecking:
 
     @patch("evaluator.engine.subprocess.run")
     def test_lint_clean(self, mock_run, evaluator, tmp_path):
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.return_value = MagicMock(returncode=0, stdout="")
-        passed, msg = evaluator._run_lint(["."], tmp_path)
+        passed, msg = evaluator._run_lint(["code.py"], tmp_path)
         assert passed
 
     @patch("evaluator.engine.subprocess.run")
     def test_lint_dirty(self, mock_run, evaluator, tmp_path):
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.return_value = MagicMock(returncode=1, stdout="E501 line too long")
-        passed, msg = evaluator._run_lint(["."], tmp_path)
+        passed, msg = evaluator._run_lint(["code.py"], tmp_path)
         assert not passed
         assert "issues" in msg.lower()
 
     def test_lint_uses_shell_false(self, evaluator, tmp_path):
         """Verify _run_lint never uses shell=True."""
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         with patch("evaluator.engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
-            evaluator._run_lint(["."], tmp_path)
+            evaluator._run_lint(["code.py"], tmp_path)
             args = mock_run.call_args[0][0]
             assert isinstance(args, list)
             assert args[0] == "python"
