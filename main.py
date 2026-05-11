@@ -190,12 +190,21 @@ async def cmd_execute(args, dag: DAG | None = None):
         _serialize_dag(dag),
     )
 
-    # Create guardrails (default: accept_edits)
-    policy = GuardrailPolicy(
-        mode=PermissionMode.ACCEPT_EDITS,
-        auto_approve_read=True,
-        max_iterations=args.max_iterations,
-    )
+    # Create guardrails (interactive: accept_edits, non-interactive: dont_ask)
+    non_interactive = os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+    if non_interactive:
+        policy = GuardrailPolicy(
+            mode=PermissionMode.DONT_ASK,
+            auto_approve_read=True,
+            allowed_tools=["read", "write", "edit", "bash", "glob", "grep", "git"],
+            max_iterations=args.max_iterations,
+        )
+    else:
+        policy = GuardrailPolicy(
+            mode=PermissionMode.ACCEPT_EDITS,
+            auto_approve_read=True,
+            max_iterations=args.max_iterations,
+        )
     guardrails = Guardrails(policy, tool_registry)
 
     # M3.1: LLM router for multi-model support

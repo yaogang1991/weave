@@ -839,6 +839,8 @@ class RunService:
                     result["auto_approve_read"] = gr["auto_approve_read"]
                 if "denied_commands" in gr:
                     result["denied_commands"] = gr["denied_commands"]
+                if "allowed_tools" in gr:
+                    result["allowed_tools"] = gr["allowed_tools"]
         except Exception:
             pass
         return result
@@ -875,15 +877,21 @@ class RunService:
         registry = AgentRegistry()
         tool_registry = ToolRegistry(base_cwd=str(work_dir) if work_dir is not None else None)
 
-        # Default guardrails: accept edits, auto-approve reads
+        # Default guardrails: non-interactive → DONT_ASK + built-in tool whitelist
         if getattr(self, "policy", None) is not None:
             policy = self.policy
         else:
-            # Load project-level guardrail overrides from .harness/config.yaml
             project_guardrails = self._load_project_guardrails(work_dir)
+            if self.non_interactive:
+                default_mode = PermissionMode.DONT_ASK
+                default_allowed = ["read", "write", "edit", "bash", "glob", "grep", "git"]
+            else:
+                default_mode = PermissionMode.ACCEPT_EDITS
+                default_allowed = []
             policy = GuardrailPolicy(
-                mode=project_guardrails.get("permission_mode", PermissionMode.ACCEPT_EDITS),
+                mode=project_guardrails.get("permission_mode", default_mode),
                 auto_approve_read=project_guardrails.get("auto_approve_read", True),
+                allowed_tools=project_guardrails.get("allowed_tools", default_allowed),
                 denied_commands=project_guardrails.get("denied_commands", []),
                 max_iterations=self.max_iterations,
             )
