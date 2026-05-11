@@ -158,7 +158,7 @@ class TestEvaluatorIntegration:
         # First attempt fails eval -> RETRYING, then retry also fails eval -> FAILED
         assert result.nodes["a"].status == NodeStatus.FAILED
         assert "evaluation failed" in result.nodes["a"].error.lower()
-        assert result.nodes["a"].eval_feedback == "Tests failed"
+        assert result.nodes["a"].eval_feedback.startswith("Tests failed")
 
     @pytest.mark.asyncio
     async def test_no_evaluator_skips_evaluation(self):

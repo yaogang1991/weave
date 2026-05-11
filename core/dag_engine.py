@@ -500,7 +500,11 @@ class DAGExecutionEngine:
 
                 if not eval_result.passed:
                     node.retry_count += 1
-                    node.eval_feedback = eval_result.feedback
+                    node.eval_feedback = (
+                        f"{eval_result.feedback}\n\n"
+                        f"Output artifacts: {node.output_artifacts or 'none'}\n"
+                        f"Fix ALL issues listed above."
+                    )
                     node.error = f"Evaluation failed (score: {eval_result.score}): {eval_result.feedback}"
                     node.status = NodeStatus.FAILED
                     node.completed_at = datetime.now(timezone.utc)
