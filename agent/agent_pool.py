@@ -111,7 +111,7 @@ Evaluate against:
         tool_registry: ToolRegistry,
         guardrails: Guardrails | None = None,
         max_iterations: int = 50,
-        timeout: int = 120,
+        timeout: int = 300,
         max_context_tokens: int = 100_000,
         memory_manager: Any | None = None,
         job_id: str = "",
@@ -289,8 +289,11 @@ Execute using your available tools. Produce clear, verifiable output.
         except asyncio.TimeoutError:
             return {
                 "status": "timeout",
-                "summary": f"Agent execution timed out after {self.timeout}s",
-                "artifacts": [],
+                "summary": (
+                    f"Agent execution timed out after {self.timeout}s. "
+                    f"Consider increasing HARNESS_AGENT_TIMEOUT (current: {self.timeout}s)"
+                ),
+                "artifacts": self.worker.artifacts if hasattr(self, 'worker') else [],
                 "output": "",
             }
 
@@ -332,7 +335,7 @@ class AgentPool:
         tool_registry: ToolRegistry | None = None,
         guardrails: Guardrails | None = None,
         max_iterations: int = 50,
-        timeout: int = 120,
+        timeout: int = 300,
         max_context_tokens: int = 100_000,
         llm_router: LLMRouter | None = None,
         memory_manager: Any | None = None,
