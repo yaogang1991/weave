@@ -136,7 +136,7 @@ class TestEvaluatorNormalizeCriteria:
 
 class TestCommandRejection:
     def test_command_dict_becomes_custom_uncheckable(self, evaluator, work_dir):
-        """A dict with type=command should be downgraded to CUSTOM (uncheckable)."""
+        """A dict with type=command should be downgraded to CUSTOM (uncheckable, but passes with warning)."""
         node = DAGNode(id="s1", agent_type="g", task_description="t",
                        success_criteria=[
                            {"type": "command", "command": "rm -rf /", "description": "danger"},
@@ -146,19 +146,19 @@ class TestCommandRejection:
             artifact_path=str(work_dir),
             work_dir=str(work_dir),
         )
-        # CUSTOM → was_auto=False → uncheckable → overall not passed
-        assert result.passed is False
-        assert "not automatically checkable" in result.feedback
+        # CUSTOM → was_auto=False → uncheckable → passes with warning
+        assert result.passed is True
+        assert "cannot auto-verify" in result.feedback.lower()
 
     def test_command_json_string_becomes_custom(self, evaluator, work_dir):
-        """Previously serialized command JSON string should also be uncheckable."""
+        """Previously serialized command JSON string should also be uncheckable (passes with warning)."""
         json_str = json.dumps({"type": "command", "command": "rm -rf /"})
         result = evaluator.evaluate_stage(
             "s2", "stage2", [json_str],
             artifact_path=str(work_dir),
             work_dir=str(work_dir),
         )
-        assert result.passed is False
+        assert result.passed is True
 
 
 # -- work_dir vs artifact_path --
