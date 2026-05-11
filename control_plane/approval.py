@@ -33,6 +33,7 @@ class TicketStatus(str, Enum):
 
     PENDING = "pending"     # 等待审批
     APPROVED = "approved"   # 已批准
+    CONSUMED = "consumed"   # 已消费（批准后被使用，不可复用）
     REJECTED = "rejected"   # 已拒绝
     EXPIRED = "expired"     # 已过期（超时未处理）
 
@@ -59,6 +60,9 @@ class ApprovalTicket(BaseModel):
     decided_by: str | None = None    # "user" / "auto" / "timeout"
     reason: str = ""                 # 审批理由（approve/reject 时填写）
     expires_at: datetime | None = None
+    consumed_at: datetime | None = None        # 消费时间
+    consumed_by_run_id: str | None = None      # 消费该票据的 run
+    consumed_by_node_id: str | None = None     # 消费该票据的 node
     created_at: datetime
     updated_at: datetime
 
@@ -81,6 +85,7 @@ class ApprovalTicket(BaseModel):
         """Return True if the ticket has reached a terminal state."""
         return self.status in {
             TicketStatus.APPROVED,
+            TicketStatus.CONSUMED,
             TicketStatus.REJECTED,
             TicketStatus.EXPIRED,
         }
@@ -379,15 +384,23 @@ class ApprovalRepository:
         """Return all pending tickets for a given job."""
         return self.list_tickets(status=TicketStatus.PENDING, job_id=job_id)
 
-    def consume_ticket(self, ticket: ApprovalTicket) -> None:
+    def consume_ticket(
+        self,
+        ticket: ApprovalTicket,
+        run_id: str | None = None,
+        node_id: str | None = None,
+    ) -> None:
         """Mark an approved ticket as consumed so it cannot be reused.
 
-        Keeps the ticket as APPROVED but adds a consumed marker to the reason
-        field. :meth:`find_approved_ticket` skips consumed tickets.
+        Transitions the ticket to CONSUMED status with structured metadata.
+        :meth:`find_approved_ticket` skips consumed tickets.
         """
         if ticket.status != TicketStatus.APPROVED:
             return
-        ticket.reason = (ticket.reason or "") + " [consumed]"
+        ticket.status = TicketStatus.CONSUMED
+        ticket.consumed_at = datetime.now(timezone.utc)
+        ticket.consumed_by_run_id = run_id
+        ticket.consumed_by_node_id = node_id
         ticket.updated_at = datetime.now(timezone.utc)
         self._persist_ticket(ticket)
 
@@ -409,7 +422,7 @@ class ApprovalRepository:
             if ticket.tool_name != tool_name:
                 continue
             # Skip consumed tickets (single-use approval)
-            if ticket.reason and "[consumed]" in ticket.reason:
+            if ticket.status == TicketStatus.CONSUMED:
                 continue
             if ticket.args_hash != args_hash:
                 continue
@@ -430,6 +443,7 @@ class ApprovalRepository:
         stats: dict[str, int] = {
             TicketStatus.PENDING.value: 0,
             TicketStatus.APPROVED.value: 0,
+            TicketStatus.CONSUMED.value: 0,
             TicketStatus.REJECTED.value: 0,
             TicketStatus.EXPIRED.value: 0,
         }

@@ -576,6 +576,7 @@ class TestGetStats:
         assert stats == {
             "pending": 0,
             "approved": 0,
+            "consumed": 0,
             "rejected": 0,
             "expired": 0,
         }
@@ -592,6 +593,7 @@ class TestGetStats:
         assert stats == {
             "pending": 2,
             "approved": 1,
+            "consumed": 0,
             "rejected": 1,
             "expired": 0,
         }
