@@ -205,14 +205,15 @@ class RunService:
             # M2.2: Build BackendManager per-job so repo_root matches project_path
             project_root = Path(job.project_path).resolve() if job.project_path else Path.cwd().resolve()
             from backend.lifecycle import BackendManager
+            from backend.base import WorkspaceIsolation, ExecutionSandbox
             from core.config import HarnessConfig
             harness_config = HarnessConfig.from_env()
             backend_manager = BackendManager(
-                workspace=harness_config.workspace_isolation,
-                sandbox=harness_config.execution_sandbox,
+                workspace=WorkspaceIsolation(harness_config.default_backend),
+                sandbox=ExecutionSandbox.LOCAL,
                 repo_root=str(project_root),
                 base_path=self.backend_base_path,
-                workspace_by_risk=harness_config.workspace_isolation_by_risk,
+                workspace_by_risk=harness_config.risk_backend_map,
                 cleanup_policy=harness_config.cleanup_policy,
             )
             work_dir = backend_manager.setup(
@@ -777,11 +778,9 @@ class RunService:
                 if not before_snapshot:
                     logger.info("Skipping impact verification: no baseline snapshot")
                     return result_dag
-                # Use coverage_threshold from config (or default 0.7)
-                config = getattr(self, "_harness_config", None)
-                threshold = (
-                    config.impact.coverage_threshold
-                    if config else 0.7
+                # Use coverage_threshold from initialized impact analyzer config
+                threshold = getattr(
+                    self, "_impact_coverage_threshold", 0.7,
                 )
                 verifier = ChangeVerifier(
                     project_path=str(work_dir),
@@ -937,6 +936,7 @@ class RunService:
         """M3.5: Initialize ImpactPredictor from config."""
         self._impact_predictor = None
         self._change_verifier = None
+        self._impact_coverage_threshold = 0.7
         try:
             from core.config import HarnessConfig
             from analysis.impact_predictor import ImpactPredictor
@@ -946,6 +946,7 @@ class RunService:
             if not config.impact.enabled:
                 return
 
+            self._impact_coverage_threshold = config.impact.coverage_threshold
             self._impact_predictor = ImpactPredictor(
                 llm_config=self.llm_config,
                 memory_manager=getattr(self, "_memory_manager", None),

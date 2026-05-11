@@ -931,7 +931,7 @@ async def cmd_impact_history(args):
         return
 
     records = []
-    for f in sorted(glob_mod.glob(os.path.join(impact_path, "**", "*.json")), reverse=True):
+    for f in sorted(glob_mod.glob(os.path.join(impact_path, "**", "*.json"), recursive=True), reverse=True):
         try:
             with open(f) as fh:
                 records.append(json.load(fh))
