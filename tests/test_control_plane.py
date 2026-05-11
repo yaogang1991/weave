@@ -23,6 +23,11 @@ from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
 from control_plane.repository import JobRepository, _VALID_TRANSITIONS
 
 
+def _encoded_path(repo: JobRepository, raw_id: str, ext: str = ".json") -> Path:
+    """Return the on-disk path for a raw ID using the repo's encoding."""
+    return repo.base_path / f"{repo._encode_id(raw_id)}{ext}"
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
@@ -256,7 +261,7 @@ class TestJobCRUD:
 
     def test_persistence_format(self, tmp_repo: JobRepository, tmp_path: Path):
         job = tmp_repo.create_job("Check JSON format")
-        path = tmp_path / "jobs" / f"{job.id}.json"
+        path = _encoded_path(tmp_repo, job.id)
         assert path.exists()
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -624,7 +629,7 @@ class TestRecovery:
 class TestAtomicWrites:
     def test_job_file_is_valid_json(self, tmp_repo: JobRepository, tmp_path: Path):
         job = tmp_repo.create_job("JSON check")
-        path = tmp_path / "jobs" / f"{job.id}.json"
+        path = _encoded_path(tmp_repo, job.id)
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         assert data["id"] == job.id
@@ -633,7 +638,8 @@ class TestAtomicWrites:
     def test_run_file_is_valid_json(self, tmp_repo: JobRepository, tmp_path: Path):
         job = tmp_repo.create_job("Run JSON check")
         run = tmp_repo.create_run(job.id, "sess_1")
-        path = tmp_path / "jobs" / job.id / f"{run.id}.json"
+        run_dir = tmp_repo.base_path / tmp_repo._encode_id(job.id)
+        path = run_dir / f"{tmp_repo._encode_id(run.id)}.json"
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         assert data["id"] == run.id

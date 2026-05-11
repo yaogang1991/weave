@@ -225,11 +225,11 @@ class JobRepository:
 
     def get_run(self, run_id: str) -> Run | None:
         """Load a run by ID, or ``None`` if not found."""
-        # Search across all job run directories
+        encoded = self._encode_id(run_id)
         for run_dir in self.base_path.iterdir():
             if not run_dir.is_dir():
                 continue
-            path = run_dir / f"{run_id}.json"
+            path = run_dir / f"{encoded}.json"
             if path.exists():
                 with open(path, "r", encoding="utf-8") as fh:
                     data = json.load(fh)

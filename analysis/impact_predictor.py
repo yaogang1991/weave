@@ -84,7 +84,7 @@ class ImpactPredictor:
 
         # Extract module names (normalize separators for cross-platform)
         predicted_modules = sorted({
-            str(Path(f).parent).replace("/", ".").replace("\\", ".")
+            str(Path(f).parent).replace("\\", "/").replace("/", ".")
             for f in predicted_files
             if "/" in f or "\\" in f
         })
@@ -144,7 +144,7 @@ class ImpactPredictor:
             parts = py_file.relative_to(project).parts
             if any(p in {".venv", "venv", "__pycache__", ".git", "node_modules"} for p in parts):
                 continue
-            rel = str(py_file.relative_to(project))
+            rel = py_file.relative_to(project).as_posix()
             file_stem = py_file.stem.lower()
             rel_lower = rel.lower().replace("/", "_").replace(".py", "")
             for kw in keywords:
