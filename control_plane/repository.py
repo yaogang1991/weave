@@ -31,6 +31,11 @@ from typing import Any
 from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
 
 
+def _sanitize_filename(name: str) -> str:
+    """Replace characters that are illegal in Windows filenames."""
+    return name.replace(":", "-").replace("+", "_").replace("?", "_").replace("*", "_").replace('"', "_").replace("<", "_").replace(">", "_").replace("|", "_")
+
+
 # =============================================================================
 # Valid job status transitions
 # =============================================================================
@@ -110,15 +115,15 @@ class JobRepository:
     # ------------------------------------------------------------------
 
     def _job_path(self, job_id: str) -> Path:
-        return self.base_path / f"{job_id}.json"
+        return self.base_path / f"{_sanitize_filename(job_id)}.json"
 
     def _run_dir(self, job_id: str) -> Path:
-        d = self.base_path / job_id
+        d = self.base_path / _sanitize_filename(job_id)
         d.mkdir(parents=True, exist_ok=True)
         return d
 
     def _run_path(self, job_id: str, run_id: str) -> Path:
-        return self._run_dir(job_id) / f"{run_id}.json"
+        return self._run_dir(job_id) / f"{_sanitize_filename(run_id)}.json"
 
     # ------------------------------------------------------------------
     # Serialization helpers
