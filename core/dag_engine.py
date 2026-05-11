@@ -323,7 +323,10 @@ class DAGExecutionEngine:
                                                 "feedback": node.eval_feedback[:200],
                                             },
                                         ))
-                                        # Retry generator with feedback
+                                        # Retry generator with feedback.
+                                        # Cap retry_count so _execute_single_node's
+                                        # internal retry loop gives exactly one attempt.
+                                        gen_node.retry_count = gen_node.max_retries - 1
                                         gen_node.status = NodeStatus.RETRYING
                                         gen_node.error = ""
                                         await self._execute_single_node(dag, target_id)
@@ -408,9 +411,12 @@ class DAGExecutionEngine:
         if len(candidates) == 1:
             return candidates[0]
 
-        # Candidate 2: name-based matching (eval_backend ↔ impl_backend)
+        # Candidate 2: name-based matching among upstream nodes only
+        # (eval_backend ↔ impl_backend / gen_backend)
         eval_name = eval_node_id.lower().replace("eval_", "")
-        for nid, node in dag.nodes.items():
+        upstream_ids = {e.from_node for e in dag.edges if e.to_node == eval_node_id}
+        for nid in upstream_ids:
+            node = dag.nodes[nid]
             if node.agent_type != "generator":
                 continue
             gen_name = nid.lower().replace("impl_", "").replace("gen_", "")

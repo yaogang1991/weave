@@ -803,7 +803,7 @@
                     } else if (evt.type === 'heartbeat_missed') {
                         eventType = 'retrying';
                         nodeId = evt.payload?.node_id || '';
-                    } else if (evt.type === 'eval_result') {
+                    } else if (evt.type === 'eval.result') {
                         eventType = evt.payload?.passed ? 'completed' : 'failed';
                         nodeId = 'EVAL';
                     } else if (evt.type && evt.type.includes('workflow.')) {

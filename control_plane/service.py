@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import traceback
 import uuid
@@ -43,6 +44,8 @@ from evaluator.engine import EvaluatorEngine
 
 from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
 from control_plane.repository import JobRepository
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -210,7 +213,11 @@ class RunService:
             harness_config = HarnessConfig.from_env()
             backend_manager = BackendManager(
                 workspace=WorkspaceIsolation(harness_config.default_backend),
-                sandbox=ExecutionSandbox.LOCAL,
+                sandbox=ExecutionSandbox(
+                    harness_config.sandbox.runtime
+                    if harness_config.sandbox.runtime in ("local", "docker")
+                    else "local"
+                ),
                 repo_root=str(project_root),
                 base_path=self.backend_base_path,
                 workspace_by_risk=harness_config.risk_backend_map,
@@ -775,7 +782,7 @@ class RunService:
                 from analysis.change_verifier import ChangeVerifier
                 from core.models import MemoryType, MemoryScope
                 # Skip verification if baseline snapshot capture failed
-                if not before_snapshot:
+                if before_snapshot is None:
                     logger.info("Skipping impact verification: no baseline snapshot")
                     return result_dag
                 # Use coverage_threshold from initialized impact analyzer config
@@ -787,8 +794,8 @@ class RunService:
                     coverage_threshold=threshold,
                 )
                 verification = verifier.verify(impact_scope, before_snapshot)
-                if getattr(self, "_memory_manager", None):
-                    self._memory_manager.store_learning(
+                if memory_manager:
+                    memory_manager.store_learning(
                         agent_type="impact_analyzer",
                         content=(
                             f"Impact prediction for "
@@ -805,11 +812,40 @@ class RunService:
                         ],
                         metadata={
                             "predicted_files": impact_scope.predicted_files[:20],
+                            "project_path": job.project_path or "",
+                            "confidence": verification.prediction_accuracy,
                         },
                     )
                 job.metadata["verification_coverage"] = verification.coverage
                 job.metadata["verification_passes"] = verification.passes
                 self.repository.update_job(job)
+
+                # Persist impact analysis record to history storage
+                try:
+                    from core.config import HarnessConfig
+                    _impact_cfg = HarnessConfig.from_env().impact
+                    _record_dir = Path(_impact_cfg.base_path)
+                    _record_dir.mkdir(parents=True, exist_ok=True)
+                    _record = {
+                        "job_id": job.id,
+                        "requirement": job.requirement[:200],
+                        "project_path": job.project_path,
+                        "predicted_files": impact_scope.predicted_files[:20],
+                        "risk_level": impact_scope.risk_level.value,
+                        "verification_coverage": verification.coverage,
+                        "verification_accuracy": verification.prediction_accuracy,
+                        "verification_passes": verification.passes,
+                        "unexpected_files": verification.unexpected_files[:10],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    _record_path = _record_dir / f"impact_{_ts}_{job.id[:8]}.json"
+                    _record_path.write_text(
+                        json.dumps(_record, indent=2, default=str, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass  # Record persistence must not block result reporting
             except Exception:
                 pass  # Verification must not block result reporting
 
@@ -869,6 +905,7 @@ class RunService:
 
     def _build_memory_manager(self, store: SessionStore) -> Any:
         """M3.2: Build a MemoryManager from config. Returns None on failure/disabled."""
+        self._memory_manager = None
         try:
             from core.config import HarnessConfig
             from memory.manager import MemoryManager
@@ -880,18 +917,17 @@ class RunService:
                     session_store=store,
                 )
                 mgr.run_maintenance()
-                return mgr
-            return None
+                self._memory_manager = mgr
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).debug("Memory manager init skipped: %s", exc)
-            return None
+            logger.debug("Memory manager init skipped: %s", exc)
 
         # M3.3: Initialize learning system
         self._init_learning_system()
 
         # M3.5: Initialize impact analyzer
         self._init_impact_analyzer()
+
+        return self._memory_manager
 
     def _init_learning_system(self) -> None:
         """M3.3: Initialize LearningScheduler from config."""
@@ -927,8 +963,7 @@ class RunService:
             self._learning_optimizer = optimizer
             self._learning_scheduler = scheduler
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).debug(
+            logger.debug(
                 "Learning system init skipped: %s", exc,
             )
 
@@ -958,8 +993,7 @@ class RunService:
                 coverage_threshold=config.impact.coverage_threshold,
             )
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).debug(
+            logger.debug(
                 "Impact analyzer init skipped: %s", exc,
             )
 

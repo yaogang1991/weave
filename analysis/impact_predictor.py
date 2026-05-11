@@ -42,7 +42,7 @@ class ImpactPredictor:
     ) -> ImpactScope:
         """Predict the impact scope of a requirement."""
         # Check memory for similar past predictions
-        historical = self._get_historical_prediction(requirement)
+        historical = self._get_historical_prediction(requirement, project_path)
         if historical and historical.confidence >= self.confidence_threshold:
             logger.info("Using historical prediction (confidence=%.2f)", historical.confidence)
             return historical
@@ -179,6 +179,7 @@ class ImpactPredictor:
     def _get_historical_prediction(
         self,
         requirement: str,
+        project_path: str = "",
     ) -> ImpactScope | None:
         """Check memory for similar past predictions."""
         if self.memory_manager is None:
@@ -192,6 +193,10 @@ class ImpactPredictor:
             )
             for entry in entries:
                 if "impact_analysis" in entry.keywords:
+                    # Skip entries from a different project
+                    entry_project = entry.metadata.get("project_path", "")
+                    if project_path and entry_project and entry_project != project_path:
+                        continue
                     # Reconstruct predicted files from metadata if available
                     predicted_files = entry.metadata.get("predicted_files", [])
                     # Fallback: try to parse file list from content
@@ -201,10 +206,12 @@ class ImpactPredictor:
                             r"[\w/]+\.py", entry.content,
                         )
                         predicted_files = file_matches[:10]
+                    # Use stored confidence or derive from match quality
+                    stored_conf = entry.metadata.get("confidence", 0.6)
                     return ImpactScope(
                         requirement=requirement,
                         predicted_files=predicted_files,
-                        confidence=0.75,
+                        confidence=stored_conf,
                         reasoning=f"Based on similar past task: {entry.content[:100]}",
                     )
         except Exception as e:

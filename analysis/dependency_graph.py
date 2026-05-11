@@ -194,11 +194,11 @@ class DependencyGraph:
             return self._module_map[module_name]
         # Try prefix match (e.g., "core.models" -> "core/models.py")
         parts = module_name.split(".")
-        candidate = "/".join(parts) + ".py"
+        candidate = str(Path(*parts)) + ".py"
         if candidate in self._graph:
             return candidate
         # Try as package
-        candidate_init = "/".join(parts) + "/__init__.py"
+        candidate_init = str(Path(*parts) / "__init__.py")
         if candidate_init in self._graph:
             return candidate_init
         return None
