@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -473,7 +474,7 @@ class DAGExecutionEngine:
             node.output_artifacts = result.get("artifacts", [])
 
             if self.evaluator and node.success_criteria:
-                eval_work_dir = self.work_dir or self.artifact_path
+                eval_work_dir = self.work_dir or os.getcwd()
                 eval_result = await asyncio.to_thread(
                     self.evaluator.evaluate_stage,
                     node_id, node_id, node.success_criteria, self.artifact_path,
