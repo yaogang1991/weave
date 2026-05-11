@@ -489,7 +489,7 @@ class DAGExecutionEngine:
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
             node.output_artifacts = result.get("artifacts", [])
 
-            if self.evaluator and node.success_criteria:
+            if self.evaluator and node.success_criteria and node.agent_type == "generator":
                 eval_work_dir = self.work_dir or os.getcwd()
                 eval_result = await asyncio.to_thread(
                     self.evaluator.evaluate_stage,

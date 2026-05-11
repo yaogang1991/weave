@@ -104,6 +104,11 @@ Each success_criteria entry should be a structured object with a "type" field:
 - **coverage**: {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
 - **no_critical**: {{"type": "no_critical", "description": "no critical markers"}}
 
+**CRITICAL**: Only assign file-based criteria (file_exists, tests_pass, lint, coverage) to `generator` nodes.
+Planner and evaluator nodes produce in-memory output (plans, feedback), NOT files.
+For planner nodes, either omit success_criteria or use CUSTOM type.
+For evaluator nodes, omit success_criteria entirely.
+
 For simple cases you MAY use plain strings like "tests pass" or "lint clean" — these will be auto-parsed — but structured objects are preferred for reliability.
 
 ## Important
