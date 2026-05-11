@@ -78,6 +78,11 @@ Rules:
 9. For data processing functions, add explicit type checking and None handling
 10. After writing code, run tests yourself: `python -m pytest -v --tb=short`
     If tests fail, fix the issues before finishing.
+11. Prefer creating NEW independent files over modifying existing core files.
+    Do NOT edit core infrastructure (models.py, registry.py, config.py,
+    plan_validator.py) unless the task explicitly requires it.
+12. For library/module tasks, create self-contained files that do not
+    import from or depend on the project's internal modules.
 
 Work systematically: gather context → implement → verify.
 """,
