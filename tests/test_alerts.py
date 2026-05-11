@@ -11,6 +11,7 @@ Coverage:
 
 from __future__ import annotations
 
+import itertools
 import urllib.request
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
@@ -36,6 +37,9 @@ from monitoring.alerts import (
 # ---------------------------------------------------------------------------
 
 
+_job_counter = itertools.count(1)
+
+
 def make_job(
     repo: JobRepository,
     status: JobStatus = JobStatus.SUCCEEDED,
@@ -48,7 +52,7 @@ def make_job(
     """Create and persist a Job."""
     now = datetime.now(timezone.utc)
     job = Job(
-        id=f"job_{(created_at or now).isoformat()}_{status.value}",
+        id=f"job_{next(_job_counter)}_{status.value}",
         requirement="test requirement",
         status=status,
         created_at=created_at or now,
@@ -61,6 +65,9 @@ def make_job(
     return job
 
 
+_run_counter = itertools.count(1)
+
+
 def make_run(
     repo: JobRepository,
     job_id: str,
@@ -71,7 +78,7 @@ def make_run(
     """Create and persist a Run."""
     now = datetime.now(timezone.utc)
     run = Run(
-        id=f"run_{job_id}_{started_at.isoformat()}",
+        id=f"run_{next(_run_counter)}",
         job_id=job_id,
         session_id="sess_test",
         status=status,

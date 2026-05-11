@@ -4,10 +4,12 @@ Tests for monitoring.metrics — MetricsCollector and MetricsReporter.
 
 from __future__ import annotations
 
+import itertools
 import json
 import shutil
 import tempfile
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -31,6 +33,10 @@ def _utc(dt_str: str) -> datetime:
     return datetime.fromisoformat(dt_str).replace(tzinfo=timezone.utc)
 
 
+_m_job_counter = itertools.count(1)
+_m_run_counter = itertools.count(1)
+
+
 def make_job(
     repo: JobRepository,
     status: JobStatus = JobStatus.SUCCEEDED,
@@ -43,7 +49,7 @@ def make_job(
     """Create and persist a Job with the given parameters."""
     now = datetime.now(timezone.utc)
     job = Job(
-        id=f"job_{created_at.isoformat() if created_at else now.isoformat()}_{status.value}",
+        id=f"job_{next(_m_job_counter)}_{status.value}",
         requirement="test requirement",
         status=status,
         created_at=created_at or now,
@@ -66,7 +72,7 @@ def make_run(
     """Create and persist a Run associated with *job_id*."""
     now = datetime.now(timezone.utc)
     run = Run(
-        id=f"run_{job_id}_{started_at.isoformat()}",
+        id=f"run_{next(_m_run_counter)}",
         job_id=job_id,
         session_id="sess_test",
         status=status,
@@ -516,7 +522,7 @@ class TestMetricsReporterJSON:
         }
         path = str(tmp_path / "report.json")
         reporter.generate_json_report(metrics, output_path=path)
-        assert json.loads(open(path).read())["summary"]["total"] == 1
+        assert json.loads(Path(path).read_text(encoding="utf-8"))["summary"]["total"] == 1
 
 
 class TestMetricsReporterMarkdown:
@@ -639,7 +645,7 @@ class TestMetricsReporterMarkdown:
         }
         path = str(tmp_path / "report.md")
         reporter.generate_markdown_report(metrics, output_path=path)
-        content = open(path).read()
+        content = Path(path).read_text(encoding="utf-8")
         assert "# Harness M1 指标报告" in content
 
 
@@ -967,7 +973,7 @@ class TestApprovalStatsMarkdown:
         metrics = collector.collect()
         path = str(tmp_path / "report_with_approvals.md")
         reporter.generate_markdown_report(metrics, output_path=path)
-        content = open(path).read()
+        content = Path(path).read_text(encoding="utf-8")
         assert "## 审批统计" in content
         assert "待审批" in content
 
