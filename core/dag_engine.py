@@ -139,14 +139,20 @@ class DAGExecutionEngine:
         """
         Watchdog coroutine: monitors running nodes' heartbeats.
 
-        Every heartbeat_interval_sec, checks all running nodes.
+        Checks all running nodes every watchdog interval (1.5x heartbeat
+        interval to avoid timing collisions). A single missed heartbeat
+        is logged as DEBUG (common timing artifact); two or more missed
+        heartbeats trigger a formal ``heartbeat_missed`` event.
+
         Nodes exceeding miss_threshold are marked UNHEALTHY and killed.
 
         This runs as a background task during execute().
         """
+        # Use 1.5x heartbeat interval to avoid watchdog/refresh timing collision
+        check_interval = self.heartbeat_interval_sec * 1.5
         while True:
             try:
-                await asyncio.sleep(self.heartbeat_interval_sec)
+                await asyncio.sleep(check_interval)
             except asyncio.CancelledError:
                 return
 
@@ -160,18 +166,28 @@ class DAGExecutionEngine:
                 )
 
                 if health == NodeHealth.MISSED:
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="heartbeat_missed",
-                        details={
-                            "missed_count": node.missed_heartbeats,
-                            "threshold": self.heartbeat_miss_threshold,
-                            "last_heartbeat": (
-                                node.last_heartbeat_at.isoformat()
-                                if node.last_heartbeat_at else None
-                            ),
-                        },
-                    ))
+                    # First missed heartbeat is likely a timing artifact —
+                    # log at DEBUG only. Emit event at missed_count >= 2.
+                    if node.missed_heartbeats >= 2:
+                        await self._emit(ExecutionEvent(
+                            node_id=node_id,
+                            event_type="heartbeat_missed",
+                            details={
+                                "missed_count": node.missed_heartbeats,
+                                "threshold": self.heartbeat_miss_threshold,
+                                "last_heartbeat": (
+                                    node.last_heartbeat_at.isoformat()
+                                    if node.last_heartbeat_at else None
+                                ),
+                            },
+                        ))
+                    else:
+                        logger.debug(
+                            "Node %s heartbeat missed (count=%d, threshold=%d) "
+                            "— likely timing artifact, not emitting event",
+                            node_id, node.missed_heartbeats,
+                            self.heartbeat_miss_threshold,
+                        )
 
                 elif health == NodeHealth.UNHEALTHY:
                     # Kill the node! Fail-fast path
