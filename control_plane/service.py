@@ -124,6 +124,15 @@ class RunService:
         self.approval_timeout_sec = approval_timeout_sec
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
+        # Shared subsystems (initialized once, safe for concurrent jobs)
+        self._subsystems_initialized = False
+        self._memory_manager = None
+        self._learning_scheduler = None
+        self._learning_optimizer = None
+        self._impact_predictor = None
+        self._change_verifier = None
+        self._impact_coverage_threshold = 0.7
+
         # M2.1/M2.2: Backend manager for isolated execution
         from backend.lifecycle import BackendManager
 
@@ -712,6 +721,27 @@ class RunService:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _ensure_subsystems(self) -> None:
+        """One-time init of shared memory/learning/impact subsystems.
+
+        Called lazily on first use. Mutates shared state only once,
+        so concurrent jobs see the same initialized objects.
+        """
+        if self._subsystems_initialized:
+            return
+        self._subsystems_initialized = True
+        try:
+            from core.config import HarnessConfig
+            from memory.manager import MemoryManager
+            config = HarnessConfig.from_env()
+            if config.memory.enabled:
+                self._memory_manager = MemoryManager(config=config.memory)
+                self._memory_manager.run_maintenance()
+        except Exception as exc:
+            logger.debug("Memory manager init skipped: %s", exc)
+        self._init_learning_system()
+        self._init_impact_analyzer()
+
     async def _execute_plan_and_run(
         self,
         job: Job,
@@ -848,7 +878,7 @@ class RunService:
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                     _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-                    _record_path = _record_dir / f"impact_{_ts}_{job.id[:8]}.json"
+                    _record_path = _record_dir / f"impact_{_ts}_{run.id[:8] if run_id else uuid.uuid4().hex[:8]}.json"
                     _record_path.write_text(
                         json.dumps(_record, indent=2, default=str, ensure_ascii=False),
                         encoding="utf-8",
@@ -913,30 +943,22 @@ class RunService:
         )
 
     def _build_memory_manager(self, store: SessionStore) -> Any:
-        """M3.2: Build a MemoryManager from config. Returns None on failure/disabled."""
-        self._memory_manager = None
+        """M3.2: Build a per-job MemoryManager. Returns None if disabled.
+
+        Does NOT mutate shared self._memory_manager. Shared subsystems
+        are initialized separately via _ensure_subsystems().
+        """
+        self._ensure_subsystems()
+        if self._memory_manager is None:
+            return None
         try:
             from core.config import HarnessConfig
             from memory.manager import MemoryManager
-
             config = HarnessConfig.from_env()
-            if config.memory.enabled:
-                mgr = MemoryManager(
-                    config=config.memory,
-                    session_store=store,
-                )
-                mgr.run_maintenance()
-                self._memory_manager = mgr
+            return MemoryManager(config=config.memory, session_store=store)
         except Exception as exc:
-            logger.debug("Memory manager init skipped: %s", exc)
-
-        # M3.3: Initialize learning system
-        self._init_learning_system()
-
-        # M3.5: Initialize impact analyzer
-        self._init_impact_analyzer()
-
-        return self._memory_manager
+            logger.debug("Per-job memory manager creation skipped: %s", exc)
+            return None
 
     def _init_learning_system(self) -> None:
         """M3.3: Initialize LearningScheduler from config."""

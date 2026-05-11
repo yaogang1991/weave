@@ -102,7 +102,7 @@ class MemorySharing:
         if original.scope == MemoryScope.SESSION:
             return original
 
-        # Check for existing session-scoped copy with same content+agent
+        # Check for existing session-scoped copy with same content+agent+type
         existing = self.manager.store.list_entries(
             scope=MemoryScope.SESSION,
             session_id=session_id,
@@ -111,7 +111,8 @@ class MemorySharing:
         for e in existing:
             if (e.content == original.content
                     and e.agent_type == agent
-                    and e.source_node_id == original.source_node_id):
+                    and e.source_node_id == original.source_node_id
+                    and e.memory_type == original.memory_type):
                 return e
 
         # Create new entry in SESSION scope
