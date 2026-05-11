@@ -1067,6 +1067,14 @@ Examples:
     exec_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
     exec_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
     exec_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    exec_parser.add_argument(
+        "--max-parallel", type=int, default=3,
+        help="Max parallel agent executions (default: 3)",
+    )
+    exec_parser.add_argument(
+        "--max-iterations", type=int, default=50,
+        help="Max iterations per agent loop (default: 50)",
+    )
     exec_parser.set_defaults(func=cmd_execute)
 
     # run command (plan + execute)
@@ -1086,6 +1094,14 @@ Examples:
         "--visualize", action="store_true",
         help="Enable visualization and auto-open browser")
     run_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
+    run_parser.add_argument(
+        "--max-parallel", type=int, default=3,
+        help="Max parallel agent executions (default: 3)",
+    )
+    run_parser.add_argument(
+        "--max-iterations", type=int, default=50,
+        help="Max iterations per agent loop (default: 50)",
+    )
     run_parser.set_defaults(func=cmd_run)
 
     # viz command (standalone server)
