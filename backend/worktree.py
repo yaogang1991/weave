@@ -116,7 +116,7 @@ class WorktreeBackend(ExecutionBackend):
                 timeout=5,
             )
             return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
             return False
 
     def _remove_worktree(self, path: str) -> None:
