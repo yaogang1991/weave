@@ -290,9 +290,26 @@ async def cmd_execute(args, dag: DAG | None = None):
 
         await bridge.broadcast_session_start(session_id, _serialize_dag(dag)) if bridge else None
 
-    # Default console progress
+    # Default console progress + bridge DAG ExecutionEvents into SessionStore
     async def on_event(event):
         print(f"  [{event.event_type.upper()}] {event.node_id}: {event.details}")
+        # Translate DAG ExecutionEvent → SessionStore WORKFLOW_STAGE events
+        if event.event_type == "started":
+            node = dag.nodes.get(event.node_id)
+            store.emit_event(session_id, EventType.WORKFLOW_STAGE_START, {
+                "node_id": event.node_id,
+                "agent_type": node.agent_type if node else "",
+                "task": node.task_description[:200] if node else "",
+            })
+        elif event.event_type == "completed":
+            store.emit_event(session_id, EventType.WORKFLOW_STAGE_END, {
+                "node_id": event.node_id,
+            })
+        elif event.event_type == "failed":
+            store.emit_event(session_id, EventType.WORKFLOW_STAGE_ERROR, {
+                "node_id": event.node_id,
+                "error": event.details.get("reason", "failed"),
+            })
 
     engine.on_event(on_event)
 
@@ -301,7 +318,13 @@ async def cmd_execute(args, dag: DAG | None = None):
     print()
 
     # Execute
-    result_dag = await engine.execute(dag)
+    try:
+        result_dag = await engine.execute(dag)
+    except Exception as exc:
+        store.emit_event(session_id, EventType.SESSION_ERROR, {
+            "error": f"{type(exc).__name__}: {exc}",
+        })
+        raise
 
     # Summary
     summary = engine.get_execution_summary(result_dag)

@@ -142,53 +142,74 @@ class SessionStore:
     def get_summary(self, session_id: str) -> dict:
         """Return a summary dict for a session.
 
-        Returns status, stages completed, error count, node results,
-        and event count. Returns empty dict if session not found.
+        Derives status from SESSION_START/SESSION_END/SESSION_ERROR events.
+        Reads DAG execution summary from SESSION_END.payload["summary"] if
+        available. Returns empty dict if session not found.
         """
         events = self.get_events(session_id)
         if not events:
             return {}
 
         status = "created"
-        stages: list[str] = []
+        created_at = None
         errors: list[str] = []
-        node_results: dict[str, str] = {}
+        execution: dict | None = None
+        node_details: dict[str, dict] = {}
 
         for ev in events:
+            payload = ev.payload
+
             if ev.type == EventType.SESSION_START:
                 status = "running"
+                created_at = payload.get("timestamp") or ev.timestamp.isoformat()
+
             elif ev.type == EventType.SESSION_END:
                 status = "completed"
+                execution = payload.get("summary")
+
             elif ev.type == EventType.SESSION_ERROR:
                 status = "error"
-                errors.append(ev.payload.get("error", "Unknown"))
+                errors.append(payload.get("error", "Unknown"))
+
             elif ev.type == EventType.WORKFLOW_STAGE_START:
-                stages.append(ev.payload.get("stage_name", ""))
+                nid = payload.get("node_id", "")
+                if nid:
+                    node_details.setdefault(nid, {})["agent_type"] = payload.get("agent_type", "")
+                    node_details[nid]["task"] = payload.get("task", "")
 
-            # Extract node-level results from execution events
-            p = ev.payload
-            if "node_id" in p and "event_type" not in ev.type:
-                pass  # skip
-            nid = p.get("node_id", "")
-            etype = ev.type if hasattr(ev, "type") else ""
-            if nid and isinstance(etype, str):
-                if "completed" in etype or "succeeded" in etype:
-                    node_results[nid] = "success"
-                elif "failed" in etype:
-                    node_results[nid] = "failed"
-                    err = p.get("error") or p.get("details", {}).get("error", "")
-                    if err:
-                        errors.append(f"{nid}: {err}")
+            elif ev.type == EventType.WORKFLOW_STAGE_END:
+                nid = payload.get("node_id", "")
+                if nid:
+                    node_details.setdefault(nid, {})["status"] = "success"
 
-        return {
+            elif ev.type == EventType.WORKFLOW_STAGE_ERROR:
+                nid = payload.get("node_id", "")
+                if nid:
+                    node_details.setdefault(nid, {})["status"] = "failed"
+                    node_details[nid]["error"] = payload.get("error", "")
+
+        # Build node_results from node_details
+        node_results: dict[str, str] = {}
+        for nid, info in node_details.items():
+            node_results[nid] = info.get("status", "unknown")
+
+        result: dict = {
             "session_id": session_id,
+            "source": "session_store",
             "status": status,
-            "stages": stages,
-            "node_results": node_results,
-            "error_count": len(errors),
-            "errors": errors[:10],
+            "created_at": created_at,
             "event_count": len(events),
+            "node_results": node_results,
+            "errors": errors[:10],
         }
+
+        if execution:
+            result["execution"] = execution
+
+        if node_details:
+            result["node_details"] = node_details
+
+        return result
 
     def checkpoint(self, session_id: str, label: str) -> None:
         """Create a named checkpoint by copying current event log."""
