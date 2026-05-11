@@ -216,12 +216,6 @@ class TestHookOrdering:
         hooks = [MemoryHook(), LearningHook(), ImpactHook()]
         ctx = _make_context()
         for hook in hooks:
-            try:
-                await hook.before_execution(ctx)
-            except Exception:
-                pass
+            await hook.before_execution(ctx)
         for hook in hooks:
-            try:
-                await hook.after_execution(ctx, MagicMock())
-            except Exception:
-                pass
+            await hook.after_execution(ctx, MagicMock())

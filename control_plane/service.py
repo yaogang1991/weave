@@ -758,6 +758,8 @@ class RunService:
             store=store,
             work_dir=work_dir,
             run_id=run_id,
+            llm_config=self.llm_config,
+            repository=self.repository,
         )
 
         # Before-hooks: memory, learning, impact prediction
