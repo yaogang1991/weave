@@ -240,6 +240,11 @@ class ToolRegistry:
 
     def _tool_read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ToolResult:
         try:
+            if not file_path or not file_path.strip():
+                return ToolResult(
+                    tool_call_id="", success=False,
+                    error="file_path is required and cannot be empty",
+                )
             path = self._resolve_path(file_path)
             if not path.exists():
                 return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")
@@ -269,6 +274,11 @@ class ToolRegistry:
 
     def _tool_write(self, file_path: str, content: str) -> ToolResult:
         try:
+            if not file_path or not file_path.strip():
+                return ToolResult(
+                    tool_call_id="", success=False,
+                    error="file_path is required and cannot be empty",
+                )
             path = self._resolve_path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
@@ -279,6 +289,11 @@ class ToolRegistry:
 
     def _tool_edit(self, file_path: str, old_string: str, new_string: str) -> ToolResult:
         try:
+            if not file_path or not file_path.strip():
+                return ToolResult(
+                    tool_call_id="", success=False,
+                    error="file_path is required and cannot be empty",
+                )
             path = self._resolve_path(file_path)
             if not path.exists():
                 return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")
