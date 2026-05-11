@@ -203,7 +203,7 @@ class TestCmdTickets:
 
         assert output["tickets"] == []
         assert output["count"] == 0
-        assert output["stats"] == {"pending": 0, "approved": 0, "rejected": 0, "expired": 0}
+        assert output["stats"] == {"pending": 0, "approved": 0, "consumed": 0, "rejected": 0, "expired": 0}
 
 
 # ------------------------------------------------------------------------------
