@@ -2,7 +2,7 @@
 
 ---
 
-**最后更新:** 2026-05-10
+**最后更新:** 2026-05-11
 **当前版本:** M3.5
 
 ---
@@ -20,6 +20,7 @@
 | **M3.3** | 自学习 — 执行模式分析 + 自动优化 | ✅ 已完成 | 2026-05-10 |
 | **M3.4** | DAG 模板 — 可复用 YAML 模板 + 变量替换 | ✅ 已完成 | 2026-05-10 |
 | **M3.5** | 影响分析 — 变更影响预测 + 依赖图 + 变更验证 | ✅ 已完成 | 2026-05-10 |
+| **Refactor** | Execution Hooks — 解耦子系统为生命周期回调 | ✅ 已完成 | 2026-05-11 |
 
 ---
 
@@ -335,6 +336,38 @@ python main.py impact-history
 
 ---
 
+## Refactor — Execution Hooks
+
+**目标:** 将 RunService 中耦合的记忆/学习/影响分析逻辑解耦为独立的生命周期回调，核心执行方法从 150+ 行缩减至 ~50 行。
+
+### 重构内容
+
+- ✅ `control_plane/hooks.py` — ExecutionContext + ExecutionHook ABC + 三个实现
+  - `MemoryHook` — 创建 per-job MemoryManager，服务级维护仅运行一次（threading.Lock）
+  - `LearningHook` — 触发学习分析，暴露 optimizer 给 Orchestrator（构造函数注入 repository）
+  - `ImpactHook` — 执行前预测影响范围，执行后验证变更（构造函数注入 llm_config）
+- ✅ `control_plane/service.py` — 重构 `_execute_plan_and_run`
+  - 移除 `_ensure_subsystems`、`_build_memory_manager`、`_init_learning_system`、`_init_impact_analyzer`
+  - 新增 `_register_hooks()` — 依赖注入点
+  - 元数据在 before_hooks 和 after_hooks 后分别持久化
+- ✅ `orchestrator/plan_validator.py` — 新增 PlanValidator 模块（修复缺失模块导致的测试收集失败）
+- ✅ `tests/test_hooks.py` — 19 个测试（注入、隔离、顺序、容错）
+
+### 设计原则
+
+```
+1. 依赖注入 — hooks 通过构造函数接收外部依赖（repository, llm_config）
+2. 顺序保证 — MemoryHook 先于 ImpactHook（确保 ctx.memory_manager 可用）
+3. 容错 — 所有 hook 错误被捕获并记录，永不中断核心执行流
+4. 可扩展 — 新增 hook 只需继承 ExecutionHook 并注册到 _register_hooks()
+```
+
+### 全量测试
+
+- `python3 -m pytest -v` — 940 passed, 0 failed
+
+---
+
 ## 完整文件清单
 
 ```
@@ -348,7 +381,8 @@ harness/
 ├── control_plane/                 # M1: CLI 控制面
 │   ├── models.py                  # Job/Run 数据模型
 │   ├── repository.py              # 持久化存储
-│   ├── service.py                 # 执行服务
+│   ├── service.py                 # 执行服务（hooks 驱动）
+│   ├── hooks.py                   # Execution Hooks（Memory/Learning/Impact）
 │   ├── worker.py                  # Worker 队列消费者
 │   └── approval.py                # M1.1: 审批票据系统
 ├── backend/                       # M2: 执行后端
@@ -368,7 +402,8 @@ harness/
 │       ├── index.html             # 主仪表盘
 │       └── console.html           # 管理控制台
 ├── orchestrator/
-│   └── intelligent_orchestrator.py # 智能编排 Agent
+│   ├── intelligent_orchestrator.py # 智能编排 Agent
+│   └── plan_validator.py           # DAG 结构验证与自动修复
 ├── agent/
 │   ├── worker.py                  # Agent Worker
 │   └── agent_pool.py              # Agent 实例池

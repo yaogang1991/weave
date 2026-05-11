@@ -485,3 +485,53 @@ python main.py impact-graph --project .
 # Review past predictions
 python main.py impact-history
 ```
+
+---
+
+## Creating an Execution Hook
+
+Execution hooks are lifecycle callbacks that run before/after DAG execution, decoupling subsystems from the core execution flow in `RunService`.
+
+### 1. Implement the hook
+
+Create a class extending `ExecutionHook` in `control_plane/hooks.py`:
+
+```python
+from control_plane.hooks import ExecutionHook, ExecutionContext
+
+class MyCustomHook(ExecutionHook):
+    def __init__(self, my_dependency: Any = None) -> None:
+        self._my_dep = my_dependency
+
+    async def before_execution(self, ctx: ExecutionContext) -> None:
+        # Read ctx.job, ctx.work_dir, etc.
+        # Write to ctx.metadata (persisted to job) or ctx._state (internal)
+        ctx.metadata["my_custom_data"] = "value"
+
+    async def after_execution(self, ctx: ExecutionContext, result_dag: Any) -> None:
+        # Read ctx._state from before_execution
+        # Access ctx.memory_manager (set by MemoryHook)
+        pass
+```
+
+### 2. Register the hook
+
+Edit `control_plane/service.py` in `_register_hooks()`:
+
+```python
+def _register_hooks(self) -> list[ExecutionHook]:
+    return [
+        MemoryHook(),                            # Must be first
+        LearningHook(repository=self.repository),
+        ImpactHook(llm_config=self.llm_config),
+        MyCustomHook(my_dependency=self.some_dep),  # Add yours
+    ]
+```
+
+### 3. Key invariants
+
+- **Ordering matters**: Hooks run in registration order. `MemoryHook` must run first to set `ctx.memory_manager`.
+- **Errors are swallowed**: Hook errors are logged, never raised. Core execution always proceeds.
+- **Metadata persistence**: `ctx.metadata` is persisted to `job.metadata` after both before_hooks and after_hooks.
+- **State isolation**: `ctx._state` is per-job, not shared across concurrent executions.
+- **Dependency injection**: Pass external dependencies via constructor, not module-level globals.

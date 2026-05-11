@@ -102,7 +102,8 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `evaluator/engine.py` — Automated success criteria checking (pytest, flake8, coverage)
 - `control_plane/models.py` — Job/Run data models, status enums
 - `control_plane/repository.py` — Persistent storage with atomic writes
-- `control_plane/service.py` — Execution service (submit/run/resume)
+- `control_plane/service.py` — Execution service (submit/run/resume), hooks-driven lifecycle
+- `control_plane/hooks.py` — Execution hooks: MemoryHook, LearningHook, ImpactHook (lifecycle callbacks)
 - `control_plane/worker.py` — Worker queue consumer with lease mechanism
 - `control_plane/approval.py` — Approval ticket system (M1.1): ApprovalTicket, ApprovalRepository
 - `backend/base.py` — ExecutionBackend abstract interface (M2)
@@ -122,6 +123,7 @@ Execution Layer (Backend abstraction, Git, Reporter)
 - `analysis/dependency_graph.py` — M3.5: File-level dependency graph using Python ast import parsing
 - `analysis/impact_predictor.py` — M3.5: Impact prediction engine (keyword matching + dependency expansion)
 - `analysis/change_verifier.py` — M3.5: Post-execution change verification with coverage metrics
+- `orchestrator/plan_validator.py` — DAG structural validation and auto-fix
 - `visualizer/server.py` — FastAPI web console (M2.3)
 - `visualizer/cli_renderer.py` — CLI DAG visualization
 - `visualizer/event_bridge.py` — WebSocket event bridge

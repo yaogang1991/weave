@@ -222,6 +222,7 @@ Available Worker Agents:
 | `repository.py` | 持久化存储（原子写入） |
 | `service.py` | 执行服务（submit/run/resume） |
 | `worker.py` | Worker 队列消费者（Lease 机制） |
+| `hooks.py` | Execution Hooks — 生命周期回调（MemoryHook, LearningHook, ImpactHook） |
 | `approval.py` | M1.1: 审批票据系统（ApprovalTicket + ApprovalRepository） |
 
 ### 7. Execution Backend (`backend/`)
@@ -319,6 +320,37 @@ python main.py run "Build API" --template build_api --var feature=Todo --var lan
 ```
 Requirement → ImpactPredictor → ImpactScope → Execute DAG → ChangeVerifier → VerificationResult
     ↓ 存入 job.metadata                                                        ↓ 存入记忆
+```
+
+### 14. Execution Hooks (`control_plane/hooks.py`) — Refactoring
+
+**职责**：将记忆、学习、影响分析从核心执行流程解耦为生命周期回调
+
+| 组件 | 说明 |
+|------|------|
+| `ExecutionContext` | 可变上下文，在 hooks 间传递 per-job 状态 |
+| `ExecutionHook` | 抽象基类，定义 `before_execution` / `after_execution` |
+| `MemoryHook` | 创建 per-job MemoryManager，服务级维护仅运行一次 |
+| `LearningHook` | 触发学习分析，暴露 `optimizer` 给 Orchestrator |
+| `ImpactHook` | 执行前预测影响范围，执行后验证变更 |
+
+设计原则：
+```
+1. 依赖注入 — hooks 通过构造函数接收 repository、llm_config
+2. 顺序保证 — MemoryHook 先于 ImpactHook（确保 memory_manager 可用）
+3. 容错 — 所有 hook 错误被捕获并记录，不中断执行
+4. 元数据持久化 — before/after hooks 写入 ctx.metadata，合并到 job.metadata
+```
+
+执行流程（重构后）：
+```
+_execute_plan_and_run():
+    1. before_hooks() → MemoryHook, LearningHook, ImpactHook
+    2. persist metadata
+    3. orchestrator.plan() → DAG
+    4. engine.execute(dag) → result_dag
+    5. after_hooks() → ImpactHook 验证
+    6. persist metadata
 ```
 
 ---
@@ -482,7 +514,8 @@ harness/
 ├── control_plane/                 # M1: CLI 控制面
 │   ├── models.py                  # Job/Run 数据模型
 │   ├── repository.py              # 持久化存储
-│   ├── service.py                 # 执行服务（含 M3 记忆/学习/影响分析集成）
+│   ├── service.py                 # 执行服务（hooks 驱动的生命周期）
+│   ├── hooks.py                   # Execution Hooks（Memory/Learning/Impact）
 │   ├── worker.py                  # Worker 队列消费者
 │   └── approval.py                # M1.1: 审批票据系统
 ├── backend/                       # M2: 执行后端
@@ -502,7 +535,8 @@ harness/
 │       ├── index.html             # 主仪表盘
 │       └── console.html           # 管理控制台
 ├── orchestrator/
-│   └── intelligent_orchestrator.py # 智能编排 Agent（含学习提示注入 + 模板规划）
+│   ├── intelligent_orchestrator.py # 智能编排 Agent（含学习提示注入 + 模板规划）
+│   └── plan_validator.py           # DAG 结构验证与自动修复
 ├── agent/
 │   ├── worker.py                  # Agent Worker
 │   └── agent_pool.py              # Agent 实例池（含记忆注入/提取）
@@ -584,5 +618,5 @@ python main.py run "设计登录页面" --project ./my-project
 
 ---
 
-*日期: 2026-05-10*
+*日期: 2026-05-11*
 *状态: M3 已完成*

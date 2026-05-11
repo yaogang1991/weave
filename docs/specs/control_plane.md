@@ -4,7 +4,7 @@
 
 Provides the job queue, run tracking, approval ticket system, execution service, and asynchronous worker that together form the control plane for the harness. Manages the full lifecycle of a job: submission, lease acquisition, DAG planning and execution, retry/dead-letter handling, approval gating for high-risk tool calls, and graceful worker shutdown.
 
-Sources: `control_plane/models.py`, `control_plane/repository.py`, `control_plane/service.py`, `control_plane/worker.py`, `control_plane/approval.py`
+Sources: `control_plane/models.py`, `control_plane/repository.py`, `control_plane/service.py`, `control_plane/worker.py`, `control_plane/approval.py`, `control_plane/hooks.py`
 
 ---
 
@@ -238,13 +238,93 @@ class RunService:
 - `async abort_after_rejection(job_id: str, ticket_id: str, reason: str = "") -> Job`
 
 **Internal methods:**
-- `async _execute_plan_and_run(job, session_id, store, work_dir) -> Any`
-- `_create_orchestrator(store) -> IntelligentOrchestrator`
-- `_create_execution_engine(session_id, store, replan_handler, work_dir) -> DAGExecutionEngine`
+- `async _execute_plan_and_run(job, session_id, store, work_dir, run_id=None) -> Any`
+- `_register_hooks() -> list[ExecutionHook]`
+- `_create_orchestrator(store, hooks) -> IntelligentOrchestrator`
+- `_create_execution_engine(session_id, store, replan_handler, work_dir, memory_manager) -> DAGExecutionEngine`
+- `async _run_hooks(method_name, context, *args) -> None`
 
 ---
 
 ### worker.py -- `TaskWorker`
+
+---
+
+### hooks.py -- Execution Hooks
+
+Execution hooks decouple subsystems (memory, learning, impact analysis) from the core execution flow in `RunService._execute_plan_and_run`.
+
+#### Model: `ExecutionContext`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `job` | `Any` | -- | Current Job |
+| `session_id` | `str` | -- | Session identifier |
+| `store` | `Any` | -- | SessionStore |
+| `work_dir` | `Path` | -- | Execution working directory |
+| `run_id` | `str \| None` | `None` | Run identifier |
+| `memory_manager` | `Any \| None` | `None` | Per-job MemoryManager (set by MemoryHook) |
+| `llm_config` | `Any \| None` | `None` | LLM configuration |
+| `repository` | `Any \| None` | `None` | JobRepository instance |
+| `metadata` | `dict[str, Any]` | `{}` | Merged into job.metadata after execution |
+| `_state` | `dict[str, Any]` | `{}` | Internal state shared between before/after hooks |
+
+#### Abstract class: `ExecutionHook`
+
+```python
+class ExecutionHook(ABC):
+    async def before_execution(self, ctx: ExecutionContext) -> None: ...
+    async def after_execution(self, ctx: ExecutionContext, result_dag: Any) -> None: ...
+```
+
+All hook errors are caught and logged — they never abort execution.
+
+#### `MemoryHook`
+
+Creates a per-job `MemoryManager` and attaches it to `ctx.memory_manager`. Service-level maintenance runs once via `threading.Lock`.
+
+| Phase | Action |
+|---|---|
+| `before_execution` | Create `MemoryManager`, run once-only maintenance, store in `ctx.memory_manager` |
+| `after_execution` | No-op |
+
+#### `LearningHook`
+
+Triggers learning analysis if due. Exposes `optimizer` for RunService to inject into Orchestrator.
+
+Constructor: `LearningHook(repository: Any | None = None)`
+
+| Phase | Action |
+|---|---|
+| `before_execution` | Call `scheduler.maybe_run_analysis()` |
+| `after_execution` | No-op |
+
+Exposed attributes:
+- `optimizer: Any | None` — `LearningOptimizer` instance for planning hints
+
+#### `ImpactHook`
+
+Predicts impact before execution; verifies changes after.
+
+Constructor: `ImpactHook(llm_config: Any | None = None)`
+
+| Phase | Action |
+|---|---|
+| `before_execution` | Predict impact scope, capture file snapshot, store in `ctx._state` and `ctx.metadata` |
+| `after_execution` | Verify changes, store learning in memory, persist impact record to `data/impact/` |
+
+#### Hook Registration (in RunService)
+
+```python
+def _register_hooks(self) -> list[ExecutionHook]:
+    return [
+        MemoryHook(),                            # Must run first (sets ctx.memory_manager)
+        LearningHook(repository=self.repository), # DI: repository
+        ImpactHook(llm_config=self.llm_config),  # DI: llm_config
+    ]
+```
+
+Ordering invariant: `MemoryHook` runs before `ImpactHook` so `ctx.memory_manager` is available for the predictor.
 
 ```python
 class WorkerConfig:
@@ -304,8 +384,12 @@ _execute_job()
     |         |
     |         +---> BackendManager.setup()           --> work_dir
     |         +---> _execute_plan_and_run()
-    |         |         +---> orchestrator.plan()     --> DAG
+    |         |         +---> _run_hooks("before_execution")  --> MemoryHook, LearningHook, ImpactHook
+    |         |         +---> persist metadata (from before-hooks)
+    |         |         +---> orchestrator.plan()              --> DAG
     |         |         +---> DAGExecutionEngine.execute(dag)
+    |         |         +---> _run_hooks("after_execution")   --> ImpactHook verification
+    |         |         +---> persist metadata (from after-hooks)
     |         +---> Evaluate summary
     |         +---> BackendManager.cleanup/preserve
     |         +---> handle_job_failure() (if failed)
@@ -362,6 +446,7 @@ Error categories used in `error_category` field: `""`, `"timeout"`, `"eval_faile
 | `PersonalGuardrailPolicy` | `core.models` | Personal-mode policy model. |
 | `EvaluatorEngine` | `evaluator.engine` | Quality gates. |
 | `BackendManager` | `backend.lifecycle` | Execution backend management. |
+| `ExecutionHook`, `ExecutionContext`, `MemoryHook`, `LearningHook`, `ImpactHook` | `control_plane.hooks` | Execution lifecycle hooks. |
 | `pydantic` | External | All data models. |
 
 ---
@@ -394,6 +479,7 @@ Error categories used in `error_category` field: `""`, `"timeout"`, `"eval_faile
 3. **Additional error categories**: Add values to the `error_category` validator in `Job`.
 4. **Worker scaling**: Increase `WorkerConfig.concurrency` or run multiple `TaskWorker` processes.
 5. **Approval automation**: Call `approve_ticket`/`reject_ticket` programmatically instead of manually.
+6. **Custom execution hooks**: Extend `ExecutionHook` and register in `RunService._register_hooks()`. Hooks receive per-job `ExecutionContext` and can read/write `ctx.metadata` (persisted to job) and `ctx._state` (internal).
 
 ---
 
