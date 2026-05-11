@@ -11,12 +11,21 @@ nodes:
   - id: generator_refactor
     agent_type: generator
     task_description: "Refactor {target} following the plan. Preserve existing behavior and public interfaces."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: generator_tests
     agent_type: generator
     task_description: "Update or add tests to cover the refactored {target}. Ensure all existing tests still pass."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: evaluator
     agent_type: evaluator
     task_description: "Evaluate the refactoring of {target}: run all tests, check code quality, verify no behavioral changes."
+    success_criteria:
+      - type: tests_pass
+        description: "tests pass"
 edges:
   - from: planner
     to: generator_refactor

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class AgentCapability(BaseModel):
@@ -56,6 +56,34 @@ class NodeHealth(str, Enum):
     DEAD = "dead"             # Killed by watchdog, final state
 
 
+class EvaluationResult(BaseModel):
+    """Result of an evaluation pass."""
+    passed: bool
+    score: float = 0.0
+    criteria_results: dict[str, bool] = Field(default_factory=dict)
+    feedback: str = ""
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class CriterionType(str, Enum):
+    """Structured criterion types for evaluator dispatch."""
+    TESTS_PASS = "tests_pass"
+    LINT = "lint"
+    FILE_EXISTS = "file_exists"
+    COVERAGE = "coverage"
+    NO_CRITICAL = "no_critical"
+    CUSTOM = "custom"
+
+
+class SuccessCriterion(BaseModel):
+    """Structured success criterion for evaluation."""
+    type: CriterionType = CriterionType.CUSTOM
+    test_path: str = ""
+    path: str = ""
+    target: float | None = None
+    description: str = ""
+
+
 class DAGNode(BaseModel):
     """
     A single node in the execution DAG = one agent task.
@@ -67,12 +95,55 @@ class DAGNode(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
     error: str = ""
     output_artifacts: list[str] = Field(default_factory=list)
-    success_criteria: list[str] = Field(default_factory=list)
+    success_criteria: list[str | SuccessCriterion] = Field(default_factory=list)
     eval_feedback: str = ""  # Evaluator feedback, passed back on retry
     max_retries: int = 3
     retry_count: int = 0
     started_at: datetime | None = None
     completed_at: datetime | None = None
+
+    @field_validator("success_criteria", mode="before")
+    @classmethod
+    def _normalize_criteria(cls, v: list) -> list:
+        """Accept list[str], list[dict], or list[SuccessCriterion].
+
+        Dicts with a recognized 'type' key are parsed into SuccessCriterion.
+        Unrecognized types (e.g. legacy "command") are downgraded to CUSTOM.
+        JSON strings that look like structured criteria are also parsed
+        for backward compatibility with previously serialized data.
+        """
+        result: list[str | SuccessCriterion] = []
+        for item in v:
+            if isinstance(item, SuccessCriterion):
+                result.append(item)
+            elif isinstance(item, dict) and "type" in item:
+                result.append(cls._safe_parse_criterion(item))
+            elif isinstance(item, str):
+                if item.startswith("{"):
+                    try:
+                        import json as _json
+                        data = _json.loads(item)
+                        if isinstance(data, dict) and "type" in data:
+                            result.append(cls._safe_parse_criterion(data))
+                            continue
+                    except (_json.JSONDecodeError, Exception):
+                        pass
+                result.append(item)
+            elif isinstance(item, dict):
+                result.append(str(item))
+            else:
+                result.append(str(item))
+        return result
+
+    @staticmethod
+    def _safe_parse_criterion(data: dict) -> SuccessCriterion:
+        """Parse dict into SuccessCriterion, downgrading unknown types to CUSTOM."""
+        try:
+            return SuccessCriterion(**data)
+        except Exception:
+            safe = {k: v for k, v in data.items() if k in ("description", "path", "target", "test_path")}
+            safe["type"] = "custom"
+            return SuccessCriterion(**safe)
 
     # M2.0: Heartbeat fields
     health_status: NodeHealth = NodeHealth.HEALTHY  # Current health
@@ -410,15 +481,6 @@ class PersonalGuardrailPolicy(GuardrailPolicy):
     auto_approve_high: bool = False
     # 交互式确认超时（秒），超时则拒绝
     confirmation_timeout_sec: int = 300
-
-
-class EvaluationResult(BaseModel):
-    """Result of an evaluation pass."""
-    passed: bool
-    score: float = 0.0
-    criteria_results: dict[str, bool] = Field(default_factory=dict)
-    feedback: str = ""
-    suggestions: list[str] = Field(default_factory=list)
 
 
 # =============================================================================

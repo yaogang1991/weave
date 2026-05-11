@@ -12,12 +12,23 @@ nodes:
   - id: generator_api
     agent_type: generator
     task_description: "Implement the {feature} in {language} following the plan. Include route handlers, data validation, and error responses."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: generator_tests
     agent_type: generator
     task_description: "Write comprehensive tests for {feature}: unit tests, integration tests, and edge cases."
+    success_criteria:
+      - type: tests_pass
+        description: "tests pass"
   - id: evaluator
     agent_type: evaluator
     task_description: "Evaluate the {feature} implementation: run tests, check code style, verify API contracts."
+    success_criteria:
+      - type: tests_pass
+        description: "tests pass"
+      - type: lint
+        description: "lint clean"
 edges:
   - from: planner_api
     to: generator_api

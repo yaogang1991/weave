@@ -12,9 +12,18 @@ nodes:
   - id: generator_scaffold
     agent_type: generator
     task_description: "Create the project scaffold for {project}: directories, config files, boilerplate code, README, and dependencies."
+    success_criteria:
+      - type: file_exists
+        path: "README.md"
+        description: "README exists"
+      - type: lint
+        description: "lint clean"
   - id: evaluator
     agent_type: evaluator
     task_description: "Evaluate the project setup for {project}: verify file structure, check configs, run any initial tests."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
 edges:
   - from: planner_structure
     to: generator_scaffold

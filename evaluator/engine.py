@@ -1,22 +1,38 @@
 """
 Evaluator: automated evaluation and contract verification.
-Inspired by Anthropic's three-agent harness evaluator.
+
+Supports both legacy list[str] criteria and structured SuccessCriterion.
+All internal checkers return 2-tuples (bool, str) for consistency.
+The public _check_criterion returns 3-tuples (bool, str, bool) for the
+was_auto_checked protocol used by evaluate_stage.
+
+Security: never executes arbitrary commands from LLM output. TESTS_PASS
+runs a fixed ``python -m pytest`` via subprocess with shell=False.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
 
-from core.models import EvaluationResult, EventType
+from core.models import (
+    CriterionType,
+    EvaluationResult,
+    EventType,
+    SuccessCriterion,
+)
 from session.store import SessionStore
 
 
 class EvaluatorEngine:
     """
     Evaluates code against predefined success criteria.
-    Supports: test execution, lint checks, coverage, complexity.
+
+    Supports: test execution, lint checks, coverage, file existence,
+    no-critical-issues check. Accepts list[str] (legacy) and
+    list[SuccessCriterion] (structured).
     """
 
     def __init__(self, session_store: SessionStore):
@@ -26,38 +42,41 @@ class EvaluatorEngine:
         self,
         session_id: str,
         stage_name: str,
-        criteria: list[str],
+        criteria: list[str | SuccessCriterion],
         artifact_path: str,
+        work_dir: str | None = None,
+        output_artifacts: list[str] | None = None,
     ) -> EvaluationResult:
         """Evaluate a stage against its success criteria."""
+        eval_dir = work_dir or artifact_path
+
         self.session_store.emit_event(
             session_id,
             EventType.EVAL_START,
-            {"stage": stage_name, "criteria": criteria, "artifact": artifact_path},
+            {"stage": stage_name, "criteria": [str(c) for c in criteria], "artifact": artifact_path},
         )
+
+        structured = self._normalize_criteria(criteria)
 
         results: dict[str, bool] = {}
         score = 0.0
         feedback_parts: list[str] = []
         uncheckable: list[str] = []
 
-        for criterion in criteria:
-            passed, msg, auto = self._check_criterion(criterion, artifact_path)
-            results[criterion] = passed
+        for crit in structured:
+            passed, msg, auto = self._check_criterion(crit, eval_dir, output_artifacts)
+            label = crit.description or crit.path or crit.test_path or crit.type.value
+            results[label] = passed
             if passed:
-                score += 10.0 / len(criteria)
+                score += 10.0 / max(len(structured), 1)
             if auto:
-                feedback_parts.append(f"{'PASS' if passed else 'FAIL'} {criterion}: {msg}")
+                feedback_parts.append(f"{'PASS' if passed else 'FAIL'} {label}: {msg}")
             else:
-                feedback_parts.append(f"WARN {criterion}: {msg}")
-                uncheckable.append(criterion)
+                feedback_parts.append(f"WARN {label}: {msg}")
+                uncheckable.append(label)
 
-        # A criterion that cannot be automatically verified should NOT
-        # be treated as passed — mark the whole evaluation as incomplete
-        # so the caller knows human review is needed.
         all_auto_passed = all(results.values())
         has_uncheckable = len(uncheckable) > 0
-
         overall_passed = all_auto_passed and not has_uncheckable
 
         feedback = "\n".join(feedback_parts)
@@ -84,57 +103,107 @@ class EvaluatorEngine:
 
         return result
 
-    def _check_criterion(self, criterion: str, artifact_path: str) -> tuple[bool, str, bool]:
+    # ------------------------------------------------------------------
+    # Criteria normalization
+    # ------------------------------------------------------------------
+
+    def _normalize_criteria(self, criteria: list[str | SuccessCriterion]) -> list[SuccessCriterion]:
+        """Parse list[str | SuccessCriterion] into list[SuccessCriterion].
+
+        SuccessCriterion instances are preserved as-is.
+        Strings that are valid JSON with a 'type' key are deserialized as
+        structured criteria (backward compatibility with serialized data).
+        Plain strings go through legacy keyword matching.
         """
-        Check a single success criterion.
+        result: list[SuccessCriterion] = []
+        for c in criteria:
+            if isinstance(c, SuccessCriterion):
+                result.append(c)
+                continue
+            if isinstance(c, str) and c.startswith("{"):
+                try:
+                    data = json.loads(c)
+                    if isinstance(data, dict) and "type" in data:
+                        result.append(SuccessCriterion(**data))
+                        continue
+                except (json.JSONDecodeError, Exception):
+                    pass
+            result.append(self._parse_string_criterion(c))
+        return result
 
-        Returns:
-            (passed, message, was_auto_checked)
-            was_auto_checked=False means this criterion could not be verified
-            and should be flagged for manual review.
-        """
-        criterion_lower = criterion.lower()
-        path = Path(artifact_path)
+    def _parse_string_criterion(self, criterion: str) -> SuccessCriterion:
+        lower = criterion.lower()
+        if "test" in lower and "pass" in lower:
+            return SuccessCriterion(type=CriterionType.TESTS_PASS, description=criterion)
+        if "coverage" in lower:
+            return SuccessCriterion(type=CriterionType.COVERAGE, target=float(self._extract_percentage(lower) or 80), description=criterion)
+        if "lint" in lower or "clean" in lower:
+            return SuccessCriterion(type=CriterionType.LINT, description=criterion)
+        if "file" in lower and "exist" in lower:
+            match = re.search(r"[:\s]+(.+)", lower)
+            return SuccessCriterion(type=CriterionType.FILE_EXISTS, path=match.group(1) if match else "", description=criterion)
+        if "no_critical" in lower or "no bug" in lower:
+            return SuccessCriterion(type=CriterionType.NO_CRITICAL, description=criterion)
+        return SuccessCriterion(type=CriterionType.CUSTOM, description=criterion)
 
-        if "test" in criterion_lower and "pass" in criterion_lower:
-            passed, msg = self._run_tests(path)
+    # ------------------------------------------------------------------
+    # Dispatch — returns 3-tuple (passed, msg, was_auto)
+    # ------------------------------------------------------------------
+
+    def _check_criterion(
+        self,
+        crit: SuccessCriterion,
+        work_dir: str,
+        output_artifacts: list[str] | None = None,
+    ) -> tuple[bool, str, bool]:
+        if crit.type == CriterionType.TESTS_PASS:
+            passed, msg = self._run_tests(Path(work_dir), crit.test_path or None)
             return passed, msg, True
 
-        if "coverage" in criterion_lower:
-            target = self._extract_percentage(criterion_lower) or 80
-            passed, msg = self._check_coverage(path, target)
+        if crit.type == CriterionType.LINT:
+            targets = output_artifacts or [work_dir]
+            passed, msg = self._run_lint(targets, Path(work_dir))
             return passed, msg, True
 
-        if "lint" in criterion_lower or "clean" in criterion_lower:
-            passed, msg = self._run_lint(path)
+        if crit.type == CriterionType.FILE_EXISTS:
+            files_str = crit.path
+            files = [f.strip() for f in files_str.split(",")] if files_str else (output_artifacts or [])
+            if not files:
+                return True, "No specific files listed", True
+            passed, msg = self._check_files_exist(files, Path(work_dir))
             return passed, msg, True
 
-        if "file" in criterion_lower and "exist" in criterion_lower:
-            passed, msg = self._check_files_exist(criterion_lower, path)
+        if crit.type == CriterionType.COVERAGE:
+            target = int(crit.target) if crit.target else 80
+            passed, msg = self._check_coverage(Path(work_dir), target)
             return passed, msg, True
 
-        if "no_critical" in criterion_lower or "no bug" in criterion_lower:
-            passed, msg = self._check_no_critical_issues(path)
+        if crit.type == CriterionType.NO_CRITICAL:
+            passed, msg = self._check_no_critical(Path(work_dir), output_artifacts)
             return passed, msg, True
 
-        # Unrecognized criterion — return False so the stage is flagged for
-        # manual review. The caller will include this in feedback and mark
-        # the overall result as not fully passed.
+        # CUSTOM + any unknown type → uncheckable
         return False, (
-            f"Criterion '{criterion}' is not automatically checkable. "
-            f"Supported patterns: 'tests pass', 'coverage', 'lint clean', "
-            f"'file exist', 'no_critical'"
+            f"Criterion '{crit.description}' is not automatically checkable. "
+            f"Supported types: tests_pass, lint, file_exists, coverage, no_critical"
         ), False
 
-    def _run_tests(self, path: Path) -> tuple[bool, str]:
+    # ------------------------------------------------------------------
+    # Internal checkers — all return 2-tuple (bool, str)
+    # ------------------------------------------------------------------
+
+    def _run_tests(self, work_dir: Path, test_path: str | None = None) -> tuple[bool, str]:
+        """Run pytest with a fixed command. Never executes arbitrary commands."""
         try:
+            cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+            if test_path:
+                cmd.append(test_path)
             result = subprocess.run(
-                ["python", "-m", "pytest", str(path), "-v", "--tb=short"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                cmd,
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
                 timeout=120,
+                cwd=str(work_dir) if work_dir.is_dir() else None,
             )
             passed = result.returncode == 0
             return passed, "Tests passed" if passed else f"Tests failed:\n{result.stdout[-500:]}"
@@ -143,15 +212,50 @@ class EvaluatorEngine:
         except Exception as e:
             return False, f"Test execution error: {e}"
 
-    def _check_coverage(self, path: Path, target: int) -> tuple[bool, str]:
+    def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
+        """Run flake8/ruff on all targets in a single batch call."""
+        resolved = []
+        for t in targets:
+            p = work_dir / t if (work_dir / t).exists() else Path(t)
+            resolved.append(str(p))
+        if not resolved:
+            return True, "No targets to lint"
         try:
             result = subprocess.run(
-                ["python", "-m", "pytest", str(path), "--cov=.", "--cov-report=term-missing"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=120,
+                ["python", "-m", "flake8"] + resolved + ["--max-line-length=100"],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60,
+            )
+            if result.returncode == 0:
+                return True, "Lint clean"
+            return False, f"Lint issues:\n{result.stdout[:500]}"
+        except FileNotFoundError:
+            try:
+                result = subprocess.run(
+                    ["ruff", "check"] + resolved,
+                    capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=60,
+                )
+                if result.returncode == 0:
+                    return True, "Ruff clean"
+                return False, f"Ruff issues:\n{result.stdout[:500]}"
+            except FileNotFoundError:
+                return False, "No linter available (install flake8 or ruff)"
+        except Exception as e:
+            return False, f"Lint error: {e}"
+
+    def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
+        missing = [f for f in files if not (base / f).exists()]
+        passed = len(missing) == 0
+        return passed, f"Missing: {missing}" if missing else "All required files present"
+
+    def _check_coverage(self, work_dir: Path, target: int) -> tuple[bool, str]:
+        try:
+            result = subprocess.run(
+                ["python", "-m", "pytest", "-v", "--tb=short", "--cov=.", "--cov-report=term-missing"],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=120,
+                cwd=str(work_dir) if work_dir.is_dir() else None,
             )
             for line in result.stdout.split("\n"):
                 if "TOTAL" in line:
@@ -160,66 +264,32 @@ class EvaluatorEngine:
                         cov_str = parts[-1].replace("%", "")
                         try:
                             cov = float(cov_str)
-                            passed = cov >= target
-                            return passed, f"Coverage: {cov}% (target: {target}%)"
+                            return cov >= target, f"Coverage: {cov}% (target: {target}%)"
                         except ValueError:
                             continue
             return False, "Could not parse coverage report"
         except Exception as e:
             return False, f"Coverage check error: {e}"
 
-    def _run_lint(self, path: Path) -> tuple[bool, str]:
-        try:
-            result = subprocess.run(
-                ["python", "-m", "flake8", str(path), "--max-line-length=100"],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-            )
-            passed = result.returncode == 0
-            return passed, "Lint clean" if passed else f"Lint issues:\n{result.stdout[:500]}"
-        except FileNotFoundError:
+    def _check_no_critical(self, path: Path, artifacts: list[str] | None = None) -> tuple[bool, str]:
+        targets = artifacts or []
+        if not targets:
+            return True, "No artifacts to check"
+        issues = []
+        for fname in targets:
+            fpath = path / fname
+            if not fpath.exists():
+                continue
             try:
-                result = subprocess.run(
-                    ["ruff", "check", str(path)],
-                    capture_output=True,
-                    text=True,
-                encoding="utf-8",
-                errors="replace",
-                    timeout=60,
-                )
-                passed = result.returncode == 0
-                return passed, "Ruff clean" if passed else f"Ruff issues:\n{result.stdout[:500]}"
-            except FileNotFoundError:
-                return False, "No linter available (install flake8 or ruff)"
-        except Exception as e:
-            return False, f"Lint error: {e}"
-
-    def _check_files_exist(self, criterion: str, path: Path) -> tuple[bool, str]:
-        match = re.search(r"[:\s]+(.+)", criterion)
-        if match:
-            files = [f.strip() for f in match.group(1).split(",")]
-            missing = [f for f in files if not (path / f).exists()]
-            passed = len(missing) == 0
-            return passed, f"Missing: {missing}" if missing else "All required files present"
-        return True, "No specific files listed"
-
-    def _check_no_critical_issues(self, path: Path) -> tuple[bool, str]:
-        try:
-            content = path.read_text(errors="ignore")
-            issues = []
-            for marker in ["TODO", "FIXME", "XXX", "HACK"]:
-                if marker in content:
-                    issues.append(marker)
-            passed = len(issues) == 0
-            return passed, f"Found markers: {issues}" if issues else "No critical markers found"
-        except Exception:
-            return True, "Could not check"
+                content = fpath.read_text(encoding="utf-8", errors="replace")
+                for marker in ["TODO", "FIXME", "XXX", "HACK"]:
+                    if marker in content:
+                        issues.append(f"{fname}: {marker}")
+            except Exception:
+                pass
+        passed = len(issues) == 0
+        return passed, f"Found markers: {issues}" if issues else "No critical markers found"
 
     def _extract_percentage(self, text: str) -> int | None:
         match = re.search(r'(\d+)%', text)
-        if match:
-            return int(match.group(1))
-        return None
+        return int(match.group(1)) if match else None

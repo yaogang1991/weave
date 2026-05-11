@@ -55,6 +55,7 @@ class DAGExecutionEngine:
         max_parallel: int = 5,
         evaluator: Any | None = None,
         artifact_path: str = "./data/artifacts",
+        work_dir: str | None = None,
         job_timeout: float | None = None,
         # M2.0: Watchdog configuration
         heartbeat_interval_sec: float = 30.0,
@@ -74,6 +75,7 @@ class DAGExecutionEngine:
         self.max_parallel = max_parallel
         self.evaluator = evaluator
         self.artifact_path = artifact_path
+        self.work_dir = work_dir
         self.job_timeout = job_timeout
         self.backoff_base = backoff_base
         self.backoff_cap = backoff_cap
@@ -467,10 +469,16 @@ class DAGExecutionEngine:
             result = await self._execute_with_heartbeat(node, input_artifacts)
 
             # -- Evaluation gate --
+            # Assign output_artifacts BEFORE evaluation so evaluator can use them
+            node.output_artifacts = result.get("artifacts", [])
+
             if self.evaluator and node.success_criteria:
+                eval_work_dir = self.work_dir or self.artifact_path
                 eval_result = await asyncio.to_thread(
                     self.evaluator.evaluate_stage,
                     node_id, node_id, node.success_criteria, self.artifact_path,
+                    work_dir=eval_work_dir,
+                    output_artifacts=node.output_artifacts or None,
                 )
 
                 if not eval_result.passed:

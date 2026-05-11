@@ -11,9 +11,15 @@ nodes:
   - id: generator_fix
     agent_type: generator
     task_description: "Fix the bug identified in the analysis. Make minimal changes to resolve the issue without introducing regressions."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: evaluator
     agent_type: evaluator
     task_description: "Verify the bug fix: run existing tests, check that the original issue is resolved, ensure no regressions."
+    success_criteria:
+      - type: tests_pass
+        description: "tests pass"
 edges:
   - from: planner_analyze
     to: generator_fix

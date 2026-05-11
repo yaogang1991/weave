@@ -11,12 +11,23 @@ nodes:
   - id: generator_auth
     agent_type: generator
     task_description: "Implement {method} authentication: auth middleware, token handling, session management, and protected routes."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: generator_tests
     agent_type: generator
     task_description: "Write tests for the {method} authentication: login flow, token validation, unauthorized access, and edge cases."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: evaluator
     agent_type: evaluator
     task_description: "Evaluate the {method} authentication: run tests, check for security vulnerabilities, verify auth flows."
+    success_criteria:
+      - type: tests_pass
+        description: "tests pass"
+      - type: no_critical
+        description: "no critical markers"
 edges:
   - from: planner
     to: generator_auth

@@ -936,6 +936,7 @@ class RunService:
             max_parallel=self.max_parallel,
             evaluator=evaluator,
             artifact_path=self.artifact_path,
+            work_dir=str(work_dir) if work_dir else None,
             memory_manager=memory_manager,
             session_id=session_id,
         )

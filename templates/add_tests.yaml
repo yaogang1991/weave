@@ -8,9 +8,18 @@ nodes:
   - id: generator_tests
     agent_type: generator
     task_description: "Write comprehensive tests for {target}. Cover unit tests, edge cases, and integration scenarios."
+    success_criteria:
+      - type: lint
+        description: "lint clean"
   - id: evaluator
     agent_type: evaluator
     task_description: "Run the tests for {target} and evaluate coverage and quality."
+    success_criteria:
+      - type: tests_pass
+        description: "tests pass"
+      - type: coverage
+        target: 80
+        description: "coverage 80%"
 edges:
   - from: generator_tests
     to: evaluator

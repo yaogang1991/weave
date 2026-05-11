@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from core.models import DAG, DAGEdge, DAGNode, DAGTemplate
+from core.models import DAG, DAGEdge, DAGNode, DAGTemplate, SuccessCriterion
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,14 @@ class TemplateRegistry:
                 text_fields.append(node.agent_type)
             # Scan success_criteria and other list fields
             for sc in (node.success_criteria or []):
-                if isinstance(sc, str):
+                if isinstance(sc, SuccessCriterion):
+                    if sc.description:
+                        text_fields.append(sc.description)
+                    if sc.test_path:
+                        text_fields.append(sc.test_path)
+                    if sc.path:
+                        text_fields.append(sc.path)
+                elif isinstance(sc, str):
                     text_fields.append(sc)
         text_fields.append(dag.reasoning or "")
 

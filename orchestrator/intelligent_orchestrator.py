@@ -74,13 +74,19 @@ Return a JSON object with this exact structure:
       "id": "impl",
       "agent_type": "generator",
       "task": "Implement the planned feature following project conventions...",
-      "success_criteria": ["tests pass", "lint clean"]
+      "success_criteria": [
+        {{"type": "tests_pass", "description": "tests pass"}},
+        {{"type": "lint", "description": "lint clean"}}
+      ]
     }},
     {{
       "id": "eval",
       "agent_type": "evaluator",
       "task": "Verify implementation against plan and project standards...",
-      "success_criteria": ["tests pass", "coverage 80%"]
+      "success_criteria": [
+        {{"type": "tests_pass", "description": "tests pass"}},
+        {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
+      ]
     }}
   ],
   "edges": [
@@ -88,6 +94,17 @@ Return a JSON object with this exact structure:
     {{"from": "impl", "to": "eval"}}
   ]
 }}
+
+## Success Criteria Types
+
+Each success_criteria entry should be a structured object with a "type" field:
+- **tests_pass**: {{"type": "tests_pass", "description": "tests pass"}} — runs pytest
+- **lint**: {{"type": "lint", "description": "lint clean"}} — runs flake8/ruff
+- **file_exists**: {{"type": "file_exists", "path": "src/foo.py", "description": "file exists"}}
+- **coverage**: {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
+- **no_critical**: {{"type": "no_critical", "description": "no critical markers"}}
+
+For simple cases you MAY use plain strings like "tests pass" or "lint clean" — these will be auto-parsed — but structured objects are preferred for reliability.
 
 ## Important
 - Node IDs must be unique and descriptive (e.g., "plan", "impl_api", "eval")
@@ -175,13 +192,19 @@ Return a JSON object with this exact structure:
       "id": "impl_fix",
       "agent_type": "generator",
       "task": "Implement the corrected plan...",
-      "success_criteria": ["tests pass", "lint clean"]
+      "success_criteria": [
+        {{"type": "tests_pass", "description": "tests pass"}},
+        {{"type": "lint", "description": "lint clean"}}
+      ]
     }},
     {{
       "id": "eval_fix",
       "agent_type": "evaluator",
       "task": "Verify the corrected implementation...",
-      "success_criteria": ["tests pass", "coverage 80%"]
+      "success_criteria": [
+        {{"type": "tests_pass", "description": "tests pass"}},
+        {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
+      ]
     }}
   ],
   "edges": [
