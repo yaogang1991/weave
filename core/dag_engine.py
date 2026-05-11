@@ -13,6 +13,8 @@ Key design decisions:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import functools
 import logging
 import os
 import traceback
@@ -91,6 +93,12 @@ class DAGExecutionEngine:
         # M3.2: Memory integration
         self.memory_manager = memory_manager
         self._session_id = session_id
+        # Dedicated thread pool for evaluator calls — avoids global pool
+        # join timeout warnings on event loop exit.
+        self._executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max_parallel,
+            thread_name_prefix="dag-engine",
+        )
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -413,6 +421,8 @@ class DAGExecutionEngine:
             self._stop_watchdog()
             self._running_nodes = {}
             self._running_tasks = {}
+            # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
+            self._executor.shutdown(wait=False)
 
     def _find_evaluator_target(self, dag: DAG, eval_node_id: str) -> str | None:
         """
@@ -491,11 +501,14 @@ class DAGExecutionEngine:
 
             if self.evaluator and node.success_criteria:
                 eval_work_dir = self.work_dir or os.getcwd()
-                eval_result = await asyncio.to_thread(
-                    self.evaluator.evaluate_stage,
-                    node_id, node_id, node.success_criteria, self.artifact_path,
-                    work_dir=eval_work_dir,
-                    output_artifacts=node.output_artifacts or None,
+                eval_result = await asyncio.get_running_loop().run_in_executor(
+                    self._executor,
+                    functools.partial(
+                        self.evaluator.evaluate_stage,
+                        node_id, node_id, node.success_criteria, self.artifact_path,
+                        work_dir=eval_work_dir,
+                        output_artifacts=node.output_artifacts or None,
+                    ),
                 )
 
                 if not eval_result.passed:
