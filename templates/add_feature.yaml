@@ -18,8 +18,7 @@ nodes:
     agent_type: evaluator
     task_description: "Evaluate the implementation of {feature}: run tests, check code quality, verify requirements."
     success_criteria:
-      - type: command
-        command: "python -m pytest -v --tb=short"
+      - type: tests_pass
         description: "tests pass"
 edges:
   - from: planner

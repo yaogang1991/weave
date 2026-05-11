@@ -67,7 +67,7 @@ class EvaluationResult(BaseModel):
 
 class CriterionType(str, Enum):
     """Structured criterion types for evaluator dispatch."""
-    COMMAND = "command"
+    TESTS_PASS = "tests_pass"
     LINT = "lint"
     FILE_EXISTS = "file_exists"
     COVERAGE = "coverage"
@@ -78,7 +78,7 @@ class CriterionType(str, Enum):
 class SuccessCriterion(BaseModel):
     """Structured success criterion for evaluation."""
     type: CriterionType = CriterionType.CUSTOM
-    command: str = ""
+    test_path: str = ""
     path: str = ""
     target: float | None = None
     description: str = ""
@@ -107,8 +107,8 @@ class DAGNode(BaseModel):
     def _normalize_criteria(cls, v: list) -> list:
         """Accept list[str], list[dict], or list[SuccessCriterion].
 
-        Dicts with a 'type' key are parsed into SuccessCriterion objects.
-        Strings and SuccessCriterion instances are preserved as-is.
+        Dicts with a recognized 'type' key are parsed into SuccessCriterion.
+        Unrecognized types (e.g. legacy "command") are downgraded to CUSTOM.
         JSON strings that look like structured criteria are also parsed
         for backward compatibility with previously serialized data.
         """
@@ -117,17 +117,16 @@ class DAGNode(BaseModel):
             if isinstance(item, SuccessCriterion):
                 result.append(item)
             elif isinstance(item, dict) and "type" in item:
-                result.append(SuccessCriterion(**item))
+                result.append(cls._safe_parse_criterion(item))
             elif isinstance(item, str):
-                # Backward compatibility: parse JSON strings from serialized data
                 if item.startswith("{"):
                     try:
-                        import json
-                        data = json.loads(item)
+                        import json as _json
+                        data = _json.loads(item)
                         if isinstance(data, dict) and "type" in data:
-                            result.append(SuccessCriterion(**data))
+                            result.append(cls._safe_parse_criterion(data))
                             continue
-                    except (json.JSONDecodeError, Exception):
+                    except (_json.JSONDecodeError, Exception):
                         pass
                 result.append(item)
             elif isinstance(item, dict):
@@ -135,6 +134,16 @@ class DAGNode(BaseModel):
             else:
                 result.append(str(item))
         return result
+
+    @staticmethod
+    def _safe_parse_criterion(data: dict) -> SuccessCriterion:
+        """Parse dict into SuccessCriterion, downgrading unknown types to CUSTOM."""
+        try:
+            return SuccessCriterion(**data)
+        except Exception:
+            safe = {k: v for k, v in data.items() if k in ("description", "path", "target", "test_path")}
+            safe["type"] = "custom"
+            return SuccessCriterion(**safe)
 
     # M2.0: Heartbeat fields
     health_status: NodeHealth = NodeHealth.HEALTHY  # Current health

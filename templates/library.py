@@ -157,8 +157,8 @@ class TemplateRegistry:
                 if isinstance(sc, SuccessCriterion):
                     if sc.description:
                         text_fields.append(sc.description)
-                    if sc.command:
-                        text_fields.append(sc.command)
+                    if sc.test_path:
+                        text_fields.append(sc.test_path)
                     if sc.path:
                         text_fields.append(sc.path)
                 elif isinstance(sc, str):

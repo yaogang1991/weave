@@ -24,8 +24,7 @@ nodes:
     agent_type: evaluator
     task_description: "Evaluate the {method} authentication: run tests, check for security vulnerabilities, verify auth flows."
     success_criteria:
-      - type: command
-        command: "python -m pytest -v --tb=short"
+      - type: tests_pass
         description: "tests pass"
       - type: no_critical
         description: "no critical markers"

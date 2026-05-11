@@ -35,16 +35,30 @@ class TestCriterionChecking:
         assert evaluator._extract_percentage("need 95% coverage") == 95
 
     @patch("evaluator.engine.subprocess.run")
-    def test_command_pass(self, mock_run, evaluator, tmp_path):
+    def test_tests_pass(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="2 passed")
-        passed, msg = evaluator._run_command("echo ok", tmp_path)
+        passed, msg = evaluator._run_tests(tmp_path)
         assert passed
+        assert "passed" in msg.lower()
 
     @patch("evaluator.engine.subprocess.run")
-    def test_command_fail(self, mock_run, evaluator, tmp_path):
+    def test_tests_fail(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=1, stdout="1 failed")
-        passed, msg = evaluator._run_command("echo fail", tmp_path)
+        passed, msg = evaluator._run_tests(tmp_path)
         assert not passed
+
+    def test_tests_pass_uses_shell_false(self, evaluator, tmp_path):
+        """Verify _run_tests never uses shell=True."""
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="ok")
+            evaluator._run_tests(tmp_path)
+            _, kwargs = mock_run.call_args
+            assert kwargs.get("shell") is not True
+            # Verify fixed command
+            args = mock_run.call_args[0][0]
+            assert args[0] == "python"
+            assert args[1] == "-m"
+            assert args[2] == "pytest"
 
     @patch("evaluator.engine.subprocess.run")
     def test_lint_clean(self, mock_run, evaluator, tmp_path):
@@ -58,6 +72,15 @@ class TestCriterionChecking:
         passed, msg = evaluator._run_lint(["."], tmp_path)
         assert not passed
         assert "issues" in msg.lower()
+
+    def test_lint_uses_shell_false(self, evaluator, tmp_path):
+        """Verify _run_lint never uses shell=True."""
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            evaluator._run_lint(["."], tmp_path)
+            args = mock_run.call_args[0][0]
+            assert isinstance(args, list)
+            assert args[0] == "python"
 
     def test_check_files_missing(self, evaluator, tmp_path):
         passed, msg = evaluator._check_files_exist(["missing.py"], tmp_path)
@@ -113,3 +136,11 @@ class TestEvaluateStage:
         sc = SuccessCriterion(type=CriterionType.FILE_EXISTS, path="hello.py", description="file")
         result = evaluator.evaluate_stage("s1", "impl", [sc], str(tmp_path))
         assert result.passed
+
+    def test_command_type_rejected_as_uncheckable(self, evaluator, tmp_path):
+        """COMMAND type should be treated as CUSTOM/uncheckable, never executed."""
+        # Simulate a node created with a command criterion that got downgraded to CUSTOM
+        node = SuccessCriterion(type=CriterionType.CUSTOM, description="danger")
+        result = evaluator.evaluate_stage("s1", "impl", [node], str(tmp_path))
+        assert not result.passed
+        assert "not automatically checkable" in result.feedback

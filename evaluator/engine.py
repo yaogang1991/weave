@@ -5,6 +5,9 @@ Supports both legacy list[str] criteria and structured SuccessCriterion.
 All internal checkers return 2-tuples (bool, str) for consistency.
 The public _check_criterion returns 3-tuples (bool, str, bool) for the
 was_auto_checked protocol used by evaluate_stage.
+
+Security: never executes arbitrary commands from LLM output. TESTS_PASS
+runs a fixed ``python -m pytest`` via subprocess with shell=False.
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ class EvaluatorEngine:
     """
     Evaluates code against predefined success criteria.
 
-    Supports: command execution, lint checks, coverage, file existence,
+    Supports: test execution, lint checks, coverage, file existence,
     no-critical-issues check. Accepts list[str] (legacy) and
     list[SuccessCriterion] (structured).
     """
@@ -62,7 +65,7 @@ class EvaluatorEngine:
 
         for crit in structured:
             passed, msg, auto = self._check_criterion(crit, eval_dir, output_artifacts)
-            label = crit.description or crit.command or crit.path or crit.type.value
+            label = crit.description or crit.path or crit.test_path or crit.type.value
             results[label] = passed
             if passed:
                 score += 10.0 / max(len(structured), 1)
@@ -117,7 +120,6 @@ class EvaluatorEngine:
             if isinstance(c, SuccessCriterion):
                 result.append(c)
                 continue
-            # Try structured JSON first (backward compat with previously serialized data)
             if isinstance(c, str) and c.startswith("{"):
                 try:
                     data = json.loads(c)
@@ -132,7 +134,7 @@ class EvaluatorEngine:
     def _parse_string_criterion(self, criterion: str) -> SuccessCriterion:
         lower = criterion.lower()
         if "test" in lower and "pass" in lower:
-            return SuccessCriterion(type=CriterionType.COMMAND, command="python -m pytest -v --tb=short", description=criterion)
+            return SuccessCriterion(type=CriterionType.TESTS_PASS, description=criterion)
         if "coverage" in lower:
             return SuccessCriterion(type=CriterionType.COVERAGE, target=float(self._extract_percentage(lower) or 80), description=criterion)
         if "lint" in lower or "clean" in lower:
@@ -154,9 +156,8 @@ class EvaluatorEngine:
         work_dir: str,
         output_artifacts: list[str] | None = None,
     ) -> tuple[bool, str, bool]:
-        if crit.type == CriterionType.COMMAND:
-            cmd = crit.command or "python -m pytest -v --tb=short"
-            passed, msg = self._run_command(cmd, Path(work_dir))
+        if crit.type == CriterionType.TESTS_PASS:
+            passed, msg = self._run_tests(Path(work_dir), crit.test_path or None)
             return passed, msg, True
 
         if crit.type == CriterionType.LINT:
@@ -181,52 +182,67 @@ class EvaluatorEngine:
             passed, msg = self._check_no_critical(Path(work_dir), output_artifacts)
             return passed, msg, True
 
+        # CUSTOM + any unknown type → uncheckable
         return False, (
             f"Criterion '{crit.description}' is not automatically checkable. "
-            f"Supported types: command, lint, file_exists, coverage, no_critical"
+            f"Supported types: tests_pass, lint, file_exists, coverage, no_critical"
         ), False
 
     # ------------------------------------------------------------------
     # Internal checkers — all return 2-tuple (bool, str)
     # ------------------------------------------------------------------
 
-    def _run_command(self, command: str, cwd: Path) -> tuple[bool, str]:
+    def _run_tests(self, work_dir: Path, test_path: str | None = None) -> tuple[bool, str]:
+        """Run pytest with a fixed command. Never executes arbitrary commands."""
         try:
+            cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+            if test_path:
+                cmd.append(test_path)
             result = subprocess.run(
-                command, shell=True, capture_output=True, text=True,
+                cmd,
+                capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
-                timeout=120, cwd=str(cwd) if cwd.is_dir() else None,
+                timeout=120,
+                cwd=str(work_dir) if work_dir.is_dir() else None,
             )
             passed = result.returncode == 0
-            return passed, "Command passed" if passed else f"Command failed:\n{result.stdout[-500:]}"
+            return passed, "Tests passed" if passed else f"Tests failed:\n{result.stdout[-500:]}"
+        except FileNotFoundError:
+            return False, "pytest not installed"
         except Exception as e:
-            return False, f"Command execution error: {e}"
+            return False, f"Test execution error: {e}"
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        for target in targets:
-            target_path = work_dir / target if (work_dir / target).exists() else Path(target)
+        """Run flake8/ruff on all targets in a single batch call."""
+        resolved = []
+        for t in targets:
+            p = work_dir / t if (work_dir / t).exists() else Path(t)
+            resolved.append(str(p))
+        if not resolved:
+            return True, "No targets to lint"
+        try:
+            result = subprocess.run(
+                ["python", "-m", "flake8"] + resolved + ["--max-line-length=100"],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60,
+            )
+            if result.returncode == 0:
+                return True, "Lint clean"
+            return False, f"Lint issues:\n{result.stdout[:500]}"
+        except FileNotFoundError:
             try:
                 result = subprocess.run(
-                    ["python", "-m", "flake8", str(target_path), "--max-line-length=100"],
+                    ["ruff", "check"] + resolved,
                     capture_output=True, text=True,
                     encoding="utf-8", errors="replace", timeout=60,
                 )
-                if result.returncode != 0:
-                    return False, f"Lint issues in {target}:\n{result.stdout[:500]}"
+                if result.returncode == 0:
+                    return True, "Ruff clean"
+                return False, f"Ruff issues:\n{result.stdout[:500]}"
             except FileNotFoundError:
-                try:
-                    result = subprocess.run(
-                        ["ruff", "check", str(target_path)],
-                        capture_output=True, text=True,
-                        encoding="utf-8", errors="replace", timeout=60,
-                    )
-                    if result.returncode != 0:
-                        return False, f"Ruff issues in {target}:\n{result.stdout[:500]}"
-                except FileNotFoundError:
-                    return False, "No linter available (install flake8 or ruff)"
-            except Exception as e:
-                return False, f"Lint error: {e}"
-        return True, "Lint clean"
+                return False, "No linter available (install flake8 or ruff)"
+        except Exception as e:
+            return False, f"Lint error: {e}"
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
         missing = [f for f in files if not (base / f).exists()]
