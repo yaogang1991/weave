@@ -498,6 +498,7 @@ class DAGExecutionEngine:
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
             node.output_artifacts = result.get("artifacts", [])
+            logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
 
             if self.evaluator and node.success_criteria and node.agent_type == "generator":
                 eval_work_dir = self.work_dir or os.getcwd()

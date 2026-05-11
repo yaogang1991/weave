@@ -390,33 +390,34 @@ class AgentPool:
         )
 
     def get_or_create(self, agent_type: str) -> WorkerAgent:
-        """Get or create a WorkerAgent instance for the given type."""
-        if agent_type not in self._instances:
-            capability = self.agent_registry.get(agent_type)
-            if not capability:
-                raise ValueError(f"Unknown agent type: {agent_type}")
+        """Create a fresh WorkerAgent instance for the given type.
 
-            # Use router for per-agent-type model selection if available
-            if self.llm_router:
-                llm_config = self.llm_router.get_client(agent_type).config
-            else:
-                llm_config = self.llm_config
+        Always creates a new instance to prevent concurrent context pollution
+        when multiple nodes of the same agent_type execute in parallel.
+        """
+        capability = self.agent_registry.get(agent_type)
+        if not capability:
+            raise ValueError(f"Unknown agent type: {agent_type}")
 
-            self._instances[agent_type] = WorkerAgent(
-                capability=capability,
-                llm_config=llm_config,
-                session_store=self.session_store,
-                tool_registry=self.tool_registry,
-                guardrails=self.guardrails,
-                max_iterations=self.max_iterations,
-                timeout=self.timeout,
-                max_context_tokens=self.max_context_tokens,
-                memory_manager=self.memory_manager,
-                job_id=self.job_id,
-                approval_repo=self.approval_repo,
-            )
+        # Use router for per-agent-type model selection if available
+        if self.llm_router:
+            llm_config = self.llm_router.get_client(agent_type).config
+        else:
+            llm_config = self.llm_config
 
-        return self._instances[agent_type]
+        return WorkerAgent(
+            capability=capability,
+            llm_config=llm_config,
+            session_store=self.session_store,
+            tool_registry=self.tool_registry,
+            guardrails=self.guardrails,
+            max_iterations=self.max_iterations,
+            timeout=self.timeout,
+            max_context_tokens=self.max_context_tokens,
+            memory_manager=self.memory_manager,
+            job_id=self.job_id,
+            approval_repo=self.approval_repo,
+        )
 
     def get_executor(self, session_id: str):
         """
