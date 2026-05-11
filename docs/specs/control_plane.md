@@ -19,6 +19,7 @@ Sources: `control_plane/models.py`, `control_plane/repository.py`, `control_plan
 | `QUEUED` | Waiting to be leased. |
 | `LEASED` | Acquired by a worker, not yet running. |
 | `RUNNING` | Worker is actively executing. |
+| `PENDING_APPROVAL` | Paused awaiting human approval. |
 | `SUCCEEDED` | Terminal: completed successfully. |
 | `FAILED` | Terminal (possibly retried). |
 | `CANCELED` | Terminal: cancelled by user. |
@@ -29,6 +30,7 @@ Sources: `control_plane/models.py`, `control_plane/repository.py`, `control_plan
 | Value | Description |
 |---|---|
 | `RUNNING` | Execution in progress. |
+| `PENDING_APPROVAL` | Paused for human approval. |
 | `SUCCEEDED` | Completed successfully. |
 | `FAILED` | Execution failed. |
 | `ABORTED` | Aborted (e.g., approval rejected). |
@@ -239,10 +241,11 @@ class RunService:
 
 **Internal methods:**
 - `async _execute_plan_and_run(job, session_id, store, work_dir, run_id=None) -> Any`
-- `_register_hooks() -> list[ExecutionHook]`
-- `_create_orchestrator(store, hooks) -> IntelligentOrchestrator`
+- `_register_hooks() -> None`
+- `_create_orchestrator(store) -> IntelligentOrchestrator`
 - `_create_execution_engine(session_id, store, replan_handler, work_dir, memory_manager) -> DAGExecutionEngine`
-- `async _run_hooks(method_name, context, *args) -> None`
+- `async _run_before_hooks(ctx) -> None`
+- `async _run_after_hooks(ctx, result_dag) -> None`
 
 ---
 
@@ -316,8 +319,8 @@ Constructor: `ImpactHook(llm_config: Any | None = None)`
 #### Hook Registration (in RunService)
 
 ```python
-def _register_hooks(self) -> list[ExecutionHook]:
-    return [
+def _register_hooks(self) -> None:
+    self._hooks = [
         MemoryHook(),                            # Must run first (sets ctx.memory_manager)
         LearningHook(repository=self.repository), # DI: repository
         ImpactHook(llm_config=self.llm_config),  # DI: llm_config

@@ -519,8 +519,8 @@ class MyCustomHook(ExecutionHook):
 Edit `control_plane/service.py` in `_register_hooks()`:
 
 ```python
-def _register_hooks(self) -> list[ExecutionHook]:
-    return [
+def _register_hooks(self) -> None:
+    self._hooks = [
         MemoryHook(),                            # Must be first
         LearningHook(repository=self.repository),
         ImpactHook(llm_config=self.llm_config),
