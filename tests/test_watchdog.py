@@ -141,44 +141,48 @@ class TestNodeHealth:
 
 class TestWatchdog:
     @pytest.mark.asyncio
-    async def test_slow_async_task_not_killed(self):
-        """慢但活跃的 async 任务不应被 watchdog 杀死.
-
-        _execute_with_heartbeat 在 poll timeout 时会记录 heartbeat，
-        所以 async 层面活跃的任务（如 asyncio.sleep）对 watchdog 是健康的。
-        这是正确行为：async 层面无法区分"慢任务"和"卡死任务"。
-        """
-
-        async def slow_executor(node, artifacts):
-            # 慢但 async 层面仍然活跃
-            await asyncio.sleep(0.5)
-            return {"summary": "ok"}
+    async def test_watchdog_kills_hanging_node(self):
+        """挂起节点应在阈值内被 watchdog 杀死"""
 
         async def mock_failure_handler(dag, node_id, error):
             from core.models import FailureDecision
             return FailureDecision(action="abort")
 
-        eng = DAGExecutionEngine(
-            agent_executor=slow_executor,
+        engine = DAGExecutionEngine(
+            agent_executor=None,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=0.1,
+            heartbeat_interval_sec=0.05,
             heartbeat_miss_threshold=2,
             enable_watchdog=True,
         )
 
+        async def hanging_executor(node, artifacts):
+            # 不发送 heartbeat，模拟挂起
+            await asyncio.sleep(10)
+
+        engine.agent_executor = hanging_executor
+
+        # Override _execute_with_heartbeat to NOT record automatic heartbeats.
+        # This simulates a truly hung process where the event loop is blocked
+        # and cannot record progress heartbeats.
+        async def no_heartbeat_wrapper(node, input_artifacts):
+            return await engine.agent_executor(node, input_artifacts)
+        engine._execute_with_heartbeat = no_heartbeat_wrapper
+
         dag = DAG(
             nodes={
                 "n1": DAGNode(
-                    id="n1", agent_type="test", task_description="slow task"
+                    id="n1", agent_type="test", task_description="hang test"
                 )
             }
         )
 
-        result_dag = await eng.execute(dag)
+        result_dag = await engine.execute(dag)
 
-        # Node should succeed (not killed by watchdog)
-        assert result_dag.nodes["n1"].status == NodeStatus.SUCCESS
-        assert result_dag.nodes["n1"].health_status == NodeHealth.HEALTHY
+        # Node should be FAILED (killed by watchdog)
+        assert result_dag.nodes["n1"].status == NodeStatus.FAILED
+        assert result_dag.nodes["n1"].health_status == NodeHealth.DEAD
+        assert "watchdog" in result_dag.nodes["n1"].error.lower()
 
     @pytest.mark.asyncio
     async def test_healthy_node_not_killed(self):
@@ -396,6 +400,7 @@ class TestHeartbeatRecord:
         assert node.last_heartbeat_at.tzinfo is not None
 
 
+
 # ---------------------------------------------------------------------------
 # TestHealthEventChain -- M2-A 验收: 完整事件链
 # ---------------------------------------------------------------------------
@@ -552,3 +557,4 @@ class TestHealthEventChain:
         ]
         assert len(decision_events) >= 1
         assert decision_events[0].details["action"] == "skip"
+

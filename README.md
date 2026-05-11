@@ -32,6 +32,11 @@ Based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/manage
 |  |   Sandbox   |  |   Git       |  |     Reporter        |      |
 |  +-------------+  +-------------+  +---------------------+      |
 +------------------------------------------------------------------+
+|  +-------------+  +-------------+  +---------------------+      |
+|  |   Memory    |  |  Learning   |  |  Impact Analysis    |      |
+|  |  (M3.2)     |  |  (M3.3)     |  |  (M3.5)             |      |
+|  +-------------+  +-------------+  +---------------------+      |
++------------------------------------------------------------------+
 ```
 
 ## M1 Personal Mode Guide
@@ -80,6 +85,19 @@ python main.py cancel job_abc123
 | `reject <ticket_id> [--reason ...]` | Reject ticket |
 | `plan "<requirement>"` | Generate execution plan (no execution) |
 | `run "<requirement>"` | One-command plan + execute |
+| `run "..." --template build_api --var feature=Todo` | Run from template (M3.4) |
+| `templates [--name NAME]` | List/show DAG templates (M3.4) |
+| `memory-search "query"` | Search agent memory (M3.2) |
+| `memory-list [--agent TYPE]` | List memory entries (M3.2) |
+| `memory-stats` | Memory system statistics (M3.2) |
+| `memory-add "content" --type fact --scope global` | Add memory manually (M3.2) |
+| `memory-cleanup` | Run memory maintenance (M3.2) |
+| `learning-analyze` | Trigger learning analysis (M3.3) |
+| `learning-insights [--limit N]` | List learning insights (M3.3) |
+| `learning-status` | Learning system status (M3.3) |
+| `impact-predict "requirement" --project .` | Predict impact (M3.5) |
+| `impact-graph --project .` | Show dependency graph (M3.5) |
+| `impact-history [--limit N]` | Past predictions (M3.5) |
 
 ### Approval Workflow (High-Risk Operations)
 
@@ -139,12 +157,78 @@ python main.py tickets --status pending
 - **Metrics & Alerts**: Auto-collect success rate, duration, and other metrics
 - **Restart Recovery**: Process interruption can recover to processable state
 
-### Known Limitations (M2 Items)
+### M3 Features
+
+#### Multi-Model Routing (M3.1)
+
+Different agent types can use different LLM models:
+
+```bash
+export HARNESS_PLANNER_MODEL="claude-opus-4-6"
+export HARNESS_GENERATOR_MODEL="gpt-4"
+```
+
+#### Agent Memory (M3.2)
+
+Agents remember facts, experiences, and preferences across tasks:
+
+```bash
+# Search memories
+python main.py memory-search "database schema"
+
+# Add a project convention
+python main.py memory-add "Always use SQLAlchemy async session" --type fact --scope global
+
+# View stats
+python main.py memory-stats
+```
+
+Memories are automatically injected into agent prompts during execution.
+
+#### Self-Learning (M3.3)
+
+The system learns from execution history to improve planning:
+
+```bash
+# Trigger analysis
+python main.py learning-analyze
+
+# View learned insights
+python main.py learning-insights
+```
+
+Insights are automatically injected into orchestrator planning prompts.
+
+#### DAG Templates (M3.4)
+
+Skip LLM planning for common task patterns:
+
+```bash
+# List templates
+python main.py templates
+
+# Run with template
+python main.py run "Build Todo API" --template build_api --var feature=Todo --var language=Python
+```
+
+#### Impact Analysis (M3.5)
+
+Predict which files a task will affect, verify changes after execution:
+
+```bash
+# Predict impact
+python main.py impact-predict "Refactor the DAG engine" --project .
+
+# View dependency graph
+python main.py impact-graph --project .
+```
+
+### Known Limitations
 
 - Single-user scenario (no multi-tenancy)
 - No persistent database (uses JSON files)
-- No Web UI (CLI only)
 - Single-machine execution (no distribution)
+- Impact analysis only supports Python import resolution
 
 ## Quick Start
 
@@ -212,6 +296,13 @@ Inspired by Anthropic's four-layer security architecture:
 | `evaluator/` | Automated evaluation, test execution |
 | `orchestrator/` | Workflow orchestration, Stage transitions |
 | `reporter/` | Audit logs, report generation |
+| `memory/` | M3.2: Agent memory (store, retrieve, share) |
+| `learning/` | M3.3: Execution pattern analysis and optimization |
+| `templates/` | M3.4: Reusable DAG templates (YAML + variables) |
+| `analysis/` | M3.5: Dependency graph, impact prediction, change verification |
+| `visualizer/` | M2.3: Web console (FastAPI + WebSocket) |
+| `backend/` | M2: Execution backend abstraction (local/worktree) |
+| `control_plane/` | Job queue, worker, approval tickets |
 
 ## Relationship with Anthropic Managed Agents
 

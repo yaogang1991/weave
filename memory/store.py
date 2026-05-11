@@ -25,6 +25,19 @@ from core.models import MemoryEntry, MemoryScope, MemoryType
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_path_component(value: str, name: str) -> str:
+    """Validate a path component to prevent path traversal attacks."""
+    if not value:
+        return value
+    dangerous = ("/", "\\", "..", "\x00")
+    for seq in dangerous:
+        if seq in value:
+            raise ValueError(
+                f"Invalid {name}: contains forbidden sequence '{seq}'"
+            )
+    return value
+
+
 def _json_dump_atomic(data: dict[str, Any], path: Path) -> None:
     """Write *data* to *path* atomically via a temporary file."""
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -52,6 +65,8 @@ class MemoryStore:
 
     def __init__(self, base_path: str = "./data/memory") -> None:
         self.base_path = Path(base_path)
+        self._id_to_path: dict[str, Path] = {}
+        self._index_loaded = False
 
     def _scope_dir(
         self,
@@ -60,6 +75,10 @@ class MemoryStore:
         session_id: str = "",
     ) -> Path:
         """Return the directory for a given scope."""
+        if agent_type:
+            _sanitize_path_component(agent_type, "agent_type")
+        if session_id:
+            _sanitize_path_component(session_id, "session_id")
         if scope == MemoryScope.GLOBAL:
             d = self.base_path / "global"
         elif scope == MemoryScope.PRIVATE:
@@ -71,6 +90,7 @@ class MemoryStore:
 
     def _entry_path(self, entry: MemoryEntry) -> Path:
         """Return the file path for an entry."""
+        _sanitize_path_component(entry.id, "entry.id")
         d = self._scope_dir(
             entry.scope,
             agent_type=entry.agent_type,
@@ -79,25 +99,43 @@ class MemoryStore:
         return d / f"{entry.id}.json"
 
     def _find_entry_path(self, memory_id: str) -> Path | None:
-        """Find an entry file by scanning all scope directories."""
+        """Find an entry file using the in-memory index.
+
+        On cache miss, rebuilds the index once to pick up entries
+        created by external processes since the last scan.
+        """
+        if not self._index_loaded:
+            self._build_index()
+            return self._id_to_path.get(memory_id)
+        result = self._id_to_path.get(memory_id)
+        if result is None:
+            # Cache miss — refresh from disk to catch external writes
+            self._build_index()
+            result = self._id_to_path.get(memory_id)
+        return result
+
+    def _build_index(self) -> None:
+        """Build in-memory index mapping memory_id -> file path."""
+        self._id_to_path.clear()
         if not self.base_path.exists():
-            return None
-        for scope_dir in self.base_path.iterdir():
-            if not scope_dir.is_dir():
+            self._index_loaded = True
+            return
+        for json_file in self.base_path.rglob("*.json"):
+            if json_file.name.endswith(".tmp"):
                 continue
-            if scope_dir.name == "global":
-                p = scope_dir / f"{memory_id}.json"
-                if p.exists():
-                    return p
-            else:
-                # agents/{type}/ or sessions/{id}/
-                for subdir in scope_dir.iterdir():
-                    if not subdir.is_dir():
-                        continue
-                    p = subdir / f"{memory_id}.json"
-                    if p.exists():
-                        return p
-        return None
+            stem = json_file.stem
+            self._id_to_path[stem] = json_file
+        self._index_loaded = True
+
+    def _index_add(self, memory_id: str, path: Path) -> None:
+        """Add or update index entry."""
+        if self._index_loaded:
+            self._id_to_path[memory_id] = path
+
+    def _index_remove(self, memory_id: str) -> None:
+        """Remove index entry."""
+        if self._index_loaded:
+            self._id_to_path.pop(memory_id, None)
 
     def _load_entry(self, path: Path) -> MemoryEntry | None:
         """Load a MemoryEntry from a JSON file."""
@@ -116,6 +154,7 @@ class MemoryStore:
         path = self._entry_path(entry)
         path.parent.mkdir(parents=True, exist_ok=True)
         _json_dump_atomic(entry.model_dump(mode="json"), path)
+        self._index_add(entry.id, path)
         logger.debug(
             "Stored memory entry %s (scope=%s, type=%s)",
             entry.id, entry.scope, entry.memory_type,
@@ -133,12 +172,14 @@ class MemoryStore:
         """Update an existing memory entry."""
         old_path = self._find_entry_path(entry.id)
         new_path = self._entry_path(entry)
+        # Write new file first (atomic), then remove old if scope changed
+        _json_dump_atomic(entry.model_dump(mode="json"), new_path)
+        self._index_add(entry.id, new_path)
         if old_path and old_path != new_path:
             try:
                 old_path.unlink()
             except OSError:
                 pass
-        _json_dump_atomic(entry.model_dump(mode="json"), new_path)
         return entry
 
     def delete(self, memory_id: str) -> bool:
@@ -148,6 +189,7 @@ class MemoryStore:
             return False
         try:
             path.unlink()
+            self._index_remove(memory_id)
             return True
         except OSError:
             return False
@@ -171,7 +213,6 @@ class MemoryStore:
                 scan_dirs = [self.base_path / "agents" / agent_type]
             else:
                 agents_dir = self.base_path / "agents"
-                scan_dirs = ([agents_dir] if agents_dir.exists() else [])
                 # Expand to subdirs
                 if agents_dir.exists():
                     scan_dirs = [d for d in agents_dir.iterdir() if d.is_dir()]
@@ -246,7 +287,7 @@ class MemoryStore:
             overlap = len(query_tokens & (content_tokens | keyword_tokens))
             return overlap
 
-        scored = [(e, score(e)) for e in all_entries if score(e) > 0]
+        scored = [(e, s) for e in all_entries if (s := score(e)) > 0]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [e for e, _ in scored[:limit]]
 
@@ -290,9 +331,10 @@ class MemoryStore:
 
     # -- Maintenance --
 
-    def record_access(self, memory_id: str) -> None:
+    def record_access(self, memory_id: str, entry: MemoryEntry | None = None) -> None:
         """Increment access count and update last_accessed_at."""
-        entry = self.get(memory_id)
+        if entry is None:
+            entry = self.get(memory_id)
         if entry is None:
             return
         entry.access_count += 1
@@ -313,12 +355,12 @@ class MemoryStore:
         return removed
 
     def enforce_limits(self, max_per_agent: int) -> int:
-        """Prune oldest entries when an agent exceeds max_per_agent."""
+        """Prune oldest entries when an agent exceeds max_per_agent across all scopes."""
         pruned = 0
-        # Group by agent_type + scope for counting
+        # Group by agent_type (across all scopes) for counting
         agent_entries: dict[str, list[MemoryEntry]] = {}
         for entry in self.list_entries():
-            key = f"{entry.agent_type}:{entry.scope.value}"
+            key = entry.agent_type
             agent_entries.setdefault(key, []).append(entry)
 
         for key, entries in agent_entries.items():
@@ -344,7 +386,12 @@ class MemoryStore:
             recency = 0.5 ** (days_since / max(half_life_days, 0.001))
             frequency_bonus = 1.0 + min(entry.access_count, 10) * 0.1
             entry.relevance_score = recency * frequency_bonus
-            self.update(entry)
+            # Write directly using known path from index to avoid re-scanning
+            path = self._find_entry_path(entry.id)
+            if path:
+                _json_dump_atomic(entry.model_dump(mode="json"), path)
+            else:
+                self.update(entry)
 
         if all_entries:
             logger.info("Recomputed relevance for %d entries", len(all_entries))

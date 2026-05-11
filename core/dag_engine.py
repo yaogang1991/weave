@@ -294,11 +294,62 @@ class DAGExecutionEngine:
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
                             if backoff > 0:
                                 await asyncio.sleep(backoff)
-                            # Reset status so _execute_single_node will actually run
-                            dag.nodes[failed_id].status = NodeStatus.RETRYING
-                            dag.nodes[failed_id].error = ""
-                            await self._execute_single_node(dag, failed_id)
-                            if dag.nodes[failed_id].status == NodeStatus.FAILED:
+
+                            node = dag.nodes[failed_id]
+
+                            # ── Evaluator feedback loop ──────────────────────────
+                            # If an evaluator fails, retrying the evaluator alone is
+                            # useless — it will just re-run the same broken tests.
+                            # Instead, roll back to the target generator, feed it
+                            # the evaluation feedback, let it fix the code, then
+                            # re-run the evaluator.
+                            if node.agent_type == "evaluator":
+                                target_id = self._find_evaluator_target(dag, failed_id)
+                                if target_id and dag.nodes[target_id].agent_type == "generator":
+                                    # Check retry budget for upstream generator
+                                    gen_node = dag.nodes[target_id]
+                                    if gen_node.retry_count >= gen_node.max_retries:
+                                        # No budget left; retry evaluator directly
+                                        node.status = NodeStatus.RETRYING
+                                        node.error = ""
+                                        await self._execute_single_node(dag, failed_id)
+                                    else:
+                                        await self._emit(ExecutionEvent(
+                                            node_id=target_id,
+                                            event_type="upstream_retry",
+                                            details={
+                                                "reason": "evaluator_failed",
+                                                "evaluator": failed_id,
+                                                "feedback": node.eval_feedback[:200],
+                                            },
+                                        ))
+                                        # Retry generator with feedback.
+                                        # Cap retry_count so _execute_single_node's
+                                        # internal retry loop gives exactly one attempt.
+                                        gen_node.retry_count = gen_node.max_retries - 1
+                                        gen_node.status = NodeStatus.RETRYING
+                                        gen_node.error = ""
+                                        await self._execute_single_node(dag, target_id)
+
+                                        if dag.nodes[target_id].status == NodeStatus.SUCCESS:
+                                            # Re-run evaluator after generator fix
+                                            node.status = NodeStatus.RETRYING
+                                            node.error = ""
+                                            await self._execute_single_node(dag, failed_id)
+                                else:
+                                    # No upstream generator found; retry evaluator directly
+                                    node.status = NodeStatus.RETRYING
+                                    node.error = ""
+                                    await self._execute_single_node(dag, failed_id)
+                            else:
+                                # Normal retry: retry the failed node itself
+                                node.status = NodeStatus.RETRYING
+                                node.error = ""
+                                await self._execute_single_node(dag, failed_id)
+
+                            # Check if retry resolved this failure
+                            if dag.nodes[failed_id].status != NodeStatus.SUCCESS:
+                                # This failure was not resolved
                                 self._skip_remaining(dag, levels, level_idx + 1)
                                 return dag
 
@@ -343,6 +394,40 @@ class DAGExecutionEngine:
             self._stop_watchdog()
             self._running_nodes = {}
             self._running_tasks = {}
+
+    def _find_evaluator_target(self, dag: DAG, eval_node_id: str) -> str | None:
+        """
+        Find the generator node that an evaluator is responsible for assessing.
+
+        Heuristic: look for a generator node that is a direct dependency
+        (i.e. has an edge → evaluator) and whose ID/domain matches the evaluator.
+        """
+        # Candidate 1: direct upstream generator with an edge to the evaluator
+        candidates = [
+            e.from_node for e in dag.edges
+            if e.to_node == eval_node_id
+            and dag.nodes[e.from_node].agent_type == "generator"
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+
+        # Candidate 2: name-based matching among upstream nodes only
+        # (eval_backend ↔ impl_backend / gen_backend)
+        eval_name = eval_node_id.lower().replace("eval_", "")
+        upstream_ids = {e.from_node for e in dag.edges if e.to_node == eval_node_id}
+        for nid in upstream_ids:
+            node = dag.nodes[nid]
+            if node.agent_type != "generator":
+                continue
+            gen_name = nid.lower().replace("impl_", "").replace("gen_", "")
+            if gen_name == eval_name:
+                return nid
+
+        # Candidate 3: any direct upstream generator
+        if candidates:
+            return candidates[0]
+
+        return None
 
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""

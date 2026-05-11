@@ -400,7 +400,7 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
     service = RunService(
         repository=repository,
         llm_config=harness_config.llm,
-        default_backend=harness_config.workspace_isolation,
+        default_backend=harness_config.default_backend,
         backend_base_path=harness_config.backend_base_path,
         approval_repo=approval_repo,
         non_interactive=non_interactive,
@@ -884,8 +884,61 @@ async def cmd_templates(args):
 
 
 # =============================================================================
-# Impact Analysis CLI commands (M3.5) — deferred until analysis/ module lands
+# Impact Analysis CLI commands (M3.5)
 # =============================================================================
+
+
+async def cmd_impact_predict(args):
+    """Predict impact of a change on the project."""
+    from analysis.impact_predictor import ImpactPredictor
+    from core.config import HarnessConfig
+
+    config = HarnessConfig.from_env()
+    project_path = getattr(args, "project", None) or "."
+
+    predictor = ImpactPredictor(
+        memory_manager=None,
+        max_predicted_files=config.impact.max_predicted_files,
+        confidence_threshold=config.impact.confidence_threshold,
+    )
+    result = predictor.predict_static(args.requirement, project_path)
+
+    print(json.dumps(result.model_dump(), indent=2, default=str))
+
+
+async def cmd_impact_graph(args):
+    """Show file dependency graph."""
+    from analysis.dependency_graph import DependencyGraph
+
+    project_path = getattr(args, "project", None) or "."
+
+    graph = DependencyGraph(project_path)
+    graph.build()
+
+    print(json.dumps(graph.to_dict(), indent=2, default=str))
+
+
+async def cmd_impact_history(args):
+    """Show impact analysis history."""
+    import glob as glob_mod
+    from core.config import HarnessConfig
+
+    config = HarnessConfig.from_env()
+    impact_path = config.impact.base_path
+
+    if not os.path.isdir(impact_path):
+        print(json.dumps({"history": [], "count": 0}))
+        return
+
+    records = []
+    for f in sorted(glob_mod.glob(os.path.join(impact_path, "**", "*.json"), recursive=True), reverse=True):
+        try:
+            with open(f) as fh:
+                records.append(json.load(fh))
+        except Exception:
+            pass
+
+    print(json.dumps({"history": records[:50], "count": len(records)}, indent=2, default=str))
 
 
 def main():
@@ -1109,6 +1162,27 @@ Examples:
     templates_parser.add_argument("--name", help="Show details of a specific template")
     templates_parser.set_defaults(func=cmd_templates)
 
+    # impact-predict command
+    impact_predict_parser = subparsers.add_parser(
+        "impact-predict", help="Predict impact of a change"
+    )
+    impact_predict_parser.add_argument("requirement", help="Change requirement text")
+    impact_predict_parser.add_argument("--project", default=".", help="Project path")
+    impact_predict_parser.set_defaults(func=cmd_impact_predict)
+
+    # impact-graph command
+    impact_graph_parser = subparsers.add_parser(
+        "impact-graph", help="Show file dependency graph"
+    )
+    impact_graph_parser.add_argument("--project", default=".", help="Project path")
+    impact_graph_parser.set_defaults(func=cmd_impact_graph)
+
+    # impact-history command
+    impact_history_parser = subparsers.add_parser(
+        "impact-history", help="Show impact analysis history"
+    )
+    impact_history_parser.set_defaults(func=cmd_impact_history)
+
     args = parser.parse_args()
 
     if not args.command:
@@ -1123,6 +1197,7 @@ Examples:
         "memory-add", "memory-cleanup",
         "learning-analyze", "learning-insights", "learning-status",
         "templates",
+        "impact-predict", "impact-graph", "impact-history",
     }
     # Template-based plan doesn't need an LLM key (run still executes agents)
     if args.command == "plan" and getattr(args, "template", None):

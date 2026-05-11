@@ -54,11 +54,13 @@ class LearningOptimizer:
                     memory_type=memory_type,
                     scope=scope,
                     keywords=self._extract_insight_keywords(insight),
+                    metadata={"insight_type": insight.insight_type.value},
                 )
                 entries.append(entry)
-            except ValueError:
-                logger.debug(
-                    "Skipping insight %s: content too long", insight.id,
+            except Exception:
+                logger.warning(
+                    "Skipping insight %s: failed to store", insight.id,
+                    exc_info=True,
                 )
 
         logger.info(
@@ -69,19 +71,39 @@ class LearningOptimizer:
 
     def get_planning_hints(self, requirement: str = "") -> str:
         """Format relevant insights as planning hints for the orchestrator."""
-        # Get GLOBAL insights relevant to planning
+        # Use store search with requirement as query for relevance
+        query = f"planning recommendation {requirement}" if requirement else "planning recommendation"
         memories = self.memory_manager.store.search(
-            query=f"planning recommendation {requirement}",
+            query=query,
             scope=MemoryScope.GLOBAL,
-            limit=5,
+            limit=10,
         )
 
         if not memories:
             return ""
 
+        # Filter to learning-sourced memories
+        learning_memories = [
+            m for m in memories
+            if any(kw in m.keywords for kw in [
+                "recommendation", "anti_pattern", "pattern", "performance",
+            ])
+        ]
+
+        if not learning_memories:
+            return ""
+
+        # Sort by relevance
+        learning_memories.sort(key=lambda m: m.relevance_score, reverse=True)
+        top_memories = learning_memories[:5]
+
         lines = ["## Learned Insights for Planning"]
-        for mem in memories:
-            tag = "AVOID" if "anti_pattern" in str(mem.metadata) else "TIP"
+        for mem in top_memories:
+            is_anti = (
+                mem.metadata.get("insight_type") == "anti_pattern"
+                or "anti_pattern" in mem.keywords
+            )
+            tag = "AVOID" if is_anti else "TIP"
             lines.append(f"- [{tag}] {mem.content}")
 
         return "\n".join(lines) + "\n"

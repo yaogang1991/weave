@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from core.models import DAG, MemoryEntry, MemoryScope, EventType
+from core.models import MemoryEntry, MemoryScope, EventType
 from memory.manager import MemoryManager
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ class MemorySharing:
         from_agent: str,
         to_agent: str,
         session_id: str,
-        dag: DAG,
+        dag: Any,
         node_id: str,
     ) -> list[MemoryEntry]:
         """Share relevant memories from upstream agent to downstream agent.
@@ -102,9 +102,22 @@ class MemorySharing:
         if original.scope == MemoryScope.SESSION:
             return original
 
+        # Check for existing session-scoped copy with same content+agent+type
+        existing = self.manager.store.list_entries(
+            scope=MemoryScope.SESSION,
+            session_id=session_id,
+        )
+        agent = target_agent or original.agent_type
+        for e in existing:
+            if (e.content == original.content
+                    and e.agent_type == agent
+                    and e.source_node_id == original.source_node_id
+                    and e.memory_type == original.memory_type):
+                return e
+
         # Create new entry in SESSION scope
         return self.manager.store_learning(
-            agent_type=target_agent or original.agent_type,
+            agent_type=agent,
             content=original.content,
             memory_type=original.memory_type,
             scope=MemoryScope.SESSION,
@@ -124,6 +137,17 @@ class MemorySharing:
 
         if original.scope == MemoryScope.GLOBAL:
             return original
+
+        # Check for existing global copy with same content+agent+type
+        existing = self.manager.store.list_entries(
+            scope=MemoryScope.GLOBAL,
+        )
+        for e in existing:
+            if (e.content == original.content
+                    and e.agent_type == original.agent_type
+                    and e.source_node_id == original.source_node_id
+                    and e.memory_type == original.memory_type):
+                return e
 
         return self.manager.store_learning(
             agent_type=original.agent_type,

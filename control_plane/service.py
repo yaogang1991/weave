@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 import traceback
 import uuid
@@ -43,6 +44,8 @@ from evaluator.engine import EvaluatorEngine
 
 from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
 from control_plane.repository import JobRepository
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================================
@@ -120,6 +123,15 @@ class RunService:
         self.approval_repo = approval_repo
         self.approval_timeout_sec = approval_timeout_sec
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
+
+        # Shared subsystems (initialized once, safe for concurrent jobs)
+        self._subsystems_initialized = False
+        self._memory_manager = None
+        self._learning_scheduler = None
+        self._learning_optimizer = None
+        self._impact_predictor = None
+        self._change_verifier = None
+        self._impact_coverage_threshold = 0.7
 
         # M2.1/M2.2: Backend manager for isolated execution
         from backend.lifecycle import BackendManager
@@ -205,14 +217,21 @@ class RunService:
             # M2.2: Build BackendManager per-job so repo_root matches project_path
             project_root = Path(job.project_path).resolve() if job.project_path else Path.cwd().resolve()
             from backend.lifecycle import BackendManager
+            from backend.base import WorkspaceIsolation, ExecutionSandbox
             from core.config import HarnessConfig
             harness_config = HarnessConfig.from_env()
+            # Select sandbox: use config value, but fall back to LOCAL if unavailable
+            sandbox_type = ExecutionSandbox(
+                harness_config.sandbox.runtime
+                if harness_config.sandbox.runtime in ("local", "docker")
+                else "local"
+            )
             backend_manager = BackendManager(
-                workspace=harness_config.workspace_isolation,
-                sandbox=harness_config.execution_sandbox,
+                workspace=WorkspaceIsolation(harness_config.default_backend),
+                sandbox=sandbox_type,
                 repo_root=str(project_root),
                 base_path=self.backend_base_path,
-                workspace_by_risk=harness_config.workspace_isolation_by_risk,
+                workspace_by_risk=harness_config.risk_backend_map,
                 cleanup_policy=harness_config.cleanup_policy,
             )
             work_dir = backend_manager.setup(
@@ -702,6 +721,27 @@ class RunService:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _ensure_subsystems(self) -> None:
+        """One-time init of shared memory/learning/impact subsystems.
+
+        Called lazily on first use. Flag is set AFTER successful init
+        so transient failures can be retried on the next job.
+        """
+        if self._subsystems_initialized:
+            return
+        try:
+            from core.config import HarnessConfig
+            from memory.manager import MemoryManager
+            config = HarnessConfig.from_env()
+            if config.memory.enabled:
+                self._memory_manager = MemoryManager(config=config.memory)
+                self._memory_manager.run_maintenance()
+        except Exception as exc:
+            logger.debug("Memory manager init skipped: %s", exc)
+        self._init_learning_system()
+        self._init_impact_analyzer()
+        self._subsystems_initialized = True
+
     async def _execute_plan_and_run(
         self,
         job: Job,
@@ -725,6 +765,33 @@ class RunService:
             except Exception:
                 pass
 
+        # M3.5: Pre-execution impact prediction
+        impact_scope = None
+        before_snapshot = None
+        # Use canonical project root for prediction (not ephemeral work_dir)
+        # so historical lookups match across runs with different worktree paths.
+        impact_project_path = (
+            job.project_path
+            if job.project_path
+            else str(work_dir)
+        )
+        if getattr(self, "_impact_predictor", None) and work_dir:
+            try:
+                impact_scope = await self._impact_predictor.predict(
+                    requirement=job.requirement,
+                    project_path=impact_project_path,
+                )
+                from analysis.change_verifier import ChangeVerifier
+                verifier = ChangeVerifier(
+                    project_path=str(work_dir),
+                )
+                before_snapshot = verifier.capture_snapshot()
+                job.metadata["impact_scope_id"] = impact_scope.id
+                job.metadata["predicted_files"] = impact_scope.predicted_files
+                self.repository.update_job(job)
+            except Exception:
+                pass  # Impact prediction must not block execution
+
         # 1. Create orchestrator and plan DAG
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
@@ -747,6 +814,80 @@ class RunService:
             run_id=run_id,
         )
         result_dag = await engine.execute(dag)
+
+        # M3.5: Post-execution change verification
+        if impact_scope and work_dir:
+            try:
+                from analysis.change_verifier import ChangeVerifier
+                from core.models import MemoryType, MemoryScope
+                # Skip verification if baseline snapshot capture failed
+                if before_snapshot is None:
+                    logger.info("Skipping impact verification: no baseline snapshot")
+                    return result_dag
+                # Use coverage_threshold from initialized impact analyzer config
+                threshold = getattr(
+                    self, "_impact_coverage_threshold", 0.7,
+                )
+                verifier = ChangeVerifier(
+                    project_path=str(work_dir),
+                    coverage_threshold=threshold,
+                )
+                verification = verifier.verify(impact_scope, before_snapshot)
+                if memory_manager:
+                    memory_manager.store_learning(
+                        agent_type="impact_analyzer",
+                        content=(
+                            f"Impact prediction for "
+                            f"'{job.requirement[:100]}': "
+                            f"coverage={verification.coverage:.2f}, "
+                            f"accuracy={verification.prediction_accuracy:.2f}, "
+                            f"unexpected={len(verification.unexpected_files)}"
+                        ),
+                        memory_type=MemoryType.EXPERIENCE,
+                        scope=MemoryScope.GLOBAL,
+                        keywords=[
+                            "impact_analysis", "prediction",
+                            impact_scope.risk_level.value,
+                        ],
+                        metadata={
+                            "predicted_files": impact_scope.predicted_files[:20],
+                            "project_path": impact_project_path,
+                            "confidence": verification.prediction_accuracy,
+                        },
+                    )
+                job.metadata["verification_coverage"] = verification.coverage
+                job.metadata["verification_passes"] = verification.passes
+                self.repository.update_job(job)
+
+                # Persist impact analysis record to history storage
+                try:
+                    from core.config import HarnessConfig
+                    _impact_cfg = HarnessConfig.from_env().impact
+                    _record_dir = Path(_impact_cfg.base_path)
+                    _record_dir.mkdir(parents=True, exist_ok=True)
+                    _record = {
+                        "job_id": job.id,
+                        "requirement": job.requirement[:200],
+                        "project_path": job.project_path,
+                        "predicted_files": impact_scope.predicted_files[:20],
+                        "risk_level": impact_scope.risk_level.value,
+                        "verification_coverage": verification.coverage,
+                        "verification_accuracy": verification.prediction_accuracy,
+                        "verification_passes": verification.passes,
+                        "unexpected_files": verification.unexpected_files[:10],
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                    _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+                    _uid = run_id[:8] if run_id else uuid.uuid4().hex[:8]
+                    _record_path = _record_dir / f"impact_{_ts}_{_uid}.json"
+                    _record_path.write_text(
+                        json.dumps(_record, indent=2, default=str, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass  # Record persistence must not block result reporting
+            except Exception:
+                pass  # Verification must not block result reporting
 
         return result_dag
 
@@ -803,27 +944,22 @@ class RunService:
         )
 
     def _build_memory_manager(self, store: SessionStore) -> Any:
-        """M3.2: Build a MemoryManager from config. Returns None on failure/disabled."""
+        """M3.2: Build a per-job MemoryManager. Returns None if disabled.
+
+        Does NOT mutate shared self._memory_manager. Shared subsystems
+        are initialized separately via _ensure_subsystems().
+        """
+        self._ensure_subsystems()
+        if self._memory_manager is None:
+            return None
         try:
             from core.config import HarnessConfig
             from memory.manager import MemoryManager
-
             config = HarnessConfig.from_env()
-            if config.memory.enabled:
-                mgr = MemoryManager(
-                    config=config.memory,
-                    session_store=store,
-                )
-                mgr.run_maintenance()
-                return mgr
-            return None
+            return MemoryManager(config=config.memory, session_store=store)
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).debug("Memory manager init skipped: %s", exc)
+            logger.debug("Per-job memory manager creation skipped: %s", exc)
             return None
-
-        # M3.3: Initialize learning system
-        self._init_learning_system()
 
     def _init_learning_system(self) -> None:
         """M3.3: Initialize LearningScheduler from config."""
@@ -859,8 +995,39 @@ class RunService:
             self._learning_optimizer = optimizer
             self._learning_scheduler = scheduler
         except Exception as exc:
-            import logging
-            logging.getLogger(__name__).debug("Learning system init skipped: %s", exc)
+            logger.debug(
+                "Learning system init skipped: %s", exc,
+            )
+
+    def _init_impact_analyzer(self) -> None:
+        """M3.5: Initialize ImpactPredictor from config."""
+        self._impact_predictor = None
+        self._change_verifier = None
+        self._impact_coverage_threshold = 0.7
+        try:
+            from core.config import HarnessConfig
+            from analysis.impact_predictor import ImpactPredictor
+            from analysis.change_verifier import ChangeVerifier
+
+            config = HarnessConfig.from_env()
+            if not config.impact.enabled:
+                return
+
+            self._impact_coverage_threshold = config.impact.coverage_threshold
+            self._impact_predictor = ImpactPredictor(
+                llm_config=self.llm_config,
+                memory_manager=getattr(self, "_memory_manager", None),
+                max_predicted_files=config.impact.max_predicted_files,
+                confidence_threshold=config.impact.confidence_threshold,
+            )
+            self._change_verifier = ChangeVerifier(
+                project_path=".",
+                coverage_threshold=config.impact.coverage_threshold,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Impact analyzer init skipped: %s", exc,
+            )
 
     def _create_execution_engine(
         self,

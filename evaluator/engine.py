@@ -117,7 +117,9 @@ class EvaluatorEngine:
             passed, msg = self._check_no_critical_issues(path)
             return passed, msg, True
 
-        # Unrecognized criterion — do NOT assume passed
+        # Unrecognized criterion — return False so the stage is flagged for
+        # manual review. The caller will include this in feedback and mark
+        # the overall result as not fully passed.
         return False, (
             f"Criterion '{criterion}' is not automatically checkable. "
             f"Supported patterns: 'tests pass', 'coverage', 'lint clean', "

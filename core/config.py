@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def _load_claude_settings() -> dict[str, str]:
@@ -68,7 +68,7 @@ class LLMConfig(BaseModel):
 
 class SandboxConfig(BaseModel):
     enabled: bool = True
-    runtime: str = "docker"  # docker, bubblewrap, direct
+    runtime: str = "local"  # local, docker (docker not yet implemented)
     image: str = "python:3.11-slim"
     network_mode: str = "none"  # none, bridge
     memory_limit: str = "512m"
@@ -149,29 +149,46 @@ class MemoryConfig(BaseModel):
     base_path: str = Field(
         default_factory=lambda: os.getenv("HARNESS_MEMORY_PATH", "./data/memory")
     )
-    max_entries_per_agent: int = 500
-    max_content_length: int = 1000      # Characters per entry
-    default_ttl_days: int = 90          # Default expiry for entries
-    retrieval_limit: int = 10           # Max memories injected per prompt
-    decay_half_life_days: float = 30.0  # Relevance score decay rate
+    max_entries_per_agent: int = Field(default=500, ge=1)
+    max_content_length: int = Field(default=1000, ge=100)       # Characters per entry
+    default_ttl_days: int = Field(default=90, ge=1)             # Default expiry for entries
+    retrieval_limit: int = Field(default=10, ge=1)              # Max memories injected per prompt
+    decay_half_life_days: float = Field(default=30.0, ge=1.0)   # Relevance score decay rate
     auto_store: bool = True             # Automatically store learnings after task
+
+    @model_validator(mode="after")
+    def _validate_memory_config(self) -> "MemoryConfig":
+        if self.retrieval_limit > self.max_entries_per_agent:
+            raise ValueError("retrieval_limit cannot exceed max_entries_per_agent")
+        return self
 
 
 class LearningConfig(BaseModel):
     """Configuration for the M3.3 Self-Learning system."""
     enabled: bool = True
-    analysis_interval_hours: float = 6.0
-    min_samples: int = 5                # Min executions before analysis
-    max_insights: int = 100
-    confidence_threshold: float = 0.7
+    analysis_interval_hours: float = Field(default=6.0, ge=0.0)
+    min_samples: int = Field(default=5, ge=1)                # Min executions before analysis
+    max_insights: int = Field(default=100, ge=1)
+    confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     base_path: str = Field(
         default_factory=lambda: os.getenv("HARNESS_LEARNING_PATH", "./data/learning")
     )
 
 
-class HarnessConfig(BaseModel):
-    model_config = ConfigDict(validate_default=True)
+class ImpactConfig(BaseModel):
+    """Configuration for the M3.5 Impact Analysis system."""
+    enabled: bool = True
+    coverage_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
+    max_predicted_files: int = Field(default=50, ge=1)
+    confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
+    base_path: str = Field(
+        default_factory=lambda: os.getenv(
+            "HARNESS_IMPACT_PATH", "./data/impact"
+        )
+    )
 
+
+class HarnessConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
@@ -183,16 +200,11 @@ class HarnessConfig(BaseModel):
     max_context_tokens: int = 100000  # token threshold for context truncation
     log_level: str = "INFO"
 
-    # M2.2: Isolation dimensions (replaces old BackendType)
-    workspace_isolation: str = Field(
+    # M2.2: Backend configuration
+    default_backend: str = Field(
         default_factory=lambda: os.getenv(
-            "HARNESS_WORKSPACE_ISOLATION",
-            os.getenv("HARNESS_DEFAULT_BACKEND", "local"),  # legacy fallback
-        )
-    )
-    execution_sandbox: str = Field(
-        default_factory=lambda: os.getenv(
-            "HARNESS_EXECUTION_SANDBOX", "local"
+            "HARNESS_DEFAULT_BACKEND",
+            os.getenv("HARNESS_WORKSPACE_ISOLATION", "local"),
         )
     )
     backend_base_path: str = Field(
@@ -200,14 +212,13 @@ class HarnessConfig(BaseModel):
             "HARNESS_BACKEND_BASE_PATH", "./data/backends"
         )
     )
-    workspace_isolation_by_risk: dict[str, str] = Field(
+    risk_backend_map: dict[str, str] = Field(
         default_factory=lambda: {
-            "low": os.getenv("HARNESS_WORKSPACE_LOW", os.getenv("HARNESS_BACKEND_LOW", "local")),
-            "medium": os.getenv("HARNESS_WORKSPACE_MEDIUM", os.getenv("HARNESS_BACKEND_MEDIUM", "local")),
-            "high": os.getenv("HARNESS_WORKSPACE_HIGH", os.getenv("HARNESS_BACKEND_HIGH", "worktree")),
+            "low": os.getenv("HARNESS_BACKEND_LOW", "local"),
+            "medium": os.getenv("HARNESS_BACKEND_MEDIUM", "local"),
+            "high": os.getenv("HARNESS_BACKEND_HIGH", "worktree"),
             "critical": os.getenv(
-                "HARNESS_WORKSPACE_CRITICAL",
-                os.getenv("HARNESS_BACKEND_CRITICAL", "worktree"),
+                "HARNESS_BACKEND_CRITICAL", "worktree"
             ),
         }
     )
@@ -220,14 +231,9 @@ class HarnessConfig(BaseModel):
     approval_timeout_sec: int = Field(
         default_factory=lambda: int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300"))
     )
-
-    # M2: Cleanup policy for execution backends
-    # "always" = always cleanup, "on_success" = preserve on failure, "never" = always preserve
     cleanup_policy: str = Field(
-        default_factory=lambda: os.getenv(
-            "HARNESS_CLEANUP_POLICY", "on_success"
-        ),
-        pattern=r"^(always|on_success|never)$",
+        default_factory=lambda: os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
+        pattern=r"^(on_success|always|never)$",
     )
 
     # M3.1: Multi-model routing
@@ -238,6 +244,9 @@ class HarnessConfig(BaseModel):
 
     # M3.3: Self-Learning
     learning: LearningConfig = Field(default_factory=LearningConfig)
+
+    # M3.5: Impact Analysis
+    impact: ImpactConfig = Field(default_factory=ImpactConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
@@ -291,5 +300,19 @@ class HarnessConfig(BaseModel):
                     os.getenv("HARNESS_LEARNING_CONFIDENCE", "0.7")
                 ),
                 base_path=os.getenv("HARNESS_LEARNING_PATH", "./data/learning"),
+            ),
+            impact=ImpactConfig(
+                enabled=os.getenv("HARNESS_IMPACT_ENABLED", "true").lower()
+                not in ("false", "0", "no"),
+                base_path=os.getenv("HARNESS_IMPACT_PATH", "./data/impact"),
+                coverage_threshold=float(
+                    os.getenv("HARNESS_IMPACT_COVERAGE_THRESHOLD", "0.7")
+                ),
+                max_predicted_files=int(
+                    os.getenv("HARNESS_IMPACT_MAX_FILES", "50")
+                ),
+                confidence_threshold=float(
+                    os.getenv("HARNESS_IMPACT_CONFIDENCE", "0.5")
+                ),
             ),
         )
