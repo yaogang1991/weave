@@ -232,7 +232,15 @@ class EvaluatorEngine:
                 cwd=str(work_dir) if work_dir.is_dir() else None,
             )
             passed = result.returncode == 0
-            return passed, "Tests passed" if passed else f"Tests failed:\n{result.stdout[-500:]}"
+            if passed:
+                return passed, "Tests passed"
+            # Extract specific failure lines for actionable feedback
+            failure_lines = []
+            for line in result.stdout.split("\n"):
+                if any(kw in line for kw in ("FAILED", "AssertionError", "Error:", "error")):
+                    failure_lines.append(line)
+            detail = "\n".join(failure_lines[-20:]) if failure_lines else result.stdout[-500:]
+            return passed, f"Tests failed:\n{detail}"
         except FileNotFoundError:
             return False, "pytest not installed"
         except Exception as e:

@@ -71,6 +71,13 @@ Rules:
 7. CRITICAL: If evaluation feedback from a previous attempt is provided,
    read it carefully and fix ALL reported issues before proceeding.
    The feedback tells you exactly what failed and why.
+8. Handle edge cases in ALL code you write:
+   - Null/None/empty values for function parameters
+   - Empty lists, dicts, strings
+   - Invalid input types and boundary conditions
+9. For data processing functions, add explicit type checking and None handling
+10. After writing code, run tests yourself: `python -m pytest -v --tb=short`
+    If tests fail, fix the issues before finishing.
 
 Work systematically: gather context → implement → verify.
 """,
