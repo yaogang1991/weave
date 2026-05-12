@@ -33,12 +33,14 @@ class AgentWorker:
         config: LLMConfig,
         session_store: SessionStore,
         max_context_tokens: int = 100_000,
+        base_cwd: str | None = None,
     ):
         self.config = config
         self.session_store = session_store
         self.llm = LLMClient(config)
         self.max_context_tokens = max_context_tokens
         self.artifacts: list[str] = []
+        self._base_cwd = Path(base_cwd).resolve() if base_cwd else None
 
     # -- Public interface ---------------------------------------------------
 
@@ -161,6 +163,8 @@ class AgentWorker:
             path = arguments["file_path"]
             try:
                 p = Path(path)
+                if not p.is_absolute() and self._base_cwd:
+                    p = self._base_cwd / p
                 if not p.is_file() or p.stat().st_size == 0:
                     return  # Missing or empty file — do not claim (#158)
             except OSError:

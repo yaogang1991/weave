@@ -181,7 +181,12 @@ Evaluate against:
             f"You are the {capability.name} agent. {capability.description}"
         )
 
-        self.worker = AgentWorker(llm_config, session_store, max_context_tokens=max_context_tokens)
+        base_cwd = str(tool_registry.base_cwd) if tool_registry.base_cwd else None
+        self.worker = AgentWorker(
+            llm_config, session_store,
+            max_context_tokens=max_context_tokens,
+            base_cwd=base_cwd,
+        )
         self.system_prompt = system_prompt
 
         # Filter tools by agent type

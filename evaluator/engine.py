@@ -219,7 +219,7 @@ class EvaluatorEngine:
                 # Fallback: loose glob match by stem.
                 stem = Path(cand).stem
                 if stem and len(stem) >= 3:
-                    matches = list(eval_root.glob(f"**/*{stem}*.py"))
+                    matches = list(eval_root.glob(f"**/*{stem}*"))
                     matches = [
                         m for m in matches
                         if m.is_file() and m.stat().st_size > 0
