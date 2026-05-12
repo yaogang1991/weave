@@ -395,7 +395,11 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     # Create evaluator for quality gates
     from evaluator.engine import EvaluatorEngine
-    evaluator = EvaluatorEngine(session_store=store)
+    pass_threshold = getattr(args, "pass_threshold", None)
+    evaluator = EvaluatorEngine(
+        session_store=store,
+        pass_threshold=pass_threshold,
+    )
 
     # Create DAG engine + M3 memory integration
     project_work_dir = str(Path(args.project).resolve()) if args.project else None
@@ -576,6 +580,7 @@ async def cmd_run(args):
         project=args.project,
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
+        pass_threshold=getattr(args, "pass_threshold", None),
         non_interactive=getattr(args, "non_interactive", False),
         allow_self_modify=getattr(args, "allow_self_modify", False),
         viz=args.viz,
@@ -1322,6 +1327,10 @@ Examples:
     run_parser.add_argument(
         "--max-iterations", type=int, default=50,
         help="Max iterations per agent loop (default: 50)",
+    )
+    run_parser.add_argument(
+        "--pass-threshold", type=float, default=None,
+        help="Evaluation pass threshold 0-10 (default: strict, all criteria must pass)",
     )
     run_parser.add_argument(
         "--non-interactive", action="store_true",

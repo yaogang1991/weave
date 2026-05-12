@@ -113,8 +113,16 @@ class EvaluatorEngine:
     list[SuccessCriterion] (structured).
     """
 
-    def __init__(self, session_store: SessionStore):
+    def __init__(
+        self,
+        session_store: SessionStore,
+        pass_threshold: float | None = None,
+    ):
         self.session_store = session_store
+        # When set, score >= threshold means overall pass even if some
+        # criteria fail (reported as WARNING instead of FAIL).  None = strict
+        # mode (all criteria must pass, same as before #194).
+        self.pass_threshold = pass_threshold
         self._last_autofixed: list[str] = []
         self._last_lint_new_issues: list[str] = []
         self._last_lint_all_issues: list[str] = []
@@ -158,7 +166,31 @@ class EvaluatorEngine:
 
         all_auto_passed = all(results.values())
         has_uncheckable = len(uncheckable) > 0
-        overall_passed = all_auto_passed
+
+        # Threshold-based passing (#194):
+        # When pass_threshold is set, score >= threshold allows overall pass
+        # even if some auto-checked criteria fail.  Failed criteria are
+        # reported as WARNING instead of FAIL.
+        failed_auto = [
+            label for label, ok in results.items() if not ok
+        ]
+        if self.pass_threshold is not None and not all_auto_passed:
+            if score >= self.pass_threshold:
+                # Downgrade failed criteria from FAIL to WARN in feedback
+                feedback_parts_new: list[str] = []
+                for part in feedback_parts:
+                    for label in failed_auto:
+                        prefix = f"FAIL {label}:"
+                        if part.startswith(prefix):
+                            part = f"WARN {part[5:]}"
+                            break
+                    feedback_parts_new.append(part)
+                feedback_parts = feedback_parts_new
+                overall_passed = True
+            else:
+                overall_passed = False
+        else:
+            overall_passed = all_auto_passed
 
         feedback = "\n".join(feedback_parts)
         if has_uncheckable:
