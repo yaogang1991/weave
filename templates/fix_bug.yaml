@@ -1,17 +1,31 @@
 name: fix_bug
 description: Analyze and fix a bug with root cause analysis
-version: "1.0"
+version: "2.0"
 category: maintenance
 variables:
   bug: reported issue
+  affected_file: ""
+  bug_pattern: ""
+  fix_pattern: ""
 nodes:
   - id: planner_analyze
     agent_type: planner
-    task_description: "Analyze the bug: {bug}. Find the root cause by examining relevant code, logs, and test failures."
+    task_description: "Analyze the bug: {bug}. Find the root cause by examining relevant code, logs, and test failures. Identify the exact file(s) and line(s) that need to change."
   - id: generator_fix
     agent_type: generator
-    task_description: "Fix the bug identified in the analysis. Make minimal changes to resolve the issue without introducing regressions."
+    task_description: "Fix the bug identified in the analysis. You MUST use the edit or write tool to modify the affected file(s). Analysis alone is NOT sufficient — make actual code changes. Make minimal changes to resolve the issue without introducing regressions."
     success_criteria:
+      - type: file_changed
+        path: "{affected_file}"
+        description: "Affected file must be modified"
+      - type: pattern_absent
+        path: "{affected_file}"
+        pattern: "{bug_pattern}"
+        description: "Original buggy code pattern must be removed"
+      - type: pattern_present
+        path: "{affected_file}"
+        pattern: "{fix_pattern}"
+        description: "Fix code pattern must be present"
       - type: lint
         description: "lint clean"
   - id: evaluator
