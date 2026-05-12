@@ -80,10 +80,9 @@ class TestDeltaLint:
         """Pre-existing E402 on unchanged lines should not cause failure."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
 
-        # autoflake → noop, autopep8 → noop, flake8 → issues
+        # autoflake dry-run → noop, flake8 → issues
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),  # autoflake
-            MagicMock(returncode=0, stdout=""),  # autopep8
+            MagicMock(returncode=0, stdout=""),  # autoflake dry-run
             MagicMock(  # flake8: existing E402
                 returncode=1,
                 stdout="code.py:1:1: E402 module level import not at top",
@@ -106,8 +105,7 @@ class TestDeltaLint:
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
 
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),  # autoflake
-            MagicMock(returncode=0, stdout=""),  # autopep8
+            MagicMock(returncode=0, stdout=""),  # autoflake dry-run
             MagicMock(  # flake8: E501 on line 10
                 returncode=1,
                 stdout="code.py:10:80: E501 line too long",
@@ -134,7 +132,6 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),
-            MagicMock(returncode=0, stdout=""),
             MagicMock(
                 returncode=1,
                 stdout="code.py:33:1: E402 module level import not at top",
@@ -159,7 +156,6 @@ class TestDeltaLint:
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
 
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
             MagicMock(
                 returncode=1,
@@ -190,7 +186,6 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),
-            MagicMock(returncode=0, stdout=""),
             MagicMock(
                 returncode=1,
                 stdout="code.py:33:1: E402 module level import not at top",
@@ -215,7 +210,6 @@ class TestDeltaLint:
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
 
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
             MagicMock(returncode=0, stdout=""),
         ]
