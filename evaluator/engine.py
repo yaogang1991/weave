@@ -27,6 +27,7 @@ from core.models import (
     EventType,
     SuccessCriterion,
 )
+from evaluator.models import CheckResult, CheckSeverity, EvaluationContext
 from session.store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,36 @@ class EvaluatorEngine:
         self._last_autofixed: list[str] = []
         self._last_lint_new_issues: list[str] = []
         self._last_lint_all_issues: list[str] = []
+        self._checkers: dict[CriterionType, Any] = {}
+
+    def register_checker(
+        self,
+        criterion_type: CriterionType,
+        checker: Any,
+    ) -> None:
+        """Register a pluggable criterion checker (#178).
+
+        When a checker is registered for a CriterionType, it takes priority
+        over the built-in dispatch in _check_criterion.
+        """
+        self._checkers[criterion_type] = checker
+
+    def _try_registered_checker(
+        self,
+        crit: SuccessCriterion,
+        context: EvaluationContext,
+    ) -> tuple[bool, str, bool] | None:
+        """Dispatch to a registered checker if one exists for this type.
+
+        Returns the 3-tuple (passed, msg, was_auto) if a checker handled it,
+        or None if no checker is registered for this criterion type.
+        """
+        checker = self._checkers.get(crit.type)
+        if checker is None:
+            return None
+        result: CheckResult = checker.check(crit, context)
+        was_auto = result.severity in (CheckSeverity.NORMAL, CheckSeverity.ERROR)
+        return result.passed, result.message, was_auto
 
     def evaluate_stage(
         self,
@@ -267,6 +298,16 @@ class EvaluatorEngine:
         work_dir: str,
         output_artifacts: list[str] | None = None,
     ) -> tuple[bool, str, bool]:
+        # Try pluggable checker first (#178)
+        context = EvaluationContext(
+            work_dir=Path(work_dir),
+            artifacts=output_artifacts,
+            session_store=self.session_store,
+        )
+        registered = self._try_registered_checker(crit, context)
+        if registered is not None:
+            return registered
+
         if crit.type == CriterionType.TESTS_PASS:
             test_targets = None
             if crit.test_path:
