@@ -123,6 +123,11 @@ Rules:
     at that EXACT path. Do NOT silently substitute a different filename.
     If you believe a different path is better, first create the file at
     the required path, then explain your reasoning in your output.
+15. TRUST TOOL RESULTS: When write or edit returns success, the change is
+    applied. Do NOT immediately read the same file to verify. Only re-read
+    if you need surrounding context not shown in the tool result, or if a
+    later test/lint error references that file. Prefer running targeted
+    tests or lint over re-reading whole files to confirm edits.
 
 Work systematically: gather context → implement → verify.
 """,

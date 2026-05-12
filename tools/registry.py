@@ -328,10 +328,26 @@ class ToolRegistry:
             line_num = content[:idx].count("\n") + 1
             content = content[:idx] + new_string + content[idx + len(old_string):]
             path.write_text(content, encoding="utf-8")
+
+            # Build before/after context so agent trusts the result (#153)
+            old_lines = old_string.splitlines()
+            new_lines = new_string.splitlines()
+            max_ctx = 5  # show up to 5 lines of before/after
+            before_snippet = "\n".join(old_lines[:max_ctx])
+            after_snippet = "\n".join(new_lines[:max_ctx])
+            trunc_old = f"\n... ({len(old_lines)} lines total)" if len(old_lines) > max_ctx else ""
+            trunc_new = f"\n... ({len(new_lines)} lines total)" if len(new_lines) > max_ctx else ""
+
+            output = (
+                f"Edited {file_path} (line {line_num})\n"
+                f"Before:\n{before_snippet}{trunc_old}\n"
+                f"After:\n{after_snippet}{trunc_new}\n"
+                f"Edit successful. No need to re-read the file."
+            )
             return ToolResult(
                 tool_call_id="",
                 success=True,
-                output=f"Edited {file_path} (line {line_num})",
+                output=output,
             )
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
