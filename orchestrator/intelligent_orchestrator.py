@@ -276,17 +276,39 @@ Return a JSON object with this exact structure:
             except Exception:
                 pass  # Learning hints must not break planning
 
-        # Step 3: Call LLM for planning
+        # Step 3: Call LLM for planning (with retry on JSON parse failure)
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
-        # Get tools schema for the orchestrator (no tools needed for planning)
-        response = self.llm.call(messages, tools=[])
+        max_retries = 2
+        plan_data = None
+        for attempt in range(max_retries + 1):
+            response = self.llm.call(messages, tools=[])
+            plan_data = self._extract_json(response.get("content", ""))
+            if plan_data is not None:
+                break
+            if attempt < max_retries:
+                messages.append({
+                    "role": "assistant",
+                    "content": response.get("content", ""),
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response could not be parsed as valid JSON. "
+                        "Please provide the plan as a valid JSON object."
+                    ),
+                })
+
+        if plan_data is None:
+            raise ValueError(
+                "Failed to parse planning response after retries. "
+                "The LLM did not return valid JSON."
+            )
 
         # Step 4: Parse and validate the plan
-        plan_data = self._extract_json(response.get("content", ""))
         plan = OrchestratorPlan(**plan_data)
 
         # Step 5: Validate all agent types exist in registry
@@ -394,29 +416,32 @@ Return a JSON object with this exact structure:
 
         return dag
 
-    def _extract_json(self, text: str) -> dict:
+    def _extract_json(self, text: str) -> dict | None:
         """
         Extract JSON from LLM response (handles markdown code blocks).
 
-        Uses regex-based extraction with brace matching to handle edge cases
-        like nested code blocks or multiple code blocks in the response.
+        Collects candidate substrings from multiple strategies, tries
+        json.loads on each, and only attempts repair on truly truncated
+        candidates (unclosed braces at end-of-text).
+
+        Returns None when no valid JSON can be extracted.
         """
         text = text.strip()
+        candidates: list[str] = []
 
-        # Strategy 1: Try to find JSON inside ```json ... ``` blocks
+        # Strategy 1: JSON inside ```json ... ``` blocks
         json_block_match = re.search(r"```json\s*\n(.*?)```", text, re.DOTALL)
         if json_block_match:
-            return json.loads(json_block_match.group(1).strip())
+            candidates.append(json_block_match.group(1).strip())
 
-        # Strategy 2: Try to find JSON inside generic ``` ... ``` blocks
+        # Strategy 2: JSON inside generic ``` ... ``` blocks
         generic_block_match = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
         if generic_block_match:
             candidate = generic_block_match.group(1).strip()
             if candidate.startswith("{") or candidate.startswith("["):
-                return json.loads(candidate)
+                candidates.append(candidate)
 
-        # Strategy 3: Find the first top-level JSON object using brace matching
-        # This handles cases where the LLM outputs raw JSON without code blocks
+        # Strategy 3: First top-level JSON object via brace matching
         brace_depth = 0
         start = None
         for i, ch in enumerate(text):
@@ -427,14 +452,36 @@ Return a JSON object with this exact structure:
             elif ch == '}':
                 brace_depth -= 1
                 if brace_depth == 0 and start is not None:
-                    candidate = text[start:i + 1]
-                    try:
-                        return json.loads(candidate)
-                    except json.JSONDecodeError:
-                        start = None
-                        continue
+                    candidates.append(text[start:i + 1])
+                    start = None
 
-        raise json.JSONDecodeError("No valid JSON object found in LLM response", text, 0)
+        # Strategy 4: Truncated JSON (unclosed braces at end-of-text)
+        if start is not None and brace_depth > 0:
+            candidates.append(self._repair_truncated_json(text[start:], brace_depth))
+
+        # Try each candidate in order — first valid wins
+        for candidate in candidates:
+            try:
+                result = json.loads(candidate)
+                if isinstance(result, dict):
+                    return result
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+        return None
+
+    @staticmethod
+    def _repair_truncated_json(text: str, brace_depth: int) -> str:
+        """Attempt to close a truncated JSON object by appending missing
+        closing quotes and braces.  Only handles genuine truncation
+        (unclosed braces), not complete-but-malformed JSON."""
+        # Close unclosed quotes (odd number of unescaped ")
+        quote_count = text.count('"') - text.count('\\"')
+        if quote_count % 2:
+            text += '"'
+        # Close unclosed braces
+        text += '}' * brace_depth
+        return text
 
     async def replan(self, dag: DAG, failed_node_id: str, requirement: str = "") -> DAG:
         """
@@ -490,11 +537,34 @@ Return a JSON object with this exact structure:
             {"role": "user", "content": user_prompt},
         ]
 
-        # 3. Call LLM
-        response = self.llm.call(messages, tools=[])
+        # 3. Call LLM (with retry on JSON parse failure)
+        max_retries = 2
+        plan_data = None
+        for attempt in range(max_retries + 1):
+            response = self.llm.call(messages, tools=[])
+            plan_data = self._extract_json(response.get("content", ""))
+            if plan_data is not None:
+                break
+            if attempt < max_retries:
+                messages.append({
+                    "role": "assistant",
+                    "content": response.get("content", ""),
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response could not be parsed as valid JSON. "
+                        "Please provide the plan as a valid JSON object."
+                    ),
+                })
+
+        if plan_data is None:
+            raise ValueError(
+                "Failed to parse replanning response after retries. "
+                "The LLM did not return valid JSON."
+            )
 
         # 4. Parse and validate
-        plan_data = self._extract_json(response.get("content", ""))
         plan = OrchestratorPlan(**plan_data)
 
         for node_def in plan.nodes:
