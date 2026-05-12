@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -370,7 +371,7 @@ class EvaluatorEngine:
     def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None) -> tuple[bool, str]:
         """Run pytest with a fixed command. Never executes arbitrary commands."""
         try:
-            cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+            cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
             if test_path:
                 if isinstance(test_path, list):
                     cmd.extend(str(work_dir / t) if not Path(t).is_absolute() else t for t in test_path)
@@ -435,7 +436,7 @@ class EvaluatorEngine:
         try:
             result = subprocess.run(
                 [
-                    "python", "-m", "autoflake",
+                    sys.executable, "-m", "autoflake",
                     "--remove-all-unused-imports",
                     "--remove-unused-variables",
                     "--check",
@@ -456,7 +457,7 @@ class EvaluatorEngine:
         lint_stdout = ""
         try:
             result = subprocess.run(
-                ["python", "-m", "flake8"] + resolved
+                [sys.executable, "-m", "flake8"] + resolved
                 + ["--max-line-length=100"],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60,
@@ -620,7 +621,7 @@ class EvaluatorEngine:
         """
         try:
             cmd = [
-                "python", "-m", "pytest", "-v",
+                sys.executable, "-m", "pytest", "-v",
                 "--tb=short", "--cov-report=term-missing",
             ]
 
@@ -640,7 +641,7 @@ class EvaluatorEngine:
             else:
                 # output_artifacts empty: run tests without coverage to avoid
                 # scanning historical files that may have import errors (#165).
-                cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
+                cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
 
             result = subprocess.run(
                 cmd,
