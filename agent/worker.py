@@ -87,6 +87,13 @@ class AgentWorker:
             # Execute tool calls
             tool_results = []
             for tc in assistant_message["tool_calls"]:
+                # Defensive: ensure tool_call_id is present (#169)
+                tool_call_id = tc.get("id") or ""
+                if not tool_call_id.strip():
+                    import uuid
+                    tool_call_id = f"tool_{uuid.uuid4().hex[:8]}"
+                    tc["id"] = tool_call_id
+
                 self.session_store.emit_event(
                     session_id,
                     EventType.AGENT_TOOL_USE,
@@ -96,7 +103,7 @@ class AgentWorker:
                 result = tool_executor.execute(tc["name"], tc.get("arguments", {}))
                 tool_results.append({
                     "role": "tool",
-                    "tool_call_id": tc["id"],
+                    "tool_call_id": tool_call_id,
                     "content": result.output if result.success else f"Error: {result.error}",
                 })
 
@@ -108,7 +115,7 @@ class AgentWorker:
                     session_id,
                     EventType.AGENT_TOOL_RESULT,
                     {
-                        "tool_call_id": tc["id"],
+                        "tool_call_id": tool_call_id,
                         "success": result.success,
                         "output": result.output,
                         "error": result.error,
