@@ -359,9 +359,11 @@ class EvaluatorEngine:
             return False, f"Test execution error: {e}"
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        """Auto-fix then delta-lint resolved target files.
+        """Dry-run autofix then delta-lint resolved target files.
 
-        Phase 1 (auto-fix): autoflake (F401/F841) + autopep8 (E501).
+        Phase 1 (dry-run): detect auto-fixable issues (F401/F841, E501)
+        without modifying files in-place, avoiding cross-node corruption
+        when parallel DAG nodes share the same work directory (#159).
 
         Phase 2 (verify): Run flake8, parse output into LintIssue list,
         then use git diff to determine which lines the agent changed.
@@ -387,52 +389,24 @@ class EvaluatorEngine:
         if not resolved:
             return True, "No targets to lint"
 
-        # Snapshot file contents before autoflake.
-        pre_contents: dict[str, bytes] = {}
-        for fpath in resolved:
-            p = Path(fpath)
-            if p.exists():
-                pre_contents[fpath] = p.read_bytes()
-
-        # Auto-fix: F401 unused imports / F841 unused variables
+        # Detect auto-fixable issues via dry-run (no in-place modification).
+        # This prevents parallel DAG nodes from corrupting each other's files.
+        autofix_suggestions: list[str] = []
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "python", "-m", "autoflake",
                     "--remove-all-unused-imports",
                     "--remove-unused-variables",
-                    "--in-place",
+                    "--check",
                 ] + resolved,
                 capture_output=True, text=True, timeout=30,
             )
-        except FileNotFoundError:
-            pass
-        except Exception:
-            pass
-
-        # Detect which files autoflake actually changed.
-        autofixed: list[str] = []
-        for fpath, pre in pre_contents.items():
-            p = Path(fpath)
-            if p.exists() and p.read_bytes() != pre:
-                try:
-                    autofixed.append(str(p.relative_to(work_dir)))
-                except ValueError:
-                    autofixed.append(p.name)
-
-        self._last_autofixed = autofixed
-
-        # Auto-fix: E501 line too long
-        try:
-            subprocess.run(
-                [
-                    "python", "-m", "autopep8",
-                    "--select", "E501",
-                    "--max-line-length", "100",
-                    "--in-place",
-                ] + resolved,
-                capture_output=True, text=True, timeout=30,
-            )
+            if result.returncode != 0 and result.stdout:
+                lines = result.stdout.strip().split("\n")[:5]
+                autofix_suggestions.extend(
+                    f"autoflake: {l}" for l in lines if l.strip()
+                )
         except FileNotFoundError:
             pass
         except Exception:
@@ -463,8 +437,11 @@ class EvaluatorEngine:
 
         if result.returncode == 0:
             msg = "Lint clean"
-            if autofixed:
-                msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+            if autofix_suggestions:
+                msg = (
+                    f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
+                    f"\n{msg}"
+                )
             return True, msg
 
         # Parse all lint issues
@@ -472,8 +449,11 @@ class EvaluatorEngine:
         if not all_issues:
             # Could not parse (unexpected format) — treat as before
             msg = f"Lint issues:\n{lint_stdout[:500]}"
-            if autofixed:
-                msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+            if autofix_suggestions:
+                msg = (
+                    f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
+                    f"\n{msg}"
+                )
             self._last_lint_all_issues = []
             self._last_lint_new_issues = []
             return False, msg
@@ -554,8 +534,11 @@ class EvaluatorEngine:
             msg = "Lint issues (delta unavailable):\n" + "\n".join(lines)
             self._last_lint_new_issues = self._last_lint_all_issues
 
-        if autofixed:
-            msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+        if autofix_suggestions:
+            msg = (
+                f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
+                f"\n{msg}"
+            )
 
         return len(new_issues) == 0, msg
 

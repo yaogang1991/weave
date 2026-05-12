@@ -106,15 +106,14 @@ class TestCriterionChecking:
         """If autoflake is not installed (FileNotFoundError), flake8 still runs."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         with patch("evaluator.engine.subprocess.run") as mock_run:
-            # autoflake → not found, autopep8 → not found, flake8 → success
+            # autoflake → not found, flake8 → success
             mock_run.side_effect = [
                 FileNotFoundError("autoflake not found"),
-                FileNotFoundError("autopep8 not found"),
                 MagicMock(returncode=0, stdout=""),
             ]
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
             assert passed
-            assert mock_run.call_count == 3
+            assert mock_run.call_count == 2
 
     def test_lint_autoflake_error_still_runs_flake8(self, evaluator, tmp_path):
         """If autoflake raises an unexpected error, flake8 still runs."""
@@ -122,22 +121,24 @@ class TestCriterionChecking:
         with patch("evaluator.engine.subprocess.run") as mock_run:
             mock_run.side_effect = [
                 RuntimeError("autoflake crashed"),
-                RuntimeError("autopep8 crashed"),
                 MagicMock(returncode=0, stdout=""),
             ]
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
             assert passed
-            assert mock_run.call_count == 3
+            assert mock_run.call_count == 2
 
     def test_lint_autoflake_then_flake8_on_same_targets(self, evaluator, tmp_path):
-        """After autoflake runs, flake8 verifies the same resolved files."""
+        """Autoflake dry-run and flake8 verify the same resolved files."""
         (tmp_path / "code.py").write_text("import os\n", encoding="utf-8")
         with patch("evaluator.engine.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             evaluator._run_lint(["code.py"], tmp_path)
             calls = mock_run.call_args_list
             autoflake_cmd = calls[0][0][0]
-            flake8_cmd = calls[2][0][0]
+            # Ensure dry-run mode: has --check, no --in-place
+            assert "--check" in autoflake_cmd
+            assert "--in-place" not in autoflake_cmd
+            flake8_cmd = calls[1][0][0]
             # autoflake: python -m autoflake --flags... <files>
             autoflake_files = [a for a in autoflake_cmd[7:] if not a.startswith("-")]
             # flake8: python -m flake8 <files> --flags...
