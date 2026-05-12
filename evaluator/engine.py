@@ -318,6 +318,22 @@ class EvaluatorEngine:
                 missing.append(cand)
 
             if missing:
+                # Fallback: try alternative test file paths (#218).
+                # Different models place tests in different conventions:
+                #   module/test_x.py  vs  tests/test_module_x.py
+                still_missing = []
+                for m in missing:
+                    alt = self._find_test_file_alternative(m, eval_root)
+                    if alt:
+                        verified.append(alt)
+                        logger.info(
+                            "FILE_EXISTS fallback: %s → %s", m, alt,
+                        )
+                    else:
+                        still_missing.append(m)
+                missing = still_missing
+
+            if missing:
                 # Actionable feedback: show expected vs actual files (#160)
                 msg = (
                     f"Required file(s) missing: {missing}. "
@@ -587,6 +603,43 @@ class EvaluatorEngine:
         missing = [f for f in files if not (base / f).exists()]
         passed = len(missing) == 0
         return passed, f"Missing: {missing}" if missing else "All required files present"
+
+    @staticmethod
+    def _find_test_file_alternative(expected: str, base: Path) -> str | None:
+        """Search common alternative locations for test files (#218).
+
+        Handles the convention mismatch where planner expects
+        ``module/test_x.py`` but agent creates ``tests/test_module_x.py``.
+        Only matches test files (containing ``test_`` in path).
+        """
+        if "test_" not in expected:
+            return None  # Only apply to test files
+
+        path = Path(expected)
+        stem = path.stem       # e.g. test_hasher
+        parent = path.parent   # e.g. fileutils
+        parent_name = parent.name if parent.name else ""
+
+        # Build alternative patterns for test files
+        alternatives: list[str] = []
+        if parent_name:
+            # module/test_x.py → tests/test_module_x.py
+            alternatives.append(f"tests/test_{parent_name}_{stem.replace('test_', '', 1)}.py")
+            # module/test_x.py → tests/test_x.py
+            alternatives.append(f"tests/{stem}.py")
+            # module/test_x.py → test/test_module_x.py
+            alternatives.append(f"test/test_{parent_name}_{stem.replace('test_', '', 1)}.py")
+        else:
+            # test_x.py → tests/test_x.py
+            alternatives.append(f"tests/{stem}.py")
+            alternatives.append(f"test/{stem}.py")
+
+        for alt in alternatives:
+            alt_path = base / alt
+            if alt_path.is_file() and alt_path.stat().st_size > 0:
+                return str(alt_path)
+
+        return None
 
     def _check_files_exist_loose(self, patterns: list[str], base: Path) -> tuple[bool, str]:
         """Loose file matching: exact, glob by name, or substring match."""
