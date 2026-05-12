@@ -96,6 +96,13 @@ Rules:
     plan_validator.py) unless the task explicitly requires it.
 12. For library/module tasks, create self-contained files that do not
     import from or depend on the project's internal modules.
+13. When modifying enums, constants, or shared definitions:
+    - FIRST use grep to find ALL references across the codebase.
+    - List every file that references the changed symbol.
+    - Update ALL reference sites systematically (mappings, validators,
+      tests, specs).
+    - Verify completeness: grep -r "SYMBOL_NAME" . --include="*.py"
+      should return 0 stale references.
 
 Work systematically: gather context → implement → verify.
 """,
