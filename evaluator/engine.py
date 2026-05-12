@@ -13,8 +13,10 @@ runs a fixed ``python -m pytest`` via subprocess with shell=False.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from core.models import (
@@ -24,6 +26,80 @@ from core.models import (
     SuccessCriterion,
 )
 from session.store import SessionStore
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class LintIssue:
+    """A single lint issue parsed from flake8 output."""
+
+    path: str  # relative to work_dir
+    line: int
+    col: int
+    code: str  # e.g. "E501", "E402"
+    message: str
+
+
+def parse_flake8_output(output: str) -> list[LintIssue]:
+    """Parse flake8 stdout into structured LintIssue list."""
+    issues: list[LintIssue] = []
+    for line in output.splitlines():
+        m = re.match(
+            r"^(.+?):(\d+):(\d+):\s+([A-Z]\d+)\s+(.+)$", line,
+        )
+        if m:
+            issues.append(LintIssue(
+                path=m.group(1),
+                line=int(m.group(2)),
+                col=int(m.group(3)),
+                code=m.group(4),
+                message=m.group(5),
+            ))
+    return issues
+
+
+def get_changed_lines(
+    file_paths: list[str],
+    work_dir: Path,
+) -> dict[str, set[int]]:
+    """Return {relative_path: set_of_changed_line_numbers} via git diff.
+
+    Uses ``git diff --unified=0`` against HEAD (or index for uncommitted).
+    Returns empty dict if git is not available or the directory is not a repo.
+    """
+    result: dict[str, set[int]] = {}
+    for fp in file_paths:
+        abs_path = work_dir / fp
+        try:
+            p = abs_path if abs_path.exists() else Path(fp)
+            diff_out = subprocess.run(
+                ["git", "diff", "--unified=0", "--", str(p)],
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+                timeout=10,
+                cwd=str(work_dir),
+            )
+            if diff_out.returncode != 0:
+                continue
+            lines: set[int] = set()
+            for hunk in re.finditer(
+                r"@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@",
+                diff_out.stdout,
+            ):
+                start = int(hunk.group(1))
+                count = int(hunk.group(2) or "1")
+                for n in range(start, start + count):
+                    lines.add(n)
+            if lines:
+                try:
+                    rel = str(abs_path.relative_to(work_dir))
+                except ValueError:
+                    rel = fp
+                result[rel] = lines
+        except (FileNotFoundError, OSError):
+            continue
+    return result
 
 
 class EvaluatorEngine:
@@ -272,18 +348,16 @@ class EvaluatorEngine:
             return False, f"Test execution error: {e}"
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        """Auto-fix then verify lint for resolved target files.
+        """Auto-fix then delta-lint resolved target files.
 
-        Phase 1 (auto-fix): Runs autoflake (F401/F841) and autopep8 (E501)
-        --in-place on resolved targets.  Snapshots file contents before/after
-        autoflake to detect which files were actually modified.
+        Phase 1 (auto-fix): autoflake (F401/F841) + autopep8 (E501).
 
-        Phase 2 (verify): Runs flake8 (or ruff as fallback) on the same
-        targets.  If auto-fix tools are not installed, the verify phase
-        proceeds without them; if flake8/ruff is not installed, returns
-        failure.
+        Phase 2 (verify): Run flake8, parse output into LintIssue list,
+        then use git diff to determine which lines the agent changed.
+        Only issues on changed lines count as failures (#150).
 
-        Only lints specific files — does NOT recursively scan directories.
+        If git is not available, falls back to all issues → failure
+        (same as pre-#150 behavior).
         """
         self._last_autofixed = []
 
@@ -351,16 +425,16 @@ class EvaluatorEngine:
         except Exception:
             pass
 
+        # Run flake8 (or ruff fallback)
+        lint_stdout = ""
         try:
             result = subprocess.run(
-                ["python", "-m", "flake8"] + resolved + ["--max-line-length=100"],
+                ["python", "-m", "flake8"] + resolved
+                + ["--max-line-length=100"],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60,
             )
-            if result.returncode == 0:
-                msg = "Lint clean"
-            else:
-                msg = f"Lint issues:\n{result.stdout[:500]}"
+            lint_stdout = result.stdout
         except FileNotFoundError:
             try:
                 result = subprocess.run(
@@ -368,20 +442,97 @@ class EvaluatorEngine:
                     capture_output=True, text=True,
                     encoding="utf-8", errors="replace", timeout=60,
                 )
-                if result.returncode == 0:
-                    msg = "Ruff clean"
-                else:
-                    msg = f"Ruff issues:\n{result.stdout[:500]}"
+                lint_stdout = result.stdout
             except FileNotFoundError:
                 return False, "No linter available (install flake8 or ruff)"
         except Exception as e:
             return False, f"Lint error: {e}"
 
-        if autofixed:
-            autofix_msg = f"Autoflake auto-fixed: {', '.join(autofixed)}"
-            msg = f"{autofix_msg}\n{msg}"
+        if result.returncode == 0:
+            msg = "Lint clean"
+            if autofixed:
+                msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+            return True, msg
 
-        return result.returncode == 0, msg
+        # Parse all lint issues
+        all_issues = parse_flake8_output(lint_stdout)
+        if not all_issues:
+            # Could not parse (unexpected format) — treat as before
+            msg = f"Lint issues:\n{lint_stdout[:500]}"
+            if autofixed:
+                msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+            return False, msg
+
+        # Delta lint: use git diff to find changed lines (#150)
+        rel_targets = []
+        for r in resolved:
+            try:
+                rel_targets.append(str(Path(r).relative_to(work_dir)))
+            except ValueError:
+                rel_targets.append(Path(r).name)
+
+        changed = get_changed_lines(rel_targets, work_dir)
+
+        if changed:
+            # Only issues on changed lines are "new"
+            new_issues: list[LintIssue] = []
+            existing_issues: list[LintIssue] = []
+            for issue in all_issues:
+                issue_path = issue.path
+                # Normalize to relative for comparison
+                try:
+                    issue_path = str(
+                        Path(issue.path).relative_to(work_dir),
+                    )
+                except ValueError:
+                    pass
+                changed_lines = changed.get(issue_path, set())
+                if issue.line in changed_lines:
+                    new_issues.append(issue)
+                else:
+                    existing_issues.append(issue)
+
+            if not new_issues:
+                msg = "Lint clean (all issues are pre-existing)"
+            else:
+                new_lines = [
+                    f"  - {i.path}:{i.line} {i.code} {i.message}"
+                    for i in new_issues
+                ]
+                msg = (
+                    f"Lint failed: {len(new_issues)} new issue(s)"
+                )
+                if existing_issues:
+                    msg += (
+                        f", {len(existing_issues)} existing ignored"
+                    )
+                msg += "\nNEW:\n" + "\n".join(new_lines)
+                if existing_issues:
+                    existing_lines = [
+                        f"  - {i.path}:{i.line} {i.code} {i.message}"
+                        for i in existing_issues[:10]
+                    ]
+                    msg += (
+                        "\nIGNORED_EXISTING:\n"
+                        + "\n".join(existing_lines)
+                    )
+                    if len(existing_issues) > 10:
+                        msg += (
+                            f"\n  ... and {len(existing_issues) - 10} more"
+                        )
+        else:
+            # No git diff available — all issues are potential failures
+            new_issues = all_issues
+            lines = [
+                f"  - {i.path}:{i.line} {i.code} {i.message}"
+                for i in all_issues
+            ]
+            msg = "Lint issues (delta unavailable):\n" + "\n".join(lines)
+
+        if autofixed:
+            msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+
+        return len(new_issues) == 0, msg
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
         missing = [f for f in files if not (base / f).exists()]
