@@ -202,6 +202,17 @@ def _parse_template_vars(var_list: list[str]) -> dict[str, str]:
 
 async def cmd_plan(args):
     """Generate an execution plan (DAG) from requirements."""
+    # Read requirement from --file or positional arg (#224)
+    if getattr(args, "file", None):
+        file_path = args.file
+        if file_path == "-":
+            args.requirement = sys.stdin.read().strip()
+        else:
+            args.requirement = Path(file_path).read_text(encoding="utf-8").strip()
+    elif not args.requirement:
+        print("Error: provide a requirement argument or use --file <path>", file=sys.stderr)
+        sys.exit(1)
+
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
@@ -534,6 +545,18 @@ async def cmd_execute(args, dag: DAG | None = None):
 
 async def cmd_run(args):
     """Plan + Execute in one command."""
+    # Read requirement from --file or positional arg (#224)
+    if getattr(args, "file", None):
+        file_path = args.file
+        if file_path == "-":
+            requirement = sys.stdin.read().strip()
+        else:
+            requirement = Path(file_path).read_text(encoding="utf-8").strip()
+        args.requirement = requirement
+    elif not args.requirement:
+        print("Error: provide a requirement argument or use --file <path>", file=sys.stderr)
+        sys.exit(1)
+
     # Safety: resolve project path before plan to ensure consistency
     project = _resolve_project_path(
         args.project,
@@ -1220,7 +1243,11 @@ Examples:
         "--project", default=argparse.SUPPRESS,
         help="Path to project directory (overrides top-level --project)",
     )
-    plan_parser.add_argument("requirement", help="User requirement")
+    plan_parser.add_argument(
+        "--file", "-f", default=None,
+        help="Read requirement from file (avoids shell escaping issues)",
+    )
+    plan_parser.add_argument("requirement", nargs="?", default=None, help="User requirement")
     plan_parser.add_argument(
         "--template",
         help="Use a named DAG template instead of LLM planning",
@@ -1265,7 +1292,11 @@ Examples:
         "--project", default=argparse.SUPPRESS,
         help="Path to project directory (overrides top-level --project)",
     )
-    run_parser.add_argument("requirement", help="User requirement")
+    run_parser.add_argument(
+        "--file", "-f", default=None,
+        help="Read requirement from file (avoids shell escaping issues)",
+    )
+    run_parser.add_argument("requirement", nargs="?", default=None, help="User requirement")
     run_parser.add_argument(
         "--template",
         help="Use a named DAG template instead of LLM planning",
