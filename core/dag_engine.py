@@ -532,35 +532,92 @@ class DAGExecutionEngine:
                 )
 
                 if not eval_result.passed:
-                    # Track best attempt to detect retry regression (#129).
+                    # Track best attempt to detect retry regression (#129, #151).
                     prev_best = self._best_attempts.get(node_id)
-                    if prev_best is None or eval_result.score > prev_best["score"]:
+                    current_issues = set(
+                        eval_result.metadata.get(
+                            "lint_new_issues",
+                            eval_result.metadata.get("lint_all_issues", []),
+                        )
+                    )
+                    is_regression = False
+                    if prev_best is None:
                         self._best_attempts[node_id] = {
                             "score": eval_result.score,
                             "artifacts": node.output_artifacts.copy(),
                             "feedback": eval_result.feedback,
+                            "lint_issues": current_issues,
+                        }
+                    elif eval_result.score > prev_best["score"]:
+                        self._best_attempts[node_id] = {
+                            "score": eval_result.score,
+                            "artifacts": node.output_artifacts.copy(),
+                            "feedback": eval_result.feedback,
+                            "lint_issues": current_issues,
                         }
                     else:
+                        # Score not improved — check issue-level regression (#151)
+                        prev_issues: set[str] = prev_best.get(
+                            "lint_issues", set(),
+                        )
+                        new_in_current = current_issues - prev_issues
+                        fixed_from_prev = prev_issues - current_issues
+                        if new_in_current and not fixed_from_prev:
+                            # Only new issues, nothing fixed → true regression
+                            is_regression = True
+                        elif (
+                            len(new_in_current) > len(fixed_from_prev)
+                            and eval_result.score < prev_best["score"]
+                        ):
+                            # More new issues than fixed AND score dropped
+                            is_regression = True
+                        else:
+                            # Partial progress: some issues fixed, some new
+                            # introduced. Update best if more were fixed.
+                            self._best_attempts[node_id] = {
+                                "score": eval_result.score,
+                                "artifacts": node.output_artifacts.copy(),
+                                "feedback": eval_result.feedback,
+                                "lint_issues": current_issues,
+                            }
                         logger.warning(
-                            "Node %s retry score %.1f <= best %.1f (regression risk)",
+                            "Node %s retry score %.1f <= best %.1f "
+                            "(new_issues=%d, fixed=%d, regression=%s)",
                             node_id, eval_result.score, prev_best["score"],
+                            len(new_in_current), len(fixed_from_prev),
+                            is_regression,
                         )
                     node.retry_count += 1
                     # Build retry feedback with regression awareness.
                     best = self._best_attempts[node_id]
                     regression_hint = ""
-                    if eval_result.score < best["score"]:
+                    if is_regression or eval_result.score < best["score"]:
                         regression_hint = (
                             "\n\nWARNING: Your previous attempt scored higher "
                             f"({best['score']:.1f} vs current {eval_result.score:.1f}). "
                             "The code may already be correct — only fix the "
                             "specific issues reported, do NOT rewrite working code."
                         )
+                    # Add targeted lint fix guidance (#151)
+                    prev_issues = best.get("lint_issues", set())
+                    curr_issues = current_issues
+                    new_only = curr_issues - prev_issues
+                    if new_only and not regression_hint:
+                        lint_guidance = (
+                            "\n\nLINT_FIX_GUIDANCE: Fix ONLY these new lint "
+                            "issues. Do NOT rewrite working code:\n"
+                            + "\n".join(
+                                f"  - {iss}" for iss in sorted(new_only)[:10]
+                            )
+                        )
+                    else:
+                        lint_guidance = ""
                     node.eval_feedback = (
                         f"{eval_result.feedback}\n\n"
                         f"Output artifacts: {node.output_artifacts or 'none'}\n"
                         f"Fix ALL issues listed above."
                         f"{regression_hint}"
+                        f"{lint_guidance}"
                     )
                     node.error = f"Evaluation failed (score: {eval_result.score}): {eval_result.feedback}"
                     node.status = NodeStatus.FAILED
