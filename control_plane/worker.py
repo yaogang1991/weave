@@ -653,16 +653,16 @@ class TaskWorker:
 
             # 3. Handle result.
             if run.status == RunStatus.SUCCEEDED:
-                await asyncio.to_thread(
-                    self.repository.transition_job_status,
-                    job_id,
-                    JobStatus.SUCCEEDED,
+                # RunService already transitioned RUNNING -> SUCCEEDED.
+                # Worker only reads and logs — no double-push.
+                current_job = await asyncio.to_thread(
+                    self.repository.get_job, job_id,
                 )
                 _json_log(
                     "INFO",
                     "Job completed successfully",
                     job_id=job_id,
-                    status=JobStatus.SUCCEEDED.value,
+                    status=current_job.status.value if current_job else "unknown",
                 )
             else:
                 # run_job has already performed RUNNING -> FAILED -> QUEUED
@@ -746,13 +746,14 @@ class TaskWorker:
                     try:
                         run = await self.run_service.run_job(job_id)
                         if run.status == RunStatus.SUCCEEDED:
-                            await asyncio.to_thread(
-                                self.repository.transition_job_status,
-                                job_id, JobStatus.SUCCEEDED,
+                            # RunService already transitioned RUNNING -> SUCCEEDED.
+                            current_job = await asyncio.to_thread(
+                                self.repository.get_job, job_id,
                             )
                             _json_log(
                                 "INFO", "Job completed after approval",
-                                job_id=job_id, status=JobStatus.SUCCEEDED.value,
+                                job_id=job_id,
+                                status=current_job.status.value if current_job else "unknown",
                             )
                         else:
                             raise RuntimeError(
