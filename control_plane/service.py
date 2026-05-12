@@ -137,9 +137,6 @@ class RunService:
         self._hooks: list[Any] = []
         self._register_hooks()
 
-        # M2.1/M2.2: Backend manager for isolated execution
-        from backend.lifecycle import BackendManager
-
         self.default_backend = default_backend
         self.backend_base_path = backend_base_path
 
@@ -230,27 +227,11 @@ class RunService:
                     "Submit jobs with --project /path/to/target."
                 )
             project_root = Path(job.project_path).resolve()
-            from backend.lifecycle import BackendManager
-            from backend.base import WorkspaceIsolation, ExecutionSandbox
-            from core.config import HarnessConfig
-            harness_config = HarnessConfig.from_env()
-            # Select sandbox: use config value, but fall back to LOCAL if unavailable
-            sandbox_type = ExecutionSandbox(
-                harness_config.sandbox.runtime
-                if harness_config.sandbox.runtime in ("local", "docker")
-                else "local"
-            )
-            backend_manager = BackendManager(
-                workspace=WorkspaceIsolation(harness_config.default_backend),
-                sandbox=sandbox_type,
-                repo_root=str(project_root),
-                base_path=self.backend_base_path,
-                workspace_by_risk=harness_config.risk_backend_map,
-                cleanup_policy=harness_config.cleanup_policy,
-            )
-            work_dir = backend_manager.setup(
-                job_id=job.id,
-                run_id=run.id,
+            from control_plane.backend_lifecycle import BackendLifecycleService
+            bls = BackendLifecycleService(backend_base_path=self.backend_base_path)
+            backend_manager = bls.create_backend_manager(str(project_root))
+            work_dir = bls.setup_workspace(
+                backend_manager, job_id=job.id, run_id=run.id,
                 risk_level=job.metadata.get("risk_level"),
             )
 
@@ -259,17 +240,11 @@ class RunService:
                 self.approval_repo.expire_tickets()
 
             # --- Lifecycle hook: after_create ---
-            hooks = self._load_project_hooks(job.project_path)
-            if hooks.get("after_create"):
-                await backend_manager.execute_hook(
-                    "after_create", hooks["after_create"], work_dir,
-                )
+            hooks = BackendLifecycleService.load_project_hooks(job.project_path)
+            await bls.run_hook(backend_manager, "after_create", hooks, work_dir)
 
             # --- Lifecycle hook: before_run ---
-            if hooks.get("before_run"):
-                await backend_manager.execute_hook(
-                    "before_run", hooks["before_run"], work_dir,
-                )
+            await bls.run_hook(backend_manager, "before_run", hooks, work_dir)
 
             # --- Core execution (with task-level timeout) ---
             result_dag = await asyncio.wait_for(
@@ -278,10 +253,7 @@ class RunService:
             )
 
             # --- Lifecycle hook: after_run ---
-            if hooks.get("after_run"):
-                await backend_manager.execute_hook(
-                    "after_run", hooks["after_run"], work_dir,
-                )
+            await bls.run_hook(backend_manager, "after_run", hooks, work_dir)
 
             # --- Summarize ---
             orchestrator = self._create_orchestrator(store)
@@ -332,10 +304,7 @@ class RunService:
                     job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
                 )
                 if work_dir is not None:
-                    try:
-                        backend_manager.preserve(job.id, run.id, reason=error_cat or "failed")
-                    except Exception:
-                        pass  # Backend cleanup failure must not mask original error
+                    bls.preserve(backend_manager, job.id, run.id, reason=error_cat or "failed")
                 job = self.repository.get_job(job_id)
                 assert job is not None
                 # Apply retry policy: FAILED -> QUEUED (retry) or DEAD_LETTER
@@ -347,10 +316,7 @@ class RunService:
                     job_id, job_status, error=error_msg, error_category=error_cat,
                 )
                 if work_dir is not None:
-                    try:
-                        backend_manager.cleanup(job.id, run.id)
-                    except Exception:
-                        pass  # Backend cleanup failure must not mask original error
+                    bls.cleanup(backend_manager, job.id, run.id)
 
         except asyncio.TimeoutError:
             # --- Timeout handling ---
@@ -373,10 +339,7 @@ class RunService:
                 job, error="Job execution timed out", error_category="timeout",
             )
             if work_dir is not None:
-                try:
-                    backend_manager.preserve(job.id, run.id, reason="timeout")
-                except Exception:
-                    pass
+                bls.preserve(backend_manager, job.id, run.id, reason="timeout")
 
         except asyncio.CancelledError:
             run = self._lifecycle.mark_canceled(run, "Run coroutine canceled")
@@ -386,10 +349,7 @@ class RunService:
                     job_id, JobStatus.CANCELED, error="Run canceled", error_category="tool_blocked",
                 )
             if work_dir is not None:
-                try:
-                    backend_manager.preserve(job.id, run.id, reason="canceled")
-                except Exception:
-                    pass
+                bls.preserve(backend_manager, job.id, run.id, reason="canceled")
             return self.repository.get_run(run.id) or run
 
         except PendingApprovalError as exc:
@@ -420,10 +380,7 @@ class RunService:
                 job, error=error_msg, error_category=error_cat,
             )
             if work_dir is not None:
-                try:
-                    backend_manager.preserve(job.id, run.id, reason=error_cat)
-                except Exception:
-                    pass
+                bls.preserve(backend_manager, job.id, run.id, reason=error_cat)
 
         finally:
             self._running_tasks.pop(job_id, None)
