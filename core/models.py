@@ -140,6 +140,7 @@ class DAGNode(BaseModel):
     output_artifacts: list[str] = Field(default_factory=list)
     success_criteria: list[str | SuccessCriterion] = Field(default_factory=list)
     eval_feedback: str = ""  # Evaluator feedback, passed back on retry
+    auto_eval_result: dict[str, Any] | None = None  # Auto-eval result for downstream evaluator agents (#145)
     max_retries: int = 3
     retry_count: int = 0
     workspace_strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED

@@ -594,6 +594,9 @@ class DAGExecutionEngine:
                     ),
                 )
 
+                # Store auto-eval result for downstream evaluator agents (#145)
+                node.auto_eval_result = eval_result.model_dump()
+
                 if not eval_result.passed:
                     # Track best attempt to detect retry regression (#129, #151).
                     prev_best = self._best_attempts.get(node_id)
@@ -841,6 +844,32 @@ class DAGExecutionEngine:
                     },
                 )
                 artifacts.append(artifact)
+
+                # Pass auto-eval results to downstream evaluator agents (#145)
+                if (
+                    dep_node.auto_eval_result
+                    and dag.nodes[node_id].agent_type == "evaluator"
+                ):
+                    eval_info = dep_node.auto_eval_result
+                    summary = (
+                        f"AUTOMATED EVALUATION RESULTS (already verified):\n"
+                        f"- Passed: {eval_info.get('passed')}\n"
+                        f"- Score: {eval_info.get('score')}\n"
+                        f"- Criteria: {eval_info.get('criteria_results')}\n"
+                        f"- Feedback:\n{eval_info.get('feedback', '')}\n"
+                    )
+                    artifacts.append(HandoffArtifact(
+                        from_agent="auto_evaluator",
+                        to_agent="evaluator",
+                        content=summary,
+                        metadata={
+                            "type": "evaluation_result",
+                            "passed": eval_info.get("passed"),
+                            "score": eval_info.get("score"),
+                            "criteria_results": eval_info.get("criteria_results"),
+                            "feedback": eval_info.get("feedback"),
+                        },
+                    ))
 
                 # M3.2: Share relevant memories from upstream agent
                 if (
