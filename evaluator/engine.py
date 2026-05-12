@@ -272,7 +272,7 @@ class EvaluatorEngine:
             if crit.test_path:
                 test_targets = crit.test_path
             elif output_artifacts:
-                test_targets = [a for a in output_artifacts if "test" in Path(a).name.lower()]
+                test_targets = self._find_test_files(output_artifacts, Path(work_dir))
             if not test_targets:
                 return True, "No test files to run (passed by default)", True
             passed, msg = self._run_tests(Path(work_dir), test_targets)
@@ -390,6 +390,51 @@ class EvaluatorEngine:
     # ------------------------------------------------------------------
     # Internal checkers — all return 2-tuple (bool, str)
     # ------------------------------------------------------------------
+
+    def _find_test_files(
+        self,
+        output_artifacts: list[str],
+        work_dir: Path,
+    ) -> list[str]:
+        """Find test files relevant to the current artifacts.
+
+        1. Test files already in output_artifacts.
+        2. Test files matching source artifact names (e.g. parser.py → test_parser.py).
+        This prevents pytest from collecting leftover test files from previous runs (#249).
+        """
+        test_files: list[str] = []
+
+        # Direct test files from artifacts
+        for a in output_artifacts:
+            name = Path(a).name.lower()
+            if "test" in name and name.endswith(".py"):
+                full = work_dir / a if not Path(a).is_absolute() else Path(a)
+                if full.exists():
+                    test_files.append(a)
+
+        # Infer test files from source artifact stems
+        source_stems: list[str] = []
+        for a in output_artifacts:
+            name = Path(a).name
+            lower = name.lower()
+            if lower.endswith(".py") and "test" not in lower:
+                source_stems.append(Path(a).stem)
+
+        if source_stems:
+            # Search for test files in common locations
+            search_dirs = [work_dir, work_dir / "tests"]
+            for search_dir in search_dirs:
+                if not search_dir.is_dir():
+                    continue
+                for tf in search_dir.glob("test_*.py"):
+                    stem = tf.stem  # e.g. "test_parser"
+                    module_name = stem[5:]  # strip "test_"
+                    if module_name in source_stems:
+                        rel = str(tf.relative_to(work_dir)) if tf.is_relative_to(work_dir) else str(tf)
+                        if rel not in test_files:
+                            test_files.append(rel)
+
+        return test_files
 
     def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None) -> tuple[bool, str]:
         """Run pytest with a fixed command. Never executes arbitrary commands."""
@@ -690,6 +735,18 @@ class EvaluatorEngine:
                 sys.executable, "-m", "pytest", "-v",
                 "--tb=short", "--cov-report=term-missing",
             ]
+
+            # Scope test collection to relevant test files only (#249).
+            # Without this, pytest collects leftover test files from previous
+            # runs that import modules no longer in the workspace.
+            test_targets: list[str] | None = None
+            if output_artifacts:
+                test_targets = self._find_test_files(output_artifacts, work_dir)
+
+            if test_targets:
+                for t in test_targets:
+                    p = Path(t)
+                    cmd.append(str(work_dir / p) if not p.is_absolute() else str(p))
 
             # Limit coverage scope to packages inferred from output artifacts
             if output_artifacts:
