@@ -70,6 +70,8 @@ class DAGExecutionEngine:
         # Retry backoff configuration
         backoff_base: float = 2.0,
         backoff_cap: float = 60.0,
+        # Per-agent-type heartbeat overrides: {agent_type: (interval, threshold)}
+        watchdog_overrides: dict[str, tuple[float, int]] | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -87,6 +89,7 @@ class DAGExecutionEngine:
         self.heartbeat_interval_sec = heartbeat_interval_sec
         self.heartbeat_miss_threshold = heartbeat_miss_threshold
         self.enable_watchdog = enable_watchdog
+        self._watchdog_overrides = watchdog_overrides or {}
         self._watchdog_task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
         self._running_tasks: dict[str, asyncio.Task] = {}  # M2.0: Tasks for cancellation
@@ -101,6 +104,12 @@ class DAGExecutionEngine:
         )
         # Best-attempt tracking to prevent retry regression (#129).
         self._best_attempts: dict[str, dict] = {}
+
+    def _get_heartbeat_settings(self, agent_type: str) -> tuple[float, int]:
+        """Return (interval_sec, miss_threshold) for the given agent type."""
+        if agent_type in self._watchdog_overrides:
+            return self._watchdog_overrides[agent_type]
+        return self.heartbeat_interval_sec, self.heartbeat_miss_threshold
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -157,6 +166,9 @@ class DAGExecutionEngine:
 
         Nodes exceeding miss_threshold are marked UNHEALTHY and killed.
 
+        Per-agent-type overrides are respected: generator nodes, for
+        example, are allowed longer timeouts than planner/evaluator.
+
         This runs as a background task during execute().
         """
         # Use 1.5x heartbeat interval to avoid watchdog/refresh timing collision
@@ -171,10 +183,10 @@ class DAGExecutionEngine:
                 if node.status != NodeStatus.RUNNING:
                     continue
 
-                health = node.check_health(
-                    self.heartbeat_interval_sec,
-                    self.heartbeat_miss_threshold,
+                interval, threshold = self._get_heartbeat_settings(
+                    node.agent_type,
                 )
+                health = node.check_health(interval, threshold)
 
                 if health == NodeHealth.MISSED:
                     # First missed heartbeat is likely a timing artifact —
@@ -185,7 +197,8 @@ class DAGExecutionEngine:
                             event_type="heartbeat_missed",
                             details={
                                 "missed_count": node.missed_heartbeats,
-                                "threshold": self.heartbeat_miss_threshold,
+                                "threshold": threshold,
+                                "agent_type": node.agent_type,
                                 "last_heartbeat": (
                                     node.last_heartbeat_at.isoformat()
                                     if node.last_heartbeat_at else None
@@ -197,7 +210,7 @@ class DAGExecutionEngine:
                             "Node %s heartbeat missed (count=%d, threshold=%d) "
                             "— likely timing artifact, not emitting event",
                             node_id, node.missed_heartbeats,
-                            self.heartbeat_miss_threshold,
+                            threshold,
                         )
 
                 elif health == NodeHealth.UNHEALTHY:
@@ -207,7 +220,8 @@ class DAGExecutionEngine:
                         event_type="unhealthy_killed",
                         details={
                             "missed_count": node.missed_heartbeats,
-                            "threshold": self.heartbeat_miss_threshold,
+                            "threshold": threshold,
+                            "agent_type": node.agent_type,
                             "action": "fail_fast",
                         },
                     ))
@@ -218,7 +232,7 @@ class DAGExecutionEngine:
                     node.error = (
                         f"Node killed by watchdog: "
                         f"{node.missed_heartbeats} heartbeats missed "
-                        f"(threshold: {self.heartbeat_miss_threshold})"
+                        f"(threshold: {threshold}, agent_type: {node.agent_type})"
                     )
                     node.completed_at = datetime.now(timezone.utc)
 
@@ -628,7 +642,7 @@ class DAGExecutionEngine:
     ) -> dict[str, Any]:
         """Execute a node while periodically refreshing heartbeat."""
         task = asyncio.create_task(self.agent_executor(node, input_artifacts))
-        heartbeat_interval = self.heartbeat_interval_sec
+        heartbeat_interval, _ = self._get_heartbeat_settings(node.agent_type)
 
         while not task.done():
             try:
