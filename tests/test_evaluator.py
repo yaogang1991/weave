@@ -2,6 +2,7 @@
 Tests for evaluator/engine.py — criterion checking, scoring, evaluation flow.
 """
 import json
+import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -56,7 +57,7 @@ class TestCriterionChecking:
             assert kwargs.get("shell") is not True
             # Verify fixed command
             args = mock_run.call_args[0][0]
-            assert args[0] == "python"
+            assert args[0] == sys.executable
             assert args[1] == "-m"
             assert args[2] == "pytest"
 
@@ -83,7 +84,7 @@ class TestCriterionChecking:
             evaluator._run_lint(["code.py"], tmp_path)
             args = mock_run.call_args[0][0]
             assert isinstance(args, list)
-            assert args[0] == "python"
+            assert args[0] == sys.executable
 
     def test_lint_autoflake_only_targets_resolved_files(self, evaluator, tmp_path):
         """autoflake must only be called with resolved target paths, not
@@ -97,7 +98,7 @@ class TestCriterionChecking:
             # First call = autoflake, second = flake8
             assert len(calls) >= 2
             autoflake_cmd = calls[0][0][0]
-            assert autoflake_cmd[0:3] == ["python", "-m", "autoflake"]
+            assert autoflake_cmd[0:3] == [sys.executable, "-m", "autoflake"]
             # autoflake args must contain resolved absolute paths
             for resolved in [str(tmp_path / "a.py"), str(tmp_path / "b.py")]:
                 assert resolved in autoflake_cmd
