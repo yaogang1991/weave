@@ -63,6 +63,7 @@ class EvaluationResult(BaseModel):
     criteria_results: dict[str, bool] = Field(default_factory=dict)
     feedback: str = ""
     suggestions: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CriterionType(str, Enum):

@@ -175,9 +175,9 @@ class TestCriterionChecking:
         passed, msg = evaluator._check_files_exist_loose(["totally_missing_file.py"], tmp_path)
         assert not passed
 
-    def test_file_exists_prefers_output_artifacts(self, evaluator, tmp_path):
-        """FILE_EXISTS verifies output_artifacts on disk, not just metadata."""
-        # Without files on disk → FAIL (fixes #158)
+    def test_file_exists_verifies_on_disk(self, evaluator, tmp_path):
+        """FILE_EXISTS verifies files on disk, not just output_artifacts (#158)."""
+        # planned.py not on disk → FAIL even though output_artifacts claims it
         result = evaluator.evaluate_stage(
             "s1", "impl",
             [SuccessCriterion(type=CriterionType.FILE_EXISTS, path="planned.py", description="file")],
@@ -197,17 +197,18 @@ class TestCriterionChecking:
         assert result.passed
 
     @patch("evaluator.engine.subprocess.run")
-    def test_coverage_no_total_line_passes_as_tool_error(self, mock_run, evaluator, tmp_path):
-        """If pytest returns 0 but stdout has no TOTAL line, coverage passes
-        as unverifiable (tool error) to avoid triggering generator retry (#129)."""
+    def test_coverage_no_total_line_fails(self, mock_run, evaluator, tmp_path):
+        """If pytest returns 0 but stdout has no TOTAL line, coverage must
+        FAIL — unverifiable coverage is not a pass (see #152)."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="2 passed in 0.01s\n",
             stderr="",
         )
-        passed, msg = evaluator._check_coverage(tmp_path, 80)
-        assert passed
+        passed, msg, auto = evaluator._check_coverage(tmp_path, 80)
+        assert not passed
+        assert auto
         assert "could not be parsed" in msg
-        assert "tool error" in msg
+        assert "not verified" in msg
 
 
 class TestEvaluateStage:
@@ -220,6 +221,29 @@ class TestEvaluateStage:
         assert isinstance(result, EvaluationResult)
         assert result.passed
         assert result.score > 0
+
+    @patch("evaluator.engine.subprocess.run")
+    def test_coverage_unparseable_emits_warn_not_pass(self, mock_run, evaluator, tmp_path):
+        """Coverage parse failure should produce WARN, not PASS (#152)."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="2 passed in 0.01s\n", stderr="",
+        )
+        result = evaluator.evaluate_stage(
+            "s1", "impl",
+            [SuccessCriterion(
+                type=CriterionType.COVERAGE, target=80,
+                description="coverage >= 80%",
+            )],
+            str(tmp_path),
+            output_artifacts=["src/module.py"],
+        )
+        # Overall passed=True because WARN doesn't fail the stage
+        assert result.passed
+        # But feedback must say WARN, not PASS
+        assert "WARN" in result.feedback
+        assert "could not be parsed" in result.feedback
+        # coverage should be in suggestions (uncheckable list)
+        assert "coverage >= 80%" in result.suggestions
 
     def test_uncheckable_criterion_passes_with_warning(self, evaluator, tmp_path):
         result = evaluator.evaluate_stage(

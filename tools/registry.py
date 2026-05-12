@@ -342,24 +342,45 @@ class ToolRegistry:
 
         try:
             run_cwd = self._resolve_safe_cwd(cwd)
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-                cwd=str(run_cwd),
-            )
-            output = result.stdout
-            if result.stderr:
-                output += "\n" + result.stderr
+            if self.sandbox_runner is not None:
+                result = self.sandbox_runner.run_command(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                    cwd=str(run_cwd),
+                )
+            else:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                    cwd=str(run_cwd),
+                )
+            # Normalize result: subprocess.CompletedProcess vs CommandResult
+            if hasattr(result, "returncode"):
+                returncode = result.returncode
+                stdout = result.stdout
+                stderr = result.stderr
+            else:
+                returncode = 0 if getattr(result, "success", True) else 1
+                stdout = getattr(result, "stdout", "")
+                stderr = getattr(result, "stderr", "")
+            output = stdout
+            if stderr:
+                output += "\n" + stderr
             return ToolResult(
                 tool_call_id="",
-                success=result.returncode == 0,
+                success=returncode == 0,
                 output=output,
-                error=result.stderr if result.returncode != 0 else "",
+                error=stderr if returncode != 0 else "",
             )
         except subprocess.TimeoutExpired:
             return ToolResult(tool_call_id="", success=False, error=f"Command timed out after {timeout}s")

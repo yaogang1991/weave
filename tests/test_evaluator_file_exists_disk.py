@@ -109,7 +109,7 @@ class TestFileExistsDiskVerification:
             crit, str(work_dir), output_artifacts=None,
         )
         assert passed is True
-        assert "loose" in msg.lower()
+        assert "verified on disk" in msg.lower()
 
 
 class TestCheckFilesExistStrict:

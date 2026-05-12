@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from core.models import AgentMessage
@@ -25,6 +26,20 @@ from agent.worker import AgentWorker
 from tools.registry import ToolRegistry
 from guardrails.policy import Guardrails, GuardrailResult
 from core.models import ToolResult
+
+
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Explicit per-node execution context passed through the tool call chain.
+
+    Replaces the former pattern of storing run_id/node_id on WorkerAgent
+    instance fields, which was unsafe under concurrent execution.
+    """
+
+    job_id: str = ""
+    run_id: str | None = None
+    node_id: str | None = None
+    approval_repo: Any | None = None
 
 
 class WorkerAgent:
@@ -160,24 +175,30 @@ Evaluate against:
         self.job_id = job_id
         self.approval_repo = approval_repo
 
-        # Dynamic execution context — set per node execution
-        self._current_run_id: str | None = None
-        self._current_node_id: str | None = None
-
         # Build agent-specific system prompt
         system_prompt = capability.system_prompt or self.SYSTEM_PROMPTS.get(
             capability.id,
             f"You are the {capability.name} agent. {capability.description}"
         )
 
-        self.worker = AgentWorker(llm_config, session_store, max_context_tokens=max_context_tokens)
+        base_cwd = str(tool_registry.base_cwd) if tool_registry.base_cwd else None
+        self.worker = AgentWorker(
+            llm_config, session_store,
+            max_context_tokens=max_context_tokens,
+            base_cwd=base_cwd,
+        )
         self.system_prompt = system_prompt
 
         # Filter tools by agent type
         allowed = self.TOOL_ALLOWLIST.get(capability.id, {"read", "glob", "grep"})
         self.tools = [s for s in tool_registry.schemas if s["name"] in allowed]
 
-    def _execute_tool(self, name: str, arguments: dict) -> ToolResult:
+    def _execute_tool(
+        self,
+        name: str,
+        arguments: dict,
+        context: ExecutionContext,
+    ) -> ToolResult:
         """Execute a tool through guardrails with approval context.
 
         Uses check_and_execute() which:
@@ -189,10 +210,10 @@ Evaluate against:
         if self.guardrails:
             result = self.guardrails.check_and_execute(
                 name, arguments,
-                job_id=self.job_id,
-                run_id=self._current_run_id,
-                approval_repo=self.approval_repo,
-                node_id=self._current_node_id,
+                job_id=context.job_id or self.job_id,
+                run_id=context.run_id,
+                approval_repo=context.approval_repo or self.approval_repo,
+                node_id=context.node_id,
             )
             if isinstance(result, GuardrailResult):
                 if result.is_pending:
@@ -223,15 +244,15 @@ Evaluate against:
         Context isolation: Each execution starts fresh - previous
         executions do not pollute the context window.
         """
-        # Set dynamic execution context for tool execution
-        self._current_run_id = run_id
-        self._current_node_id = node_id
-
-        try:
-            return await self._execute_inner(task, input_artifacts, session_id, node_id)
-        finally:
-            self._current_run_id = None
-            self._current_node_id = None
+        context = ExecutionContext(
+            job_id=self.job_id,
+            run_id=run_id,
+            node_id=node_id,
+            approval_repo=self.approval_repo,
+        )
+        return await self._execute_inner(
+            task, input_artifacts, session_id, node_id, context,
+        )
 
     async def _execute_inner(
         self,
@@ -239,6 +260,7 @@ Evaluate against:
         input_artifacts: list[HandoffArtifact],
         session_id: str,
         node_id: str | None = None,
+        context: ExecutionContext | None = None,
     ) -> dict[str, Any]:
         """Internal execute implementation."""
         # Build context from input artifacts
@@ -279,7 +301,7 @@ Execute using your available tools. Produce clear, verifiable output.
 """
 
         # Run the agent (dumb loop) via AgentWorker
-        result = await self._run_with_tools(full_prompt, session_id)
+        result = await self._run_with_tools(full_prompt, session_id, context)
 
         # M3.2: Store learnings from execution result
         if (
@@ -302,18 +324,28 @@ Execute using your available tools. Produce clear, verifiable output.
 
         return result
 
-    async def _run_with_tools(self, prompt: str, session_id: str) -> dict[str, Any]:
+    async def _run_with_tools(
+        self,
+        prompt: str,
+        session_id: str,
+        context: ExecutionContext | None = None,
+    ) -> dict[str, Any]:
         """Run agent loop and collect results via AgentWorker."""
 
-        # AgentWorker expects a tool_executor with execute(name, arguments) -> ToolResult
-        # WorkerAgent.execute() is the *task* interface, so we wrap _execute_tool.
-        class _ToolExecutor:
-            def __init__(self, agent: WorkerAgent):
-                self._agent = agent
-            def execute(self, name: str, arguments: dict):
-                return self._agent._execute_tool(name, arguments)
+        _ctx = context or ExecutionContext()
 
-        tool_executor = _ToolExecutor(self)
+        # AgentWorker expects a tool_executor with execute(name, arguments) -> ToolResult
+        class _ToolExecutor:
+            def __init__(self, agent: WorkerAgent, ctx: ExecutionContext):
+                self._agent = agent
+                self._ctx = ctx
+
+            def execute(self, name: str, arguments: dict):
+                return self._agent._execute_tool(
+                    name, arguments, self._ctx,
+                )
+
+        tool_executor = _ToolExecutor(self, _ctx)
 
         def _run_sync() -> list[AgentMessage]:
             return list(
@@ -410,10 +442,13 @@ class AgentPool:
         exc_name = type(exc).__name__
         return any(
             substr in exc_name
-            for substr in ("Authentication", "Permission", "RateLimit", "API", "Connection", "ServiceUnavailable")
+            for substr in (
+                "Authentication", "Permission", "RateLimit",
+                "API", "Connection", "ServiceUnavailable",
+            )
         )
 
-    def get_or_create(self, agent_type: str) -> WorkerAgent:
+    def create_worker(self, agent_type: str) -> WorkerAgent:
         """Create a fresh WorkerAgent instance for the given type.
 
         Always creates a new instance to prevent concurrent context pollution
@@ -443,6 +478,9 @@ class AgentPool:
             approval_repo=self.approval_repo,
         )
 
+    # Backward-compatible alias
+    get_or_create = create_worker
+
     def get_executor(self, session_id: str):
         """
         Return a callable that the DAG engine can use to execute nodes.
@@ -455,7 +493,7 @@ class AgentPool:
         _log = logging.getLogger(__name__)
 
         async def _executor(node: DAGNode, artifacts: list[HandoffArtifact]) -> dict:
-            worker = self.get_or_create(node.agent_type)
+            worker = self.create_worker(node.agent_type)
             try:
                 return await worker.execute(
                     node.task_description, artifacts, session_id,

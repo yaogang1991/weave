@@ -70,6 +70,10 @@ class DAGExecutionEngine:
         # Retry backoff configuration
         backoff_base: float = 2.0,
         backoff_cap: float = 60.0,
+        # Per-agent-type heartbeat overrides: {agent_type: (interval, threshold)}
+        watchdog_overrides: dict[str, tuple[float, int]] | None = None,
+        # Per-agent-type alert thresholds: {agent_type: min_missed_for_alert}
+        alert_thresholds: dict[str, int] | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -87,9 +91,11 @@ class DAGExecutionEngine:
         self.heartbeat_interval_sec = heartbeat_interval_sec
         self.heartbeat_miss_threshold = heartbeat_miss_threshold
         self.enable_watchdog = enable_watchdog
+        self._watchdog_overrides = watchdog_overrides or {}
+        self._alert_thresholds = alert_thresholds or {}
         self._watchdog_task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
-        self._running_tasks: dict[str, asyncio.Task] = {}  # M2.0: Tasks for cancellation
+        self._running_tasks: dict[str, asyncio.Task] = {}
         # M3.2: Memory integration
         self.memory_manager = memory_manager
         self._session_id = session_id
@@ -101,6 +107,18 @@ class DAGExecutionEngine:
         )
         # Best-attempt tracking to prevent retry regression (#129).
         self._best_attempts: dict[str, dict] = {}
+
+    def _get_heartbeat_settings(self, agent_type: str) -> tuple[float, int]:
+        """Return (interval_sec, miss_threshold) for the given agent type."""
+        if agent_type in self._watchdog_overrides:
+            return self._watchdog_overrides[agent_type]
+        return self.heartbeat_interval_sec, self.heartbeat_miss_threshold
+
+    def _get_alert_threshold(self, agent_type: str) -> int:
+        """Minimum missed_count to emit heartbeat_missed event."""
+        if agent_type in self._alert_thresholds:
+            return self._alert_thresholds[agent_type]
+        return 2
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -150,16 +168,19 @@ class DAGExecutionEngine:
         """
         Watchdog coroutine: monitors running nodes' heartbeats.
 
-        Checks all running nodes every watchdog interval (1.5x heartbeat
-        interval to avoid timing collisions). A single missed heartbeat
-        is logged as DEBUG (common timing artifact); two or more missed
-        heartbeats trigger a formal ``heartbeat_missed`` event.
+        Per-agent-type overrides are respected: generator nodes get more
+        generous intervals and thresholds.
 
         Nodes exceeding miss_threshold are marked UNHEALTHY and killed.
 
+        Per-agent-type overrides are respected: generator nodes, for
+        example, are allowed longer timeouts than planner/evaluator.
+
+        Alert events use a configurable threshold (default 50% of kill
+        threshold) to reduce noise from slow-but-healthy LLM APIs (#146).
+
         This runs as a background task during execute().
         """
-        # Use 1.5x heartbeat interval to avoid watchdog/refresh timing collision
         check_interval = self.heartbeat_interval_sec * 1.5
         while True:
             try:
@@ -171,21 +192,21 @@ class DAGExecutionEngine:
                 if node.status != NodeStatus.RUNNING:
                     continue
 
-                health = node.check_health(
-                    self.heartbeat_interval_sec,
-                    self.heartbeat_miss_threshold,
+                interval, threshold = self._get_heartbeat_settings(
+                    node.agent_type,
                 )
+                health = node.check_health(interval, threshold)
+                alert_min = self._get_alert_threshold(node.agent_type)
 
                 if health == NodeHealth.MISSED:
-                    # First missed heartbeat is likely a timing artifact —
-                    # log at DEBUG only. Emit event at missed_count >= 2.
-                    if node.missed_heartbeats >= 2:
+                    if node.missed_heartbeats >= alert_min:
                         await self._emit(ExecutionEvent(
                             node_id=node_id,
                             event_type="heartbeat_missed",
                             details={
                                 "missed_count": node.missed_heartbeats,
-                                "threshold": self.heartbeat_miss_threshold,
+                                "threshold": threshold,
+                                "agent_type": node.agent_type,
                                 "last_heartbeat": (
                                     node.last_heartbeat_at.isoformat()
                                     if node.last_heartbeat_at else None
@@ -194,43 +215,39 @@ class DAGExecutionEngine:
                         ))
                     else:
                         logger.debug(
-                            "Node %s heartbeat missed (count=%d, threshold=%d) "
-                            "— likely timing artifact, not emitting event",
+                            "Node %s heartbeat missed (count=%d, threshold=%d)"
+                            " — below alert_min=%d, not emitting event",
                             node_id, node.missed_heartbeats,
-                            self.heartbeat_miss_threshold,
+                            threshold, alert_min,
                         )
 
                 elif health == NodeHealth.UNHEALTHY:
-                    # Kill the node! Fail-fast path
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
                         event_type="unhealthy_killed",
                         details={
                             "missed_count": node.missed_heartbeats,
-                            "threshold": self.heartbeat_miss_threshold,
+                            "threshold": threshold,
+                            "agent_type": node.agent_type,
                             "action": "fail_fast",
                         },
                     ))
 
-                    # Mark node as failed via fail-fast
                     node.health_status = NodeHealth.DEAD
                     node.status = NodeStatus.FAILED
                     node.error = (
                         f"Node killed by watchdog: "
                         f"{node.missed_heartbeats} heartbeats missed "
-                        f"(threshold: {self.heartbeat_miss_threshold})"
+                        f"(threshold: {threshold}, agent_type: {node.agent_type})"
                     )
                     node.completed_at = datetime.now(timezone.utc)
 
-                    # Cancel the running task to unblock gather
                     task = self._running_tasks.pop(node_id, None)
                     if task and not task.done():
                         task.cancel()
 
-                    # Remove from running nodes
                     self._running_nodes.pop(node_id, None)
 
-                    # Emit workflow health alert
                     await self._emit(ExecutionEvent(
                         node_id="",
                         event_type="health_alert",
@@ -515,35 +532,92 @@ class DAGExecutionEngine:
                 )
 
                 if not eval_result.passed:
-                    # Track best attempt to detect retry regression (#129).
+                    # Track best attempt to detect retry regression (#129, #151).
                     prev_best = self._best_attempts.get(node_id)
-                    if prev_best is None or eval_result.score > prev_best["score"]:
+                    current_issues = set(
+                        eval_result.metadata.get(
+                            "lint_new_issues",
+                            eval_result.metadata.get("lint_all_issues", []),
+                        )
+                    )
+                    is_regression = False
+                    if prev_best is None:
                         self._best_attempts[node_id] = {
                             "score": eval_result.score,
                             "artifacts": node.output_artifacts.copy(),
                             "feedback": eval_result.feedback,
+                            "lint_issues": current_issues,
+                        }
+                    elif eval_result.score > prev_best["score"]:
+                        self._best_attempts[node_id] = {
+                            "score": eval_result.score,
+                            "artifacts": node.output_artifacts.copy(),
+                            "feedback": eval_result.feedback,
+                            "lint_issues": current_issues,
                         }
                     else:
+                        # Score not improved — check issue-level regression (#151)
+                        prev_issues: set[str] = prev_best.get(
+                            "lint_issues", set(),
+                        )
+                        new_in_current = current_issues - prev_issues
+                        fixed_from_prev = prev_issues - current_issues
+                        if new_in_current and not fixed_from_prev:
+                            # Only new issues, nothing fixed → true regression
+                            is_regression = True
+                        elif (
+                            len(new_in_current) > len(fixed_from_prev)
+                            and eval_result.score < prev_best["score"]
+                        ):
+                            # More new issues than fixed AND score dropped
+                            is_regression = True
+                        else:
+                            # Partial progress: some issues fixed, some new
+                            # introduced. Update best if more were fixed.
+                            self._best_attempts[node_id] = {
+                                "score": eval_result.score,
+                                "artifacts": node.output_artifacts.copy(),
+                                "feedback": eval_result.feedback,
+                                "lint_issues": current_issues,
+                            }
                         logger.warning(
-                            "Node %s retry score %.1f <= best %.1f (regression risk)",
+                            "Node %s retry score %.1f <= best %.1f "
+                            "(new_issues=%d, fixed=%d, regression=%s)",
                             node_id, eval_result.score, prev_best["score"],
+                            len(new_in_current), len(fixed_from_prev),
+                            is_regression,
                         )
                     node.retry_count += 1
                     # Build retry feedback with regression awareness.
                     best = self._best_attempts[node_id]
                     regression_hint = ""
-                    if eval_result.score < best["score"]:
+                    if is_regression or eval_result.score < best["score"]:
                         regression_hint = (
                             "\n\nWARNING: Your previous attempt scored higher "
                             f"({best['score']:.1f} vs current {eval_result.score:.1f}). "
                             "The code may already be correct — only fix the "
                             "specific issues reported, do NOT rewrite working code."
                         )
+                    # Add targeted lint fix guidance (#151)
+                    prev_issues = best.get("lint_issues", set())
+                    curr_issues = current_issues
+                    new_only = curr_issues - prev_issues
+                    if new_only and not regression_hint:
+                        lint_guidance = (
+                            "\n\nLINT_FIX_GUIDANCE: Fix ONLY these new lint "
+                            "issues. Do NOT rewrite working code:\n"
+                            + "\n".join(
+                                f"  - {iss}" for iss in sorted(new_only)[:10]
+                            )
+                        )
+                    else:
+                        lint_guidance = ""
                     node.eval_feedback = (
                         f"{eval_result.feedback}\n\n"
                         f"Output artifacts: {node.output_artifacts or 'none'}\n"
                         f"Fix ALL issues listed above."
                         f"{regression_hint}"
+                        f"{lint_guidance}"
                     )
                     node.error = f"Evaluation failed (score: {eval_result.score}): {eval_result.feedback}"
                     node.status = NodeStatus.FAILED
@@ -626,39 +700,41 @@ class DAGExecutionEngine:
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
     ) -> dict[str, Any]:
-        """Execute a node while periodically refreshing heartbeat."""
+        """Execute a node with a dedicated heartbeat coroutine.
+
+        A background task records heartbeats at the per-agent-type interval
+        independently of the executor task.  This avoids timing gaps that
+        could occur with the previous ``asyncio.wait_for`` polling approach
+        when the LLM API response time is close to the heartbeat interval.
+        """
         task = asyncio.create_task(self.agent_executor(node, input_artifacts))
-        heartbeat_interval = self.heartbeat_interval_sec
+        heartbeat_interval, _ = self._get_heartbeat_settings(node.agent_type)
 
-        while not task.done():
-            try:
-                # Shield the executor task so heartbeat polling timeouts do not
-                # cancel a healthy long-running node execution.
-                return await asyncio.wait_for(
-                    asyncio.shield(task),
-                    timeout=heartbeat_interval,
-                )
-            except asyncio.TimeoutError:
-                # The shielded task is still running (not done, not raised).
-                # Record heartbeat to indicate the executor coroutine is alive.
-                # A truly hung coroutine (e.g. blocked on unresolved future)
-                # will still appear alive here — but that is indistinguishable
-                # from a slow but healthy task at the async level. The watchdog
-                # protects against process-level hangs, not async-level stalls.
-                node.record_heartbeat()
-                continue
-            except asyncio.CancelledError:
-                # Watchdog (or caller) cancelled outer task: explicitly cancel
-                # the inner executor task and wait for cleanup to finish.
+        async def _heartbeat_loop() -> None:
+            while not task.done():
+                await asyncio.sleep(heartbeat_interval)
                 if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                raise
+                    node.record_heartbeat()
 
-        return await task
+        hb = asyncio.create_task(_heartbeat_loop())
+        try:
+            return await task
+        except asyncio.CancelledError:
+            # Watchdog (or caller) cancelled the task.
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            raise
+        finally:
+            if not hb.done():
+                hb.cancel()
+            try:
+                await hb
+            except asyncio.CancelledError:
+                pass
 
     def _collect_input_artifacts(self, dag: DAG, node_id: str) -> list[HandoffArtifact]:
         """Collect output artifacts from all dependency nodes."""

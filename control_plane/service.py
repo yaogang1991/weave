@@ -30,7 +30,7 @@ from typing import Any
 # Allow imports from project root (core/, orchestrator/, agent/, session/, ...)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.config import LLMConfig
+from core.config import LLMConfig, WatchdogConfig
 from core.dag_engine import DAGExecutionEngine
 from core.agent_registry import AgentRegistry
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
@@ -65,6 +65,11 @@ def _classify_error(error: str) -> str:
     if "watchdog" in lowered or "killed by watchdog" in lowered:
         return "watchdog"
     return "unknown"
+
+
+def _default_watchdog_config() -> WatchdogConfig:
+    """Create a WatchdogConfig with sensible defaults."""
+    return WatchdogConfig()
 
 
 # ============================================================================
@@ -109,6 +114,7 @@ class RunService:
         non_interactive: bool = False,
         approval_repo: Any | None = None,
         approval_timeout_sec: int = 300,
+        watchdog_config: Any | None = None,
     ) -> None:
         self.repository = repository
         self.llm_config = llm_config
@@ -122,6 +128,7 @@ class RunService:
         self.non_interactive = non_interactive
         self.approval_repo = approval_repo
         self.approval_timeout_sec = approval_timeout_sec
+        self.watchdog_config = watchdog_config or _default_watchdog_config()
         self._running_tasks: dict[str, asyncio.Task[Any]] = {}
 
         # Execution hooks — subsystems register lifecycle callbacks
@@ -957,6 +964,19 @@ class RunService:
             work_dir=str(work_dir) if work_dir else None,
             memory_manager=memory_manager,
             session_id=session_id,
+            heartbeat_interval_sec=self.watchdog_config.heartbeat_interval_sec,
+            heartbeat_miss_threshold=self.watchdog_config.heartbeat_miss_threshold,
+            enable_watchdog=self.watchdog_config.enabled,
+            watchdog_overrides={
+                agent_type: (ov.heartbeat_interval_sec, ov.heartbeat_miss_threshold)
+                for agent_type, ov in self.watchdog_config.agent_overrides.items()
+                if ov.heartbeat_interval_sec is not None
+                and ov.heartbeat_miss_threshold is not None
+            },
+            alert_thresholds={
+                agent_type: self.watchdog_config.alert_threshold_for(agent_type)
+                for agent_type in self.watchdog_config.agent_overrides
+            },
         )
 
         # Register event handler: forward DAG node events to session store

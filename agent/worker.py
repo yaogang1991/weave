@@ -33,12 +33,14 @@ class AgentWorker:
         config: LLMConfig,
         session_store: SessionStore,
         max_context_tokens: int = 100_000,
+        base_cwd: str | None = None,
     ):
         self.config = config
         self.session_store = session_store
         self.llm = LLMClient(config)
         self.max_context_tokens = max_context_tokens
         self.artifacts: list[str] = []
+        self._base_cwd = Path(base_cwd).resolve() if base_cwd else None
 
     # -- Public interface ---------------------------------------------------
 
@@ -88,6 +90,13 @@ class AgentWorker:
             # Execute tool calls
             tool_results = []
             for tc in assistant_message["tool_calls"]:
+                # Defensive: ensure tool_call_id is present (#169)
+                tool_call_id = tc.get("id") or ""
+                if not tool_call_id.strip():
+                    import uuid
+                    tool_call_id = f"tool_{uuid.uuid4().hex[:8]}"
+                    tc["id"] = tool_call_id
+
                 self.session_store.emit_event(
                     session_id,
                     EventType.AGENT_TOOL_USE,
@@ -97,7 +106,7 @@ class AgentWorker:
                 result = tool_executor.execute(tc["name"], tc.get("arguments", {}))
                 tool_results.append({
                     "role": "tool",
-                    "tool_call_id": tc["id"],
+                    "tool_call_id": tool_call_id,
                     "content": result.output if result.success else f"Error: {result.error}",
                 })
 
@@ -109,7 +118,7 @@ class AgentWorker:
                     session_id,
                     EventType.AGENT_TOOL_RESULT,
                     {
-                        "tool_call_id": tc["id"],
+                        "tool_call_id": tool_call_id,
                         "success": result.success,
                         "output": result.output,
                         "error": result.error,
@@ -154,14 +163,17 @@ class AgentWorker:
     def _track_artifact(self, tool_name: str, arguments: dict) -> None:
         """Track file paths from successful write/edit tool calls.
 
-        Only records the path if the file actually exists on disk,
-        so output_artifacts stays trustworthy for evaluator checks.
+        Verifies the file actually exists on disk before recording,
+        preventing false-positive artifact claims (#158).
         """
         if tool_name in ("write", "edit") and "file_path" in arguments:
             path = arguments["file_path"]
             try:
-                if not Path(path).is_file():
-                    return
+                p = Path(path)
+                if not p.is_absolute() and self._base_cwd:
+                    p = self._base_cwd / p
+                if not p.is_file() or p.stat().st_size == 0:
+                    return  # Missing or empty file — do not claim (#158)
             except OSError:
                 return
             if path not in self.artifacts:

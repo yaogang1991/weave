@@ -652,6 +652,8 @@ class TaskWorker:
             run = await self.run_service.run_job(job_id)
 
             # 3. Handle result.
+            # RunService already transitions RUNNING -> SUCCEEDED/FAILED.
+            # Worker only reads the final state and logs — no double transition.
             if run.status == RunStatus.SUCCEEDED:
                 # RunService already transitioned RUNNING -> SUCCEEDED.
                 # Worker only reads and logs — no double-push.
@@ -660,7 +662,7 @@ class TaskWorker:
                 )
                 _json_log(
                     "INFO",
-                    "Job completed successfully",
+                    f"Job finished with status {current_job.status.value if current_job else 'unknown'}",
                     job_id=job_id,
                     status=current_job.status.value if current_job else "unknown",
                 )

@@ -274,6 +274,7 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     # Create DAG engine + M3 memory integration
     project_work_dir = str(Path(args.project).resolve()) if args.project else None
+    wd_cfg = config.watchdog
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
@@ -283,6 +284,19 @@ async def cmd_execute(args, dag: DAG | None = None):
         work_dir=project_work_dir,
         memory_manager=memory_manager,
         session_id=session_id,
+        heartbeat_interval_sec=wd_cfg.heartbeat_interval_sec,
+        heartbeat_miss_threshold=wd_cfg.heartbeat_miss_threshold,
+        enable_watchdog=wd_cfg.enabled,
+        watchdog_overrides={
+            agent_type: (ov.heartbeat_interval_sec, ov.heartbeat_miss_threshold)
+            for agent_type, ov in wd_cfg.agent_overrides.items()
+            if ov.heartbeat_interval_sec is not None
+            and ov.heartbeat_miss_threshold is not None
+        },
+        alert_thresholds={
+            agent_type: wd_cfg.alert_threshold_for(agent_type)
+            for agent_type in wd_cfg.agent_overrides
+        },
     )
 
     # ── Visualization setup ──────────────────────────────────

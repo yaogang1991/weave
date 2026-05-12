@@ -82,6 +82,89 @@ class MCPConfig(BaseModel):
     auto_discover: bool = False
 
 
+class AgentWatchdogOverride(BaseModel):
+    """Per-agent-type heartbeat override for the watchdog."""
+
+    heartbeat_interval_sec: float | None = None
+    heartbeat_miss_threshold: int | None = None
+
+
+# Sensible defaults: generator tasks (editing existing files) naturally take
+# much longer than planner/evaluator tasks.
+_DEFAULT_AGENT_WATCHDOG_OVERRIDES: dict[str, AgentWatchdogOverride] = {
+    "generator": AgentWatchdogOverride(
+        heartbeat_interval_sec=60.0,
+        heartbeat_miss_threshold=10,
+    ),
+}
+
+
+class WatchdogConfig(BaseModel):
+    """Configuration for the DAG node watchdog."""
+
+    enabled: bool = True
+    heartbeat_interval_sec: float = 30.0
+    heartbeat_miss_threshold: int = 8  # was 5; raised to reduce false kills
+    # Fraction of miss_threshold at which heartbeat_missed events are
+    # emitted.  With threshold=8 and fraction=0.5, alerts fire at
+    # missed_count >= 4 instead of the old hardcoded 2 — reducing noise
+    # for slow but healthy LLM API responses.
+    alert_threshold_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
+    agent_overrides: dict[str, AgentWatchdogOverride] = Field(
+        default_factory=lambda: dict(_DEFAULT_AGENT_WATCHDOG_OVERRIDES),
+    )
+
+    def settings_for(self, agent_type: str) -> tuple[float, int]:
+        """Return (interval_sec, miss_threshold) for *agent_type*."""
+        override = self.agent_overrides.get(agent_type)
+        interval = (
+            override.heartbeat_interval_sec
+            if override and override.heartbeat_interval_sec is not None
+            else self.heartbeat_interval_sec
+        )
+        threshold = (
+            override.heartbeat_miss_threshold
+            if override and override.heartbeat_miss_threshold is not None
+            else self.heartbeat_miss_threshold
+        )
+        return interval, threshold
+
+    def alert_threshold_for(self, agent_type: str) -> int:
+        """Minimum missed_count to emit heartbeat_missed event."""
+        _, threshold = self.settings_for(agent_type)
+        return max(2, int(threshold * self.alert_threshold_fraction))
+    @classmethod
+    def from_env(cls) -> WatchdogConfig:
+        """Create from HARNESS_WATCHDOG_* environment variables."""
+        overrides: dict[str, AgentWatchdogOverride] = dict(
+            _DEFAULT_AGENT_WATCHDOG_OVERRIDES,
+        )
+        # Allow per-agent override via HARNESS_WATCHDOG_<TYPE>_INTERVAL /
+        # HARNESS_WATCHDOG_<TYPE>_THRESHOLD (e.g. HARNESS_WATCHDOG_GENERATOR_INTERVAL)
+        for agent_type in ("planner", "generator", "evaluator"):
+            iv = os.getenv(f"HARNESS_WATCHDOG_{agent_type.upper()}_INTERVAL")
+            tv = os.getenv(f"HARNESS_WATCHDOG_{agent_type.upper()}_THRESHOLD")
+            if iv or tv:
+                overrides[agent_type] = AgentWatchdogOverride(
+                    heartbeat_interval_sec=float(iv) if iv else None,
+                    heartbeat_miss_threshold=int(tv) if tv else None,
+                )
+        return cls(
+            enabled=os.getenv("HARNESS_WATCHDOG_ENABLED", "true").lower()
+            not in ("false", "0", "no"),
+            heartbeat_interval_sec=float(
+                os.getenv("HARNESS_WATCHDOG_INTERVAL", "30.0")
+            ),
+            heartbeat_miss_threshold=int(
+                os.getenv("HARNESS_WATCHDOG_THRESHOLD", "8")
+            ),
+            alert_threshold_fraction=float(
+                os.getenv("HARNESS_WATCHDOG_ALERT_FRACTION", "0.5")
+            ),
+            agent_overrides=overrides,
+        )
+
+
 class ModelRoute(BaseModel):
     """Model assignment for a specific agent type or role."""
 
@@ -248,6 +331,9 @@ class HarnessConfig(BaseModel):
     # M3.5: Impact Analysis
     impact: ImpactConfig = Field(default_factory=ImpactConfig)
 
+    # M2.0: Watchdog
+    watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r", encoding="utf-8") as f:
@@ -315,4 +401,5 @@ class HarnessConfig(BaseModel):
                     os.getenv("HARNESS_IMPACT_CONFIDENCE", "0.5")
                 ),
             ),
+            watchdog=WatchdogConfig.from_env(),
         )

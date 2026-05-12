@@ -78,33 +78,39 @@ class TestContextManagement:
 
 
 class TestArtifactTracking:
-    def test_tracks_write(self, worker):
+    def test_tracks_write(self, worker, tmp_path):
+        f = tmp_path / "a.py"
+        f.write_text("x = 1\n", encoding="utf-8")
         mock_exec = MagicMock()
         mock_exec.execute = MagicMock(return_value=ToolResult(
             tool_call_id="tc1", success=True, output="ok",
         ))
         worker.llm.call = MagicMock(side_effect=[
             {"role": "assistant", "content": "",
-             "tool_calls": [{"id": "tc1", "name": "write", "arguments": {"file_path": "/tmp/a.py"}}]},
+             "tool_calls": [{"id": "tc1", "name": "write", "arguments": {"file_path": str(f)}}]},
             {"role": "assistant", "content": "done"},
         ])
         list(worker.run("s1", "sys", "do it", [], mock_exec))
-        assert worker.artifacts == ["/tmp/a.py"]
+        assert worker.artifacts == [str(f)]
 
-    def test_tracks_edit(self, worker):
+    def test_tracks_edit(self, worker, tmp_path):
+        f = tmp_path / "b.py"
+        f.write_text("old\n", encoding="utf-8")
         mock_exec = MagicMock()
         mock_exec.execute = MagicMock(return_value=ToolResult(
             tool_call_id="tc1", success=True, output="ok",
         ))
         worker.llm.call = MagicMock(side_effect=[
             {"role": "assistant", "content": "",
-             "tool_calls": [{"id": "tc1", "name": "edit", "arguments": {"file_path": "b.py"}}]},
+             "tool_calls": [{"id": "tc1", "name": "edit", "arguments": {"file_path": str(f)}}]},
             {"role": "assistant", "content": "done"},
         ])
         list(worker.run("s1", "sys", "do it", [], mock_exec))
-        assert worker.artifacts == ["b.py"]
+        assert worker.artifacts == [str(f)]
 
-    def test_no_duplicates(self, worker):
+    def test_no_duplicates(self, worker, tmp_path):
+        f = tmp_path / "x.py"
+        f.write_text("x = 1\n", encoding="utf-8")
         mock_exec = MagicMock()
         mock_exec.execute = MagicMock(return_value=ToolResult(
             tool_call_id="tc1", success=True, output="ok",
@@ -112,13 +118,13 @@ class TestArtifactTracking:
         worker.llm.call = MagicMock(side_effect=[
             {"role": "assistant", "content": "",
              "tool_calls": [
-                 {"id": "tc1", "name": "write", "arguments": {"file_path": "x.py"}},
-                 {"id": "tc2", "name": "edit", "arguments": {"file_path": "x.py"}},
+                 {"id": "tc1", "name": "write", "arguments": {"file_path": str(f)}},
+                 {"id": "tc2", "name": "edit", "arguments": {"file_path": str(f)}},
              ]},
             {"role": "assistant", "content": "done"},
         ])
         list(worker.run("s1", "sys", "do it", [], mock_exec))
-        assert worker.artifacts == ["x.py"]
+        assert worker.artifacts == [str(f)]
 
     def test_resets_on_new_run(self, worker, mock_tool_executor):
         worker.artifacts = ["/old/file.py"]
