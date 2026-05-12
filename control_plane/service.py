@@ -217,7 +217,13 @@ class RunService:
 
         try:
             # M2.2: Build BackendManager per-job so repo_root matches project_path
-            project_root = Path(job.project_path).resolve() if job.project_path else Path.cwd().resolve()
+            if not job.project_path:
+                raise ValueError(
+                    "project_path is required for job execution. "
+                    "Refusing to use cwd as target — agents may modify harness itself. "
+                    "Submit jobs with --project /path/to/target."
+                )
+            project_root = Path(job.project_path).resolve()
             from backend.lifecycle import BackendManager
             from backend.base import WorkspaceIsolation, ExecutionSandbox
             from core.config import HarnessConfig

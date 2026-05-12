@@ -52,6 +52,45 @@ from control_plane.worker import TaskWorker, WorkerConfig, run_worker
 from control_plane.approval import ApprovalRepository, TicketStatus
 
 
+def _resolve_project_path(project: str | None, allow_self_modify: bool = False) -> str | None:
+    """Resolve and validate the project path for mutating operations.
+
+    Prevents agents from accidentally modifying the harness source tree when
+    --project is not specified. Returns the resolved project path, or raises
+    SystemExit with a clear error message.
+    """
+    if project:
+        resolved = str(Path(project).resolve())
+        # Check if explicitly targeting harness tree
+        harness_root = Path(__file__).parent.resolve()
+        target = Path(resolved).resolve()
+        if (target == harness_root or harness_root in target.parents) and not allow_self_modify:
+            sys.stderr.write(
+                "ERROR: --project points to the harness source tree.\n"
+                "Agents would modify harness itself, which is usually unintended.\n\n"
+                "Use --allow-self-modify to opt in (NOT recommended for production).\n"
+            )
+            sys.exit(2)
+        return resolved
+
+    cwd = Path.cwd().resolve()
+    harness_root = Path(__file__).parent.resolve()
+
+    if cwd == harness_root or harness_root in cwd.parents:
+        sys.stderr.write(
+            "ERROR: --project not specified and cwd is inside the harness source tree.\n"
+            "Running without --project would let agents modify harness itself.\n\n"
+            "Pick one:\n"
+            f"  (1) --project ./my-project        target an existing project\n"
+            f"  (2) --allow-self-modify           explicit opt-in (NOT recommended)\n"
+        )
+        sys.exit(2)
+
+    # Outside harness tree: use cwd, but warn
+    sys.stderr.write(f"WARN: --project not given, defaulting to {cwd}\n")
+    return str(cwd)
+
+
 def load_registry(project_path: str | None = None) -> AgentRegistry:
     """Load agent registry with defaults + project custom agents."""
     registry = AgentRegistry()
@@ -173,6 +212,13 @@ async def cmd_plan(args):
 
 async def cmd_execute(args, dag: DAG | None = None):
     """Execute a saved plan (DAG). Accepts DAG directly to avoid re-serialization."""
+    # Safety: resolve project path and block accidental self-modification
+    project = _resolve_project_path(
+        args.project,
+        allow_self_modify=getattr(args, "allow_self_modify", False),
+    )
+    args.project = project
+
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
@@ -506,13 +552,18 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
 
 async def cmd_submit(args):
     """Submit a new job to the control plane."""
+    project = _resolve_project_path(
+        args.project,
+        allow_self_modify=getattr(args, "allow_self_modify", False),
+    )
+
     repository = _make_repository()
     service = _make_run_service(repository)
 
     try:
         job = await service.submit_job(
             requirement=args.requirement,
-            project_path=args.project,
+            project_path=project,
             timeout=args.timeout,
             max_attempts=args.max_attempts,
         )
@@ -1110,6 +1161,10 @@ Examples:
     exec_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
     exec_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     exec_parser.add_argument(
+        "--allow-self-modify", action="store_true",
+        help="Allow agents to modify the harness source tree (NOT recommended)",
+    )
+    exec_parser.add_argument(
         "--max-parallel", type=int, default=3,
         help="Max parallel agent executions (default: 3)",
     )
@@ -1141,6 +1196,10 @@ Examples:
         help="Enable visualization and auto-open browser")
     run_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     run_parser.add_argument(
+        "--allow-self-modify", action="store_true",
+        help="Allow agents to modify the harness source tree (NOT recommended)",
+    )
+    run_parser.add_argument(
         "--max-parallel", type=int, default=3,
         help="Max parallel agent executions (default: 3)",
     )
@@ -1171,6 +1230,10 @@ Examples:
     submit_parser.add_argument("--project", help="Project path")
     submit_parser.add_argument("--timeout", type=int, default=600, help="Timeout in seconds (default: 600)")
     submit_parser.add_argument("--max-attempts", type=int, default=3, help="Max retry attempts (default: 3)")
+    submit_parser.add_argument(
+        "--allow-self-modify", action="store_true",
+        help="Allow agents to modify the harness source tree (NOT recommended)",
+    )
     submit_parser.set_defaults(func=cmd_submit)
 
     # status command
