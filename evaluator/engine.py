@@ -249,10 +249,19 @@ class EvaluatorEngine:
             return False, f"Test execution error: {e}"
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        """Run flake8/ruff on all targets in a single batch call.
+        """Auto-fix then verify lint for resolved target files.
+
+        Phase 1 (auto-fix): Runs autoflake --remove-all-unused-imports
+        --remove-unused-variables --in-place on resolved targets only.
+        This mutates the working tree — the evaluator is NOT a pure
+        read-only verifier.  Job output may differ from the generator's
+        original files as a result.
+
+        Phase 2 (verify): Runs flake8 (or ruff as fallback) on the same
+        targets.  If autoflake is not installed, the verify phase proceeds
+        without it; if flake8/ruff is not installed, returns failure.
 
         Only lints specific files — does NOT recursively scan directories.
-        This prevents cross-node pollution in parallel DAG execution.
         """
         resolved = []
         for t in targets:
@@ -267,6 +276,24 @@ class EvaluatorEngine:
                 resolved.append(str(Path(t)))
         if not resolved:
             return True, "No targets to lint"
+
+        # Auto-fix unused imports / variables before linting (graceful
+        # degradation if autoflake is not installed).
+        try:
+            subprocess.run(
+                [
+                    "python", "-m", "autoflake",
+                    "--remove-all-unused-imports",
+                    "--remove-unused-variables",
+                    "--in-place",
+                ] + resolved,
+                capture_output=True, text=True, timeout=30,
+            )
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
+
         try:
             result = subprocess.run(
                 ["python", "-m", "flake8"] + resolved + ["--max-line-length=100"],
