@@ -56,6 +56,43 @@ class NodeHealth(str, Enum):
     DEAD = "dead"             # Killed by watchdog, final state
 
 
+# ---------------------------------------------------------------------------
+# Workspace isolation models (#176)
+# ---------------------------------------------------------------------------
+
+class NodeWorkspaceStrategy(str, Enum):
+    """Workspace isolation strategy for a DAG node."""
+    SHARED = "shared"       # Share the run's work_dir (default, current behavior)
+    WORKTREE = "worktree"   # Git worktree per node
+    COPY = "copy"           # File copy per node (non-git fallback)
+
+
+class NodeWorkspace(BaseModel):
+    """Workspace information for a DAG node.
+
+    Created by BackendManager.setup_node(), consumed by DAGExecutionEngine
+    and evaluator to route file operations to the correct directory.
+    """
+    node_id: str
+    strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
+    base_path: str = ""             # The run's shared work_dir
+    workspace_path: str = ""        # This node's isolated workspace (same as base_path if SHARED)
+    baseline_commit: str = ""       # Git commit SHA at workspace creation time (for delta lint)
+
+
+class NodeWorkspaceResult(BaseModel):
+    """Result of node execution in its workspace.
+
+    Collected by BackendManager after node completes, used for merging
+    node outputs back into the shared workspace.
+    """
+    node_id: str
+    changed_files: list[str] = Field(default_factory=list)
+    patch_content: str = ""         # Unified diff patch of node's changes
+    merge_status: Literal["pending", "merged", "conflict"] = "pending"
+    conflicts: list[str] = Field(default_factory=list)
+
+
 class EvaluationResult(BaseModel):
     """Result of an evaluation pass."""
     passed: bool
@@ -105,6 +142,7 @@ class DAGNode(BaseModel):
     eval_feedback: str = ""  # Evaluator feedback, passed back on retry
     max_retries: int = 3
     retry_count: int = 0
+    workspace_strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
