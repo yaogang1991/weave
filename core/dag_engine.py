@@ -516,7 +516,17 @@ class DAGExecutionEngine:
 
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
-            node.output_artifacts = result.get("artifacts", [])
+            previous_artifacts = node.output_artifacts or []
+            reported_artifacts = result.get("artifacts", [])
+            # Preserve previous artifacts on retry: agent may only read/test
+            # without write/edit, leaving artifacts empty (#165).
+            if not reported_artifacts and previous_artifacts:
+                reported_artifacts = previous_artifacts
+                logger.info(
+                    "Node %s: retry produced no new artifacts, preserving %d from previous attempt",
+                    node_id, len(previous_artifacts),
+                )
+            node.output_artifacts = reported_artifacts
             logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
 
             if self.evaluator and node.success_criteria and node.agent_type == "generator":
