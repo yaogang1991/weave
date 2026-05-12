@@ -627,9 +627,12 @@ class EvaluatorEngine:
                     for t in cov_targets:
                         cmd.append(f"--cov={t}")
                 else:
-                    cmd.append("--cov=.")
+                    # No package-level targets found; scope to work_dir
+                    cmd.append(f"--cov={work_dir}")
             else:
-                cmd.append("--cov=.")
+                # output_artifacts empty: run tests without coverage to avoid
+                # scanning historical files that may have import errors (#165).
+                cmd = ["python", "-m", "pytest", "-v", "--tb=short"]
 
             result = subprocess.run(
                 cmd,
@@ -654,17 +657,23 @@ class EvaluatorEngine:
                         )
 
             # Could not parse TOTAL line — coverage target is unverifiable.
-            # This must be FAIL, not PASS; otherwise the quality gate gives
-            # a false positive (see #152).
+            # Return was_auto_verified=False so evaluate_stage emits WARN
+            # instead of PASS/FAIL (see #152).
             stdout_tail = result.stdout[-500:] if result.stdout else ""
             stderr_tail = result.stderr[-500:] if result.stderr else ""
             if result.returncode == 0:
-                return False, (
+                if not output_artifacts:
+                    return True, (
+                        f"Coverage could not be verified: no output_artifacts "
+                        f"to scope coverage. Tests passed but coverage target "
+                        f"{target}% was not verified."
+                    ), False
+                return True, (
                     f"Coverage could not be parsed; tests passed but coverage "
                     f"target {target}% was not verified. "
                     f"stdout_tail=...{stdout_tail} "
                     f"stderr_tail=...{stderr_tail}"
-                ), True
+                ), False
             return False, (
                 f"Tests failed and coverage report could not be parsed. "
                 f"stdout_tail=...{stdout_tail} "

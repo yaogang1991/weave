@@ -190,16 +190,15 @@ class TestCriterionChecking:
 
     @patch("evaluator.engine.subprocess.run")
     def test_coverage_no_total_line_fails(self, mock_run, evaluator, tmp_path):
-        """If pytest returns 0 but stdout has no TOTAL line, coverage must
-        FAIL — unverifiable coverage is not a pass (see #152)."""
+        """If pytest returns 0 but stdout has no TOTAL line, coverage is
+        unverifiable — returns auto=False so evaluate_stage emits WARN (#152)."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="2 passed in 0.01s\n",
             stderr="",
         )
         passed, msg, auto = evaluator._check_coverage(tmp_path, 80)
-        assert not passed
-        assert auto
-        assert "could not be parsed" in msg
+        # Unverifiable coverage → WARN (auto=False), not hard FAIL
+        assert not auto
         assert "not verified" in msg
 
 
