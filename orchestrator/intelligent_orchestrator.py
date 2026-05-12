@@ -14,6 +14,7 @@ and agent assignment, but it does NOT execute tasks itself.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
@@ -31,6 +32,8 @@ from core.llm_client import LLMClient
 from core.llm_router import LLMRouter
 from session.store import SessionStore
 from orchestrator.plan_validator import PlanValidator, PlanValidationError
+
+logger = logging.getLogger(__name__)
 from templates.library import TemplateRegistry
 
 
@@ -309,9 +312,17 @@ Return a JSON object with this exact structure:
                 })
 
         if plan_data is None:
+            last_response = response.get("content", "")
+            preview = last_response[:500] if last_response else "(empty response)"
+            logger.error(
+                "Planning response parse failed after %d attempts. "
+                "Last LLM output (first 500 chars):\n%s",
+                max_retries + 1, preview,
+            )
             raise ValueError(
-                "Failed to parse planning response after retries. "
-                "The LLM did not return valid JSON."
+                f"Failed to parse planning response after {max_retries + 1} retries. "
+                f"LLM did not return valid JSON.\n"
+                f"Last response preview: {preview}"
             )
 
         # Step 4: Parse and validate the plan
