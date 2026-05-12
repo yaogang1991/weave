@@ -58,7 +58,7 @@ class TestFileExistsDiskVerification:
             crit, str(tmp_work_dir), output_artifacts=["bogus.py"],
         )
         assert passed is False
-        assert "not found on disk" in msg.lower()
+        assert "missing" in msg.lower()
         assert auto is True
 
     def test_fail_when_file_is_empty(self, engine, tmp_work_dir):
@@ -74,7 +74,7 @@ class TestFileExistsDiskVerification:
             crit, str(tmp_work_dir), output_artifacts=["empty.py"],
         )
         assert passed is False
-        assert "not found on disk" in msg.lower()
+        assert "missing" in msg.lower()
 
     def test_pass_with_loose_match(self, engine, tmp_work_dir):
         """Exact path missing but stem glob finds file → PASS."""

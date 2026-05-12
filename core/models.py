@@ -71,6 +71,7 @@ class CriterionType(str, Enum):
     TESTS_PASS = "tests_pass"
     LINT = "lint"
     FILE_EXISTS = "file_exists"
+    FILE_PATTERN = "file_pattern"
     COVERAGE = "coverage"
     NO_CRITICAL = "no_critical"
     FILE_CHANGED = "file_changed"

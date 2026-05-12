@@ -118,6 +118,11 @@ Rules:
       tests, specs).
     - Verify completeness: grep -r "SYMBOL_NAME" . --include="*.py"
       should return 0 stale references.
+14. FILE PATH CONTRACT: If the task or plan specifies an exact file path
+    (e.g., "create reporter/report_engine.py"), you MUST create the file
+    at that EXACT path. Do NOT silently substitute a different filename.
+    If you believe a different path is better, first create the file at
+    the required path, then explain your reasoning in your output.
 
 Work systematically: gather context → implement → verify.
 """,

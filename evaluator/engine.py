@@ -317,15 +317,23 @@ class EvaluatorEngine:
                 missing.append(cand)
 
             if missing:
-                return False, (
-                    f"FILE_EXISTS failed: {len(missing)} file(s) not found "
-                    f"on disk: {missing}"
-                ), True
+                # Actionable feedback: show expected vs actual files (#160)
+                msg = (
+                    f"Required file(s) missing: {missing}. "
+                    f"Found on disk: {verified or 'none'}. "
+                    f"To pass, create the required file(s) at the exact path(s), "
+                    f"or adjust the plan criterion to file_pattern if "
+                    f"alternative filenames are acceptable."
+                )
+                return False, msg, True
             return (
                 True,
                 f"All {len(verified)} file(s) verified on disk",
                 True,
             )
+
+        if crit.type == CriterionType.FILE_PATTERN:
+            return self._check_file_pattern(crit, Path(work_dir))
 
         if crit.type == CriterionType.COVERAGE:
             target = int(crit.target) if crit.target else 80
@@ -735,6 +743,44 @@ class EvaluatorEngine:
 
         # No output_artifacts — agent didn't produce any file changes
         return False, f"No files changed by agent (expected: {target_files})"
+
+    def _check_file_pattern(
+        self,
+        crit: SuccessCriterion,
+        work_dir: Path,
+    ) -> tuple[bool, str, bool]:
+        """Verify that at least one file matching a glob pattern exists on disk.
+
+        Unlike file_exists (exact path), file_pattern accepts any matching
+        non-empty file. Used when the exact filename is a generator choice (#160).
+        """
+        pattern = crit.pattern or crit.path
+        if not pattern:
+            return True, "file_pattern: no pattern specified (skipped)", True
+
+        matches = list(work_dir.glob(pattern))
+        files = [
+            m for m in matches
+            if m.is_file() and m.stat().st_size > 0
+        ]
+
+        if not files:
+            return False, (
+                f"No non-empty files matched pattern: {pattern} "
+                f"(searched in {work_dir})"
+            ), True
+
+        rel_names = []
+        for f in files[:10]:
+            try:
+                rel_names.append(str(f.relative_to(work_dir)))
+            except ValueError:
+                rel_names.append(str(f))
+
+        return True, (
+            f"Matched {len(files)} file(s) for pattern '{pattern}': "
+            f"{rel_names}"
+        ), True
 
     def _check_pattern_absent(
         self,
