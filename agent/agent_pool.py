@@ -205,9 +205,9 @@ Evaluate against:
         if self.guardrails:
             result = self.guardrails.check_and_execute(
                 name, arguments,
-                job_id=context.job_id,
+                job_id=context.job_id or self.job_id,
                 run_id=context.run_id,
-                approval_repo=context.approval_repo,
+                approval_repo=context.approval_repo or self.approval_repo,
                 node_id=context.node_id,
             )
             if isinstance(result, GuardrailResult):

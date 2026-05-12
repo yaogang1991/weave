@@ -342,16 +342,28 @@ class ToolRegistry:
 
         try:
             run_cwd = self._resolve_safe_cwd(cwd)
-            result = subprocess.run(
-                command,
-                shell=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-                cwd=str(run_cwd),
-            )
+            if self.sandbox_runner is not None:
+                result = self.sandbox_runner.run_command(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                    cwd=str(run_cwd),
+                )
+            else:
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout,
+                    cwd=str(run_cwd),
+                )
             output = result.stdout
             if result.stderr:
                 output += "\n" + result.stderr
