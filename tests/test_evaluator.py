@@ -186,18 +186,18 @@ class TestCriterionChecking:
         assert result.passed
 
     @patch("evaluator.engine.subprocess.run")
-    def test_coverage_no_total_line_passes_as_tool_error(self, mock_run, evaluator, tmp_path):
-        """If pytest returns 0 but stdout has no TOTAL line, coverage emits
-        WARN (auto=False) instead of PASS to avoid false positive (#152)."""
+    def test_coverage_no_total_line_fails(self, mock_run, evaluator, tmp_path):
+        """If pytest returns 0 but stdout has no TOTAL line, coverage must
+        FAIL — unverifiable coverage is not a pass (see #152)."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="2 passed in 0.01s\n",
             stderr="",
         )
         passed, msg, auto = evaluator._check_coverage(tmp_path, 80)
-        assert passed  # Still passed (tests ok) but not auto-verified
-        assert not auto  # WARN, not PASS
+        assert not passed
+        assert auto
         assert "could not be parsed" in msg
-        assert "tool error" in msg
+        assert "not verified" in msg
 
 
 class TestEvaluateStage:

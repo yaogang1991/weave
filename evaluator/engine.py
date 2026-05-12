@@ -623,38 +623,33 @@ class EvaluatorEngine:
                 cwd=str(work_dir) if work_dir.is_dir() else None,
             )
 
-            # Parse TOTAL line — try multiple column positions
+            # Parse TOTAL line via regex — handles both compact and wide formats:
+            #   TOTAL  123  4  97%
+            #   TOTAL  123  4  5  97.5%
             for line in result.stdout.split("\n"):
                 stripped = line.strip()
                 if stripped.startswith("TOTAL"):
-                    parts = stripped.split()
-                    if len(parts) >= 2:
-                        for idx in (-1, -2):
-                            if abs(idx) <= len(parts):
-                                cov_str = parts[idx].replace("%", "")
-                                try:
-                                    cov = float(cov_str)
-                                    return (
-                                        cov >= target,
-                                        f"Coverage: {cov}% (target: {target}%)",
-                                        True,
-                                    )
-                                except ValueError:
-                                    continue
+                    m = re.search(r"(\d+(?:\.\d+)?)%", stripped)
+                    if m:
+                        cov = float(m.group(1))
+                        return (
+                            cov >= target,
+                            f"Coverage: {cov}% (target: {target}%)",
+                            True,
+                        )
 
-            # Could not parse TOTAL line
-            stdout_tail = result.stdout[-200:] if result.stdout else ""
-            stderr_tail = result.stderr[-200:] if result.stderr else ""
+            # Could not parse TOTAL line — coverage target is unverifiable.
+            # This must be FAIL, not PASS; otherwise the quality gate gives
+            # a false positive (see #152).
+            stdout_tail = result.stdout[-500:] if result.stdout else ""
+            stderr_tail = result.stderr[-500:] if result.stderr else ""
             if result.returncode == 0:
-                # Tests pass but coverage unverified — mark as WARN, not PASS.
-                # Returning auto=False ensures evaluate_stage emits "WARN ..."
-                # instead of "PASS ..." (#152).
-                return True, (
-                    f"Coverage could not be parsed (tool error); "
-                    f"tests passed, coverage target {target}% not verified. "
+                return False, (
+                    f"Coverage could not be parsed; tests passed but coverage "
+                    f"target {target}% was not verified. "
                     f"stdout_tail=...{stdout_tail} "
                     f"stderr_tail=...{stderr_tail}"
-                ), False
+                ), True
             return False, (
                 f"Tests failed and coverage report could not be parsed. "
                 f"stdout_tail=...{stdout_tail} "

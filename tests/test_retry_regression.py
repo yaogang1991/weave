@@ -1,11 +1,10 @@
 """Tests for retry regression prevention (issue #129).
 
 Verifies:
-1. Coverage parse failure does not fail evaluation when tests pass
+1. Coverage parse failure returns FAIL even when tests pass (#152)
 2. Best-attempt tracking detects score regression
 3. Retry feedback includes regression warning
 """
-import pytest
 from unittest.mock import MagicMock, patch
 
 from evaluator.engine import EvaluatorEngine
@@ -13,8 +12,9 @@ from core.models import SuccessCriterion, CriterionType
 
 
 class TestCoverageParseTolerance:
-    def test_coverage_parse_failure_passes_when_tests_ok(self, tmp_path):
-        """When coverage can't be parsed but pytest passed, evaluation should pass."""
+    def test_coverage_parse_failure_fails_even_when_tests_ok(self, tmp_path):
+        """When coverage can't be parsed but pytest passed, coverage must
+        FAIL — unverifiable coverage is not a pass (see #152)."""
         engine = EvaluatorEngine(MagicMock())
 
         with patch("evaluator.engine.subprocess.run") as mock_run:
@@ -26,9 +26,9 @@ class TestCoverageParseTolerance:
             )
             passed, msg = engine._check_coverage(tmp_path, 80)
 
-        assert passed
+        assert not passed
         assert "could not be parsed" in msg
-        assert "tool error" in msg
+        assert "not verified" in msg
 
     def test_coverage_parse_failure_fails_when_tests_fail(self, tmp_path):
         """When tests fail AND coverage can't be parsed, evaluation should fail."""
@@ -78,9 +78,9 @@ class TestCoverageParseTolerance:
 
 
 class TestCoverageInEvaluationStage:
-    def test_coverage_parse_doesnt_block_overall_eval(self, tmp_path):
-        """Full evaluate_stage passes when coverage can't parse but other
-        criteria succeed."""
+    def test_coverage_parse_failure_fails_overall_eval(self, tmp_path):
+        """Full evaluate_stage fails when coverage can't parse, even if other
+        criteria succeed (#152: unverifiable coverage is not a pass)."""
         engine = EvaluatorEngine(MagicMock())
 
         (tmp_path / "module.py").write_text("x = 1\n")
@@ -117,6 +117,6 @@ class TestCoverageInEvaluationStage:
                 output_artifacts=["module.py"],
             )
 
-        assert result.passed
-        # Coverage criterion should show as passed (with warning)
-        assert result.score > 0
+        assert not result.passed
+        # Coverage criterion should show as failed
+        assert result.criteria_results.get("coverage") is False
