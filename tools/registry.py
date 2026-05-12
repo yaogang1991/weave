@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 from core.models import ToolResult
+from tools.command_runner import ToolCommandRunner
 
 # Maximum file size to read/search (10 MB)
 _MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -37,10 +38,10 @@ class ToolRegistry:
     MCP tools: dynamically loaded from MCP servers
     """
 
-    def __init__(self, sandbox_runner=None, base_cwd: str | None = None):
+    def __init__(self, sandbox_runner: ToolCommandRunner | None = None, base_cwd: str | None = None):
         self._tools: dict[str, Callable] = {}
         self._schemas: dict[str, dict] = {}
-        self.sandbox_runner = sandbox_runner
+        self.sandbox_runner: ToolCommandRunner | None = sandbox_runner
         self.base_cwd = Path(base_cwd).resolve() if base_cwd else None
         self._register_builtin_tools()
 
@@ -366,14 +367,18 @@ class ToolRegistry:
             if self.sandbox_runner is not None:
                 result = self.sandbox_runner.run_command(
                     command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=timeout,
                     cwd=str(run_cwd),
+                    timeout=timeout,
                 )
+                returncode = result.returncode
+                stdout = result.stdout
+                stderr = result.stderr
+                if result.timed_out:
+                    return ToolResult(
+                        tool_call_id="",
+                        success=False,
+                        error=f"Command timed out after {timeout}s",
+                    )
             else:
                 result = subprocess.run(
                     command,
@@ -385,15 +390,9 @@ class ToolRegistry:
                     timeout=timeout,
                     cwd=str(run_cwd),
                 )
-            # Normalize result: subprocess.CompletedProcess vs CommandResult
-            if hasattr(result, "returncode"):
                 returncode = result.returncode
                 stdout = result.stdout
                 stderr = result.stderr
-            else:
-                returncode = 0 if getattr(result, "success", True) else 1
-                stdout = getattr(result, "stdout", "")
-                stderr = getattr(result, "stderr", "")
             output = stdout
             if stderr:
                 output += "\n" + stderr
