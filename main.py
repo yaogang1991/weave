@@ -1154,6 +1154,10 @@ Examples:
 
     # plan command
     plan_parser = subparsers.add_parser("plan", help="Generate execution plan")
+    plan_parser.add_argument(
+        "--project", default=argparse.SUPPRESS,
+        help="Path to project directory (overrides top-level --project)",
+    )
     plan_parser.add_argument("requirement", help="User requirement")
     plan_parser.add_argument(
         "--template",
@@ -1167,6 +1171,10 @@ Examples:
 
     # execute command
     exec_parser = subparsers.add_parser("execute", help="Execute a saved plan")
+    exec_parser.add_argument(
+        "--project", default=argparse.SUPPRESS,
+        help="Path to project directory (overrides top-level --project)",
+    )
     exec_parser.add_argument("plan_file", help="Path to plan JSON file")
     exec_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
     exec_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
@@ -1191,6 +1199,10 @@ Examples:
 
     # run command (plan + execute)
     run_parser = subparsers.add_parser("run", help="Plan and execute in one step")
+    run_parser.add_argument(
+        "--project", default=argparse.SUPPRESS,
+        help="Path to project directory (overrides top-level --project)",
+    )
     run_parser.add_argument("requirement", help="User requirement")
     run_parser.add_argument(
         "--template",
