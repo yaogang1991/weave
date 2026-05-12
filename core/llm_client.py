@@ -4,16 +4,27 @@ LLMClient: Unified LLM API wrapper for Anthropic and OpenAI providers.
 Extracted from AgentWorker so that both AgentWorker and IntelligentOrchestrator
 can share the same LLM calling logic without the orchestrator depending on
 AgentWorker internals.
+
+Includes built-in retry with exponential backoff for transient errors
+(rate limits, timeouts, connection issues) — transparent to all callers.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import time
+from datetime import datetime, timezone
 
 import anthropic
 from openai import OpenAI
 
 from core.config import LLMConfig
+
+# Transient error name fragments that warrant retry
+_TRANSIENT_MARKERS = frozenset(
+    ("rate", "timeout", "connection", "overload", "429", "503", "502", "ratelimit")
+)
 
 
 class LLMClient:
@@ -24,8 +35,9 @@ class LLMClient:
     don't need to know which provider is in use.
     """
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, max_retries: int = 3):
         self.config = config
+        self.max_retries = max_retries
         self._client = self._create_client()
 
     def _create_client(self):
@@ -42,23 +54,104 @@ class LLMClient:
                 timeout=self.config.timeout,
             )
 
-    def call(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+    def call(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+        max_retries: int | None = None,
+    ) -> dict:
         """
-        Call the configured LLM.
+        Call the configured LLM with automatic retry for transient errors.
+
+        Retries on rate limits, timeouts, and connection issues with
+        exponential backoff. For 429 errors, parses the reset time from
+        the error message and waits until then instead of short backoff.
 
         Args:
             messages: Chat messages in OpenAI-style format.
-                System messages are extracted for Anthropic automatically.
-            tools: Tool schemas (OpenAI format). Pass ``None`` or ``[]`` to omit.
+            tools: Tool schemas (OpenAI format).
+            max_retries: Override default retry count for this call.
 
         Returns:
-            dict with keys: ``role`` ("assistant"), ``content`` (str),
-            and optionally ``tool_calls`` (list of dicts).
+            dict with keys: ``role``, ``content``, and optionally
+            ``tool_calls``.
         """
+        retries = max_retries if max_retries is not None else self.max_retries
+        for attempt in range(retries + 1):
+            try:
+                return self._call_once(messages, tools)
+            except Exception as e:
+                if attempt == retries:
+                    raise
+                error_name = type(e).__name__.lower()
+                error_msg = str(e)
+                error_lower = error_msg.lower()
+
+                is_transient = any(
+                    t in error_name or t in error_lower
+                    for t in _TRANSIENT_MARKERS
+                )
+                if not is_transient:
+                    raise
+
+                # For 429 / rate-limit: parse reset time and wait
+                if "429" in error_lower or "rate" in error_lower:
+                    wait_sec = self._parse_rate_limit_wait(error_msg)
+                    if wait_sec is not None:
+                        time.sleep(min(wait_sec + 1, 300))  # cap at 5 min
+                        continue
+
+                # Generic transient: exponential backoff
+                time.sleep(2 ** attempt)
+
+    def _call_once(
+        self, messages: list[dict], tools: list[dict] | None = None
+    ) -> dict:
+        """Single LLM call — no retry."""
         if self.config.provider == "anthropic":
             return self._call_anthropic(messages, tools or [])
         else:
             return self._call_openai(messages, tools or [])
+
+    @staticmethod
+    def _parse_rate_limit_wait(error_msg: str) -> float | None:
+        """Parse wait duration from rate limit error messages.
+
+        Supports patterns like:
+        - "will reset at 2026-05-12 03:02:22"
+        - "retry after 30 seconds"
+        - "retry-after: 60"
+        """
+        # Pattern: datetime reset time
+        dt_match = re.search(
+            r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", error_msg
+        )
+        if dt_match:
+            try:
+                reset_dt = datetime.strptime(
+                    dt_match.group(1), "%Y-%m-%d %H:%M:%S"
+                )
+                reset_dt = reset_dt.replace(tzinfo=timezone.utc)
+                wait = (reset_dt - datetime.now(timezone.utc)).total_seconds()
+                return max(wait, 0)
+            except ValueError:
+                pass
+
+        # Pattern: "retry after N seconds" or "retry-after: N"
+        num_match = re.search(
+            r"retry.?(?:after|in)\s*:?\s*(\d+)", error_msg, re.IGNORECASE
+        )
+        if num_match:
+            return float(num_match.group(1))
+
+        # Pattern: bare number after "retry" (e.g., "retry in 30s")
+        s_match = re.search(
+            r"(\d+)\s*s(?:econds?)?", error_msg, re.IGNORECASE
+        )
+        if s_match and "retry" in error_msg.lower():
+            return float(s_match.group(1))
+
+        return None
 
     # -- Anthropic --------------------------------------------------------
 

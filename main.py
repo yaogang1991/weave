@@ -37,6 +37,7 @@ from core.config import HarnessConfig, LLMConfig
 from core.agent_registry import AgentRegistry
 from core.models import DAG, DAGNode
 from core.dag_engine import DAGExecutionEngine
+from core.exceptions import PendingApprovalError
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from agent.agent_pool import AgentPool
 from session.store import SessionStore
