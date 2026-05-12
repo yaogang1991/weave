@@ -13,10 +13,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
+import json
+import logging
+
 from core.models import AgentMessage, ToolCall, ToolResult, EventType
 from core.config import LLMConfig
 from core.llm_client import LLMClient
 from session.store import SessionStore
+
+logger = logging.getLogger(__name__)
+
+# Required arguments for known tools — used to validate LLM tool calls
+# before execution, catching empty/malformed arguments from some models (#215).
+TOOL_REQUIRED_ARGS: dict[str, list[str]] = {
+    "write": ["file_path", "content"],
+    "edit": ["file_path", "old_string", "new_string"],
+    "read": ["file_path"],
+    "bash": ["command"],
+    "glob": ["pattern"],
+    "grep": ["pattern"],
+}
 
 
 class AgentWorker:
@@ -103,7 +119,27 @@ class AgentWorker:
                     tc,
                 )
 
-                result = tool_executor.execute(tc["name"], tc.get("arguments", {}))
+                # Validate required arguments before execution (#215)
+                tool_name = tc["name"]
+                args = tc.get("arguments", {})
+                required = TOOL_REQUIRED_ARGS.get(tool_name, [])
+                missing = [k for k in required if k not in args or not args[k]]
+
+                if missing:
+                    tool_results.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call_id,
+                        "content": (
+                            f"Error: '{tool_name}' tool is missing required argument(s): "
+                            f"{', '.join(missing)}. "
+                            f"Your call had arguments: {json.dumps(args)}. "
+                            f"Please retry with all required arguments."
+                        ),
+                    })
+                    logger.warning("Tool %s called with missing args: %s", tool_name, missing)
+                    continue
+
+                result = tool_executor.execute(tool_name, args)
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
