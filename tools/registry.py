@@ -109,11 +109,16 @@ class ToolRegistry:
 
         self.register("bash", self._tool_bash, {
             "name": "bash",
-            "description": "Execute a bash command.",
+            "description": (
+                "Execute a bash command in the project workspace. "
+                "Commands run with cwd=PROJECT_ROOT by default. "
+                "Use relative paths from PROJECT_ROOT (e.g. 'python -m pytest tests/test_x.py'). "
+                "Do NOT guess absolute paths or cd into unknown directories."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Command to execute"},
+                    "command": {"type": "string", "description": "Command to execute (runs in PROJECT_ROOT)"},
                     "timeout": {"type": "integer", "default": 120},
                     "cwd": {"type": "string", "description": "Optional working directory (must stay within project root)"},
                 },

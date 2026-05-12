@@ -256,3 +256,80 @@ class TestAgentPoolAPI:
         a = pool.create_worker("generator")
         b = pool.create_worker("generator")
         assert a is not b
+
+
+# ---------------------------------------------------------------------------
+# TestRuntimeContextInjection
+# ---------------------------------------------------------------------------
+
+
+class TestRuntimeContextInjection:
+    def test_build_runtime_context_includes_project_root(self):
+        """_build_runtime_context should include PROJECT_ROOT from tool_registry.base_cwd."""
+        tool_registry = MagicMock()
+        tool_registry.schemas = [{"name": "read"}]
+        tool_registry.base_cwd = "/custom/project"
+
+        worker = WorkerAgent(
+            capability=_make_capability("generator"),
+            llm_config=LLMConfig(api_key="test"),
+            session_store=MagicMock(),
+            tool_registry=tool_registry,
+        )
+        ctx = worker._build_runtime_context()
+        assert "## Runtime Environment" in ctx
+        assert "PROJECT_ROOT: /custom/project" in ctx
+        assert "Path rules:" in ctx
+
+    def test_build_runtime_context_falls_back_to_cwd(self):
+        """Without base_cwd, should fall back to cwd."""
+        tool_registry = MagicMock()
+        tool_registry.schemas = [{"name": "read"}]
+        del tool_registry.base_cwd
+
+        worker = WorkerAgent(
+            capability=_make_capability("generator"),
+            llm_config=LLMConfig(api_key="test"),
+            session_store=MagicMock(),
+            tool_registry=tool_registry,
+        )
+        ctx = worker._build_runtime_context()
+        assert "## Runtime Environment" in ctx
+        assert "PROJECT_ROOT:" in ctx
+
+    @pytest.mark.asyncio
+    async def test_execute_inner_prompt_includes_runtime_context(self):
+        """_execute_inner should inject Runtime Environment into the prompt."""
+        tool_registry = MagicMock()
+        tool_registry.schemas = [{"name": "read"}, {"name": "write"}]
+        tool_registry.base_cwd = "/test/project"
+
+        captured_prompts: list[str] = []
+
+        class FakeWorker:
+            artifacts = []
+
+            def run(self, session_id, system_prompt, user_message,
+                    tools, tool_executor, max_iterations=50):
+                captured_prompts.append(user_message)
+                return []
+
+        worker = WorkerAgent(
+            capability=_make_capability("generator"),
+            llm_config=LLMConfig(api_key="test"),
+            session_store=MagicMock(),
+            tool_registry=tool_registry,
+        )
+        worker.worker = FakeWorker()
+
+        await worker._execute_inner(
+            task="do something",
+            input_artifacts=[],
+            session_id="test-session",
+        )
+
+        assert len(captured_prompts) == 1
+        prompt = captured_prompts[0]
+        assert "## Runtime Environment" in prompt
+        assert "PROJECT_ROOT: /test/project" in prompt
+        assert "Your task: do something" in prompt
