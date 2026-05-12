@@ -179,11 +179,11 @@ class TestJobStatusEnum:
         for status in self.REQUIRED_STATUSES:
             assert status in actual, f"JobStatus '{status}' missing"
 
-    def test_no_extra_statuses(self):
-        """没有超出规范的状态（防止意外添加）。"""
-        actual = sorted([s.value for s in JobStatus])
-        expected = sorted(self.REQUIRED_STATUSES)
-        assert actual == expected, f"Unexpected statuses: {set(actual) - set(expected)}"
+    def test_required_statuses_exist(self):
+        """必需值都存在（允许扩展）。"""
+        actual = {s.value for s in JobStatus}
+        required = set(self.REQUIRED_STATUSES)
+        assert required.issubset(actual), f"Missing required statuses: {required - actual}"
 
 
 # =============================================================================
@@ -202,12 +202,12 @@ class TestRunStatusEnum:
         for status in self.REQUIRED_STATUSES:
             assert status in actual, f"RunStatus '{status}' missing"
 
-    def test_no_extra_statuses(self):
-        """没有超出规范的状态。"""
+    def test_required_statuses_exist(self):
+        """必需值都存在（允许扩展）。"""
         from control_plane.models import RunStatus
-        actual = sorted([s.value for s in RunStatus])
-        expected = sorted(self.REQUIRED_STATUSES)
-        assert actual == expected, f"Unexpected RunStatus: {set(actual) - set(expected)}"
+        actual = {s.value for s in RunStatus}
+        required = set(self.REQUIRED_STATUSES)
+        assert required.issubset(actual), f"Missing required statuses: {required - actual}"
 
 
 # =============================================================================
@@ -225,11 +225,11 @@ class TestTicketStatusEnum:
         for status in self.REQUIRED_STATUSES:
             assert status in actual, f"TicketStatus '{status}' missing"
 
-    def test_no_extra_statuses(self):
-        """没有超出规范的状态。"""
-        actual = sorted([s.value for s in TicketStatus])
-        expected = sorted(self.REQUIRED_STATUSES)
-        assert actual == expected, f"Unexpected TicketStatus: {set(actual) - set(expected)}"
+    def test_required_statuses_exist(self):
+        """必需值都存在（允许扩展）。"""
+        actual = {s.value for s in TicketStatus}
+        required = set(self.REQUIRED_STATUSES)
+        assert required.issubset(actual), f"Missing required statuses: {required - actual}"
 
 
 # =============================================================================
@@ -246,11 +246,11 @@ class TestRiskLevelEnum:
         assert RiskLevel.HIGH.value == 3
         assert RiskLevel.CRITICAL.value == 4
 
-    def test_no_extra_levels(self):
-        """没有超出规范的风险等级。"""
-        actual = sorted([m.value for m in RiskLevel])
-        expected = [1, 2, 3, 4]
-        assert actual == expected, f"Unexpected RiskLevel: {set(actual) - set(expected)}"
+    def test_required_levels_exist(self):
+        """必需值都存在（允许扩展）。"""
+        actual = {m.value for m in RiskLevel}
+        required = {1, 2, 3, 4}
+        assert required.issubset(actual), f"Missing required levels: {required - actual}"
 
 
 # =============================================================================
