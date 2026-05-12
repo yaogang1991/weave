@@ -176,10 +176,21 @@ class TestCriterionChecking:
         assert not passed
 
     def test_file_exists_prefers_output_artifacts(self, evaluator, tmp_path):
-        """When output_artifacts provided, FILE_EXISTS passes immediately."""
+        """FILE_EXISTS verifies output_artifacts on disk, not just metadata."""
+        # Without files on disk → FAIL (fixes #158)
         result = evaluator.evaluate_stage(
             "s1", "impl",
             [SuccessCriterion(type=CriterionType.FILE_EXISTS, path="planned.py", description="file")],
+            str(tmp_path),
+            output_artifacts=["actual.py"],
+        )
+        assert not result.passed
+
+        # With the artifact file on disk → PASS (via output_artifacts)
+        (tmp_path / "actual.py").write_text("x = 1", encoding="utf-8")
+        result = evaluator.evaluate_stage(
+            "s2", "impl",
+            [SuccessCriterion(type=CriterionType.FILE_EXISTS, description="file")],
             str(tmp_path),
             output_artifacts=["actual.py"],
         )

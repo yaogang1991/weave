@@ -197,15 +197,16 @@ class EvaluatorEngine:
             return passed, msg, True
 
         if crit.type == CriterionType.FILE_EXISTS:
-            # Prefer output_artifacts (actual files the agent produced)
+            # Collect candidate paths from both planner and agent,
+            # then verify every candidate on disk.
+            candidates: list[str] = []
+            if crit.path:
+                candidates.extend(f.strip() for f in crit.path.split(",") if f.strip())
             if output_artifacts:
-                return True, f"Files confirmed via output_artifacts ({len(output_artifacts)} files)", True
-            # Fallback: check criteria paths with loose matching
-            files_str = crit.path
-            files = [f.strip() for f in files_str.split(",")] if files_str else []
-            if not files:
+                candidates.extend(output_artifacts)
+            if not candidates:
                 return True, "No specific files listed", True
-            passed, msg = self._check_files_exist_loose(files, Path(work_dir))
+            passed, msg = self._check_files_exist_strict(candidates, Path(work_dir))
             return passed, msg, True
 
         if crit.type == CriterionType.COVERAGE:
@@ -388,6 +389,55 @@ class EvaluatorEngine:
         missing = [f for f in files if not (base / f).exists()]
         passed = len(missing) == 0
         return passed, f"Missing: {missing}" if missing else "All required files present"
+
+    def _check_files_exist_strict(
+        self, candidates: list[str], base: Path,
+    ) -> tuple[bool, str]:
+        """Verify files exist on disk, are regular files, and non-empty.
+
+        Returns (passed, detailed_feedback).
+        """
+        present: list[str] = []
+        missing: list[str] = []
+        empty: list[str] = []
+
+        for cand in candidates:
+            p = Path(cand)
+            resolved = p if p.is_absolute() else base / p
+            if not resolved.exists():
+                # Try loose match by stem as fallback
+                stem = Path(cand).stem
+                if stem and len(stem) >= 3:
+                    matches = [
+                        m for m in base.glob(f"**/*{stem}*")
+                        if m.is_file() and m.stat().st_size > 0
+                    ]
+                    if matches:
+                        present.append(f"{cand} (loose→{matches[0].relative_to(base)})")
+                        continue
+                missing.append(cand)
+                continue
+            if not resolved.is_file():
+                missing.append(cand)
+                continue
+            if resolved.stat().st_size == 0:
+                empty.append(cand)
+                continue
+            try:
+                present.append(str(resolved.relative_to(base)))
+            except ValueError:
+                present.append(str(resolved))
+
+        if missing or empty:
+            parts = []
+            if missing:
+                parts.append(f"missing={missing}")
+            if empty:
+                parts.append(f"empty={empty}")
+            if present:
+                parts.append(f"present={present}")
+            return False, f"File existence check failed: {', '.join(parts)}"
+        return True, f"All {len(present)} files verified on disk: {present}"
 
     def _check_files_exist_loose(self, patterns: list[str], base: Path) -> tuple[bool, str]:
         """Loose file matching: exact, glob by name, or substring match."""
