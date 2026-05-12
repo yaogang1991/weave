@@ -198,7 +198,9 @@ class EvaluatorEngine:
 
         if crit.type == CriterionType.COVERAGE:
             target = int(crit.target) if crit.target else 80
-            passed, msg = self._check_coverage(Path(work_dir), target)
+            passed, msg = self._check_coverage(
+                Path(work_dir), target, output_artifacts,
+            )
             return passed, msg, True
 
         if crit.type == CriterionType.NO_CRITICAL:
@@ -313,25 +315,67 @@ class EvaluatorEngine:
         passed = len(missing) == 0
         return passed, f"Missing: {missing}" if missing else "Required files found (loose match)"
 
-    def _check_coverage(self, work_dir: Path, target: int) -> tuple[bool, str]:
+    def _check_coverage(
+        self,
+        work_dir: Path,
+        target: int,
+        output_artifacts: list[str] | None = None,
+    ) -> tuple[bool, str]:
         try:
+            cmd = [
+                "python", "-m", "pytest", "-v",
+                "--tb=short", "--cov-report=term-missing",
+            ]
+
+            # Limit coverage scope to packages inferred from output artifacts
+            if output_artifacts:
+                cov_targets = set()
+                for a in output_artifacts:
+                    parts = Path(a).parts
+                    if len(parts) > 1:
+                        cov_targets.add(str(Path(*parts[:2])))
+                if cov_targets:
+                    for t in cov_targets:
+                        cmd.append(f"--cov={t}")
+                else:
+                    cmd.append("--cov=.")
+            else:
+                cmd.append("--cov=.")
+
             result = subprocess.run(
-                ["python", "-m", "pytest", "-v", "--tb=short", "--cov=.", "--cov-report=term-missing"],
+                cmd,
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=120,
                 cwd=str(work_dir) if work_dir.is_dir() else None,
             )
+
+            # Parse TOTAL line — try multiple column positions
             for line in result.stdout.split("\n"):
-                if "TOTAL" in line:
-                    parts = line.split()
+                stripped = line.strip()
+                if stripped.startswith("TOTAL"):
+                    parts = stripped.split()
                     if len(parts) >= 2:
-                        cov_str = parts[-1].replace("%", "")
-                        try:
-                            cov = float(cov_str)
-                            return cov >= target, f"Coverage: {cov}% (target: {target}%)"
-                        except ValueError:
-                            continue
-            return False, "Could not parse coverage report"
+                        for idx in (-1, -2):
+                            if abs(idx) <= len(parts):
+                                cov_str = parts[idx].replace("%", "")
+                                try:
+                                    cov = float(cov_str)
+                                    return (
+                                        cov >= target,
+                                        f"Coverage: {cov}% (target: {target}%)",
+                                    )
+                                except ValueError:
+                                    continue
+
+            # Could not parse TOTAL line — fail rather than assume OK
+            # (false positive is worse than false negative for evaluator)
+            stdout_tail = result.stdout[-200:] if result.stdout else ""
+            stderr_tail = result.stderr[-200:] if result.stderr else ""
+            return False, (
+                f"Coverage report could not be parsed; pytest passed but "
+                f"coverage target {target}% was not verified. "
+                f"stdout_tail=...{stdout_tail} stderr_tail=...{stderr_tail}"
+            )
         except Exception as e:
             return False, f"Coverage check error: {e}"
 
