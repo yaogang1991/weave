@@ -210,10 +210,9 @@ class EvaluatorEngine:
 
         if crit.type == CriterionType.COVERAGE:
             target = int(crit.target) if crit.target else 80
-            passed, msg = self._check_coverage(
+            return self._check_coverage(
                 Path(work_dir), target, output_artifacts,
             )
-            return passed, msg, True
 
         if crit.type == CriterionType.NO_CRITICAL:
             passed, msg = self._check_no_critical(Path(work_dir), output_artifacts)
@@ -413,7 +412,13 @@ class EvaluatorEngine:
         work_dir: Path,
         target: int,
         output_artifacts: list[str] | None = None,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, bool]:
+        """Check test coverage against target percentage.
+
+        Returns (passed, message, was_auto_verified).
+        When coverage output cannot be parsed, returns was_auto_verified=False
+        so the caller emits WARN instead of PASS (#152).
+        """
         try:
             cmd = [
                 "python", "-m", "pytest", "-v",
@@ -456,27 +461,31 @@ class EvaluatorEngine:
                                     return (
                                         cov >= target,
                                         f"Coverage: {cov}% (target: {target}%)",
+                                        True,
                                     )
                                 except ValueError:
                                     continue
 
-            # Could not parse TOTAL line — if pytest passed, treat as
-            # unverifiable (tool error) rather than implementation failure.
-            # Failing here triggers generator retry which can regress
-            # correct code (see #129).
+            # Could not parse TOTAL line
             stdout_tail = result.stdout[-200:] if result.stdout else ""
+            stderr_tail = result.stderr[-200:] if result.stderr else ""
             if result.returncode == 0:
+                # Tests pass but coverage unverified — mark as WARN, not PASS.
+                # Returning auto=False ensures evaluate_stage emits "WARN ..."
+                # instead of "PASS ..." (#152).
                 return True, (
                     f"Coverage could not be parsed (tool error); "
                     f"tests passed, coverage target {target}% not verified. "
-                    f"tail=...{stdout_tail}"
-                )
+                    f"stdout_tail=...{stdout_tail} "
+                    f"stderr_tail=...{stderr_tail}"
+                ), False
             return False, (
                 f"Tests failed and coverage report could not be parsed. "
-                f"tail=...{stdout_tail}"
-            )
+                f"stdout_tail=...{stdout_tail} "
+                f"stderr_tail=...{stderr_tail}"
+            ), True
         except Exception as e:
-            return False, f"Coverage check error: {e}"
+            return False, f"Coverage check error: {e}", True
 
     def _check_no_critical(self, path: Path, artifacts: list[str] | None = None) -> tuple[bool, str]:
         targets = artifacts or []

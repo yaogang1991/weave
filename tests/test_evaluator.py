@@ -187,14 +187,15 @@ class TestCriterionChecking:
 
     @patch("evaluator.engine.subprocess.run")
     def test_coverage_no_total_line_passes_as_tool_error(self, mock_run, evaluator, tmp_path):
-        """If pytest returns 0 but stdout has no TOTAL line, coverage passes
-        as unverifiable (tool error) to avoid triggering generator retry (#129)."""
+        """If pytest returns 0 but stdout has no TOTAL line, coverage emits
+        WARN (auto=False) instead of PASS to avoid false positive (#152)."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="2 passed in 0.01s\n",
             stderr="",
         )
-        passed, msg = evaluator._check_coverage(tmp_path, 80)
-        assert passed
+        passed, msg, auto = evaluator._check_coverage(tmp_path, 80)
+        assert passed  # Still passed (tests ok) but not auto-verified
+        assert not auto  # WARN, not PASS
         assert "could not be parsed" in msg
         assert "tool error" in msg
 
@@ -209,6 +210,29 @@ class TestEvaluateStage:
         assert isinstance(result, EvaluationResult)
         assert result.passed
         assert result.score > 0
+
+    @patch("evaluator.engine.subprocess.run")
+    def test_coverage_unparseable_emits_warn_not_pass(self, mock_run, evaluator, tmp_path):
+        """Coverage parse failure should produce WARN, not PASS (#152)."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="2 passed in 0.01s\n", stderr="",
+        )
+        result = evaluator.evaluate_stage(
+            "s1", "impl",
+            [SuccessCriterion(
+                type=CriterionType.COVERAGE, target=80,
+                description="coverage >= 80%",
+            )],
+            str(tmp_path),
+            output_artifacts=["src/module.py"],
+        )
+        # Overall passed=True because WARN doesn't fail the stage
+        assert result.passed
+        # But feedback must say WARN, not PASS
+        assert "WARN" in result.feedback
+        assert "could not be parsed" in result.feedback
+        # coverage should be in suggestions (uncheckable list)
+        assert "coverage >= 80%" in result.suggestions
 
     def test_uncheckable_criterion_passes_with_warning(self, evaluator, tmp_path):
         result = evaluator.evaluate_stage(
