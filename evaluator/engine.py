@@ -219,6 +219,18 @@ class EvaluatorEngine:
             passed, msg = self._check_no_critical(Path(work_dir), output_artifacts)
             return passed, msg, True
 
+        if crit.type == CriterionType.FILE_CHANGED:
+            passed, msg = self._check_file_changed(crit, output_artifacts)
+            return passed, msg, True
+
+        if crit.type == CriterionType.PATTERN_ABSENT:
+            passed, msg = self._check_pattern_absent(crit, Path(work_dir))
+            return passed, msg, True
+
+        if crit.type == CriterionType.PATTERN_PRESENT:
+            passed, msg = self._check_pattern_present(crit, Path(work_dir))
+            return passed, msg, True
+
         # CUSTOM + any unknown type → pass with warning (manual review recommended)
         return True, (
             f"Cannot auto-verify: {crit.description}. "
@@ -488,3 +500,90 @@ class EvaluatorEngine:
     def _extract_percentage(self, text: str) -> int | None:
         match = re.search(r'(\d+)%', text)
         return int(match.group(1)) if match else None
+
+    # ------------------------------------------------------------------
+    # Bug-fix verification checkers
+    # ------------------------------------------------------------------
+
+    def _check_file_changed(
+        self,
+        crit: SuccessCriterion,
+        output_artifacts: list[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Verify that the agent actually modified the specified file(s).
+
+        Checks output_artifacts (the list of files the agent wrote/edited).
+        If output_artifacts is empty, the file must exist on disk.
+        """
+        if not crit.path:
+            if output_artifacts:
+                return True, f"Files changed: {len(output_artifacts)} file(s)"
+            return False, "No files changed (path not specified, no output_artifacts)"
+
+        target_files = [f.strip() for f in crit.path.split(",")]
+        if output_artifacts:
+            # Normalize for comparison (handle relative/absolute differences)
+            artifact_names = {Path(a).name for a in output_artifacts}
+            missing = [f for f in target_files if Path(f).name not in artifact_names]
+            if missing:
+                return False, f"Files not changed by agent: {missing}"
+            return True, f"All target files changed: {target_files}"
+
+        # No output_artifacts — agent didn't produce any file changes
+        return False, f"No files changed by agent (expected: {target_files})"
+
+    def _check_pattern_absent(
+        self,
+        crit: SuccessCriterion,
+        work_dir: Path,
+    ) -> tuple[bool, str]:
+        """Verify that a pattern no longer exists in the specified file.
+
+        Used for bug-fix verification: the buggy code pattern must be gone.
+        """
+        if not crit.path or not crit.pattern:
+            return True, "pattern_absent: path or pattern not specified (skipped)"
+
+        fpath = work_dir / crit.path
+        if not fpath.exists():
+            return True, f"File {crit.path} does not exist (pattern trivially absent)"
+
+        try:
+            content = fpath.read_text(encoding="utf-8", errors="replace")
+            matches = re.findall(crit.pattern, content)
+            if matches:
+                return False, (
+                    f"Pattern still present in {crit.path}: "
+                    f"found {len(matches)} match(es) for '{crit.pattern}'"
+                )
+            return True, f"Pattern '{crit.pattern}' absent from {crit.path}"
+        except re.error as e:
+            return False, f"Invalid regex pattern '{crit.pattern}': {e}"
+
+    def _check_pattern_present(
+        self,
+        crit: SuccessCriterion,
+        work_dir: Path,
+    ) -> tuple[bool, str]:
+        """Verify that a pattern exists in the specified file.
+
+        Used for bug-fix verification: the fix code pattern must be present.
+        """
+        if not crit.path or not crit.pattern:
+            return True, "pattern_present: path or pattern not specified (skipped)"
+
+        fpath = work_dir / crit.path
+        if not fpath.exists():
+            return False, f"File {crit.path} does not exist"
+
+        try:
+            content = fpath.read_text(encoding="utf-8", errors="replace")
+            matches = re.findall(crit.pattern, content)
+            if not matches:
+                return False, (
+                    f"Pattern not found in {crit.path}: "
+                    f"expected '{crit.pattern}'"
+                )
+            return True, f"Pattern '{crit.pattern}' found in {crit.path} ({len(matches)} match(es))"
+        except re.error as e:
+            return False, f"Invalid regex pattern '{crit.pattern}': {e}"

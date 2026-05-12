@@ -72,6 +72,9 @@ class CriterionType(str, Enum):
     FILE_EXISTS = "file_exists"
     COVERAGE = "coverage"
     NO_CRITICAL = "no_critical"
+    FILE_CHANGED = "file_changed"
+    PATTERN_ABSENT = "pattern_absent"
+    PATTERN_PRESENT = "pattern_present"
     CUSTOM = "custom"
 
 
@@ -80,6 +83,7 @@ class SuccessCriterion(BaseModel):
     type: CriterionType = CriterionType.CUSTOM
     test_path: str = ""
     path: str = ""
+    pattern: str = ""
     target: float | None = None
     description: str = ""
 
