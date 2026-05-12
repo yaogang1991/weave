@@ -247,14 +247,19 @@ class EvaluatorEngine:
             return False, f"Test execution error: {e}"
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        """Run flake8/ruff on all targets in a single batch call.
+        """Auto-fix then verify lint for resolved target files.
+
+        Phase 1 (auto-fix): Runs autoflake --remove-all-unused-imports
+        --remove-unused-variables --in-place on resolved targets only.
+        This mutates the working tree — the evaluator is NOT a pure
+        read-only verifier.  Job output may differ from the generator's
+        original files as a result.
+
+        Phase 2 (verify): Runs flake8 (or ruff as fallback) on the same
+        targets.  If autoflake is not installed, the verify phase proceeds
+        without it; if flake8/ruff is not installed, returns failure.
 
         Only lints specific files — does NOT recursively scan directories.
-        This prevents cross-node pollution in parallel DAG execution.
-
-        Auto-fixes F401 (unused imports) and F841 (unused variables) via
-        autoflake before linting to eliminate the most common first-failure
-        cause without requiring a generator retry round.
         """
         resolved = []
         for t in targets:

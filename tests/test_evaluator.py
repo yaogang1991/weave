@@ -85,6 +85,63 @@ class TestCriterionChecking:
             assert isinstance(args, list)
             assert args[0] == "python"
 
+    def test_lint_autoflake_only_targets_resolved_files(self, evaluator, tmp_path):
+        """autoflake must only be called with resolved target paths, not
+        recursively scanning directories."""
+        (tmp_path / "a.py").write_text("import os\n", encoding="utf-8")
+        (tmp_path / "b.py").write_text("import sys\n", encoding="utf-8")
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            evaluator._run_lint(["a.py", "b.py"], tmp_path)
+            calls = mock_run.call_args_list
+            # First call = autoflake, second = flake8
+            assert len(calls) >= 2
+            autoflake_cmd = calls[0][0][0]
+            assert autoflake_cmd[0:3] == ["python", "-m", "autoflake"]
+            # autoflake args must contain resolved absolute paths
+            for resolved in [str(tmp_path / "a.py"), str(tmp_path / "b.py")]:
+                assert resolved in autoflake_cmd
+
+    def test_lint_continues_without_autoflake(self, evaluator, tmp_path):
+        """If autoflake is not installed (FileNotFoundError), flake8 still runs."""
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            # First call (autoflake) fails, second (flake8) succeeds
+            mock_run.side_effect = [
+                FileNotFoundError("autoflake not found"),
+                MagicMock(returncode=0, stdout=""),
+            ]
+            passed, msg = evaluator._run_lint(["code.py"], tmp_path)
+            assert passed
+            assert mock_run.call_count == 2
+
+    def test_lint_autoflake_error_still_runs_flake8(self, evaluator, tmp_path):
+        """If autoflake raises an unexpected error, flake8 still runs."""
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                RuntimeError("autoflake crashed"),
+                MagicMock(returncode=0, stdout=""),
+            ]
+            passed, msg = evaluator._run_lint(["code.py"], tmp_path)
+            assert passed
+            assert mock_run.call_count == 2
+
+    def test_lint_autoflake_then_flake8_on_same_targets(self, evaluator, tmp_path):
+        """After autoflake runs, flake8 verifies the same resolved files."""
+        (tmp_path / "code.py").write_text("import os\n", encoding="utf-8")
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            evaluator._run_lint(["code.py"], tmp_path)
+            calls = mock_run.call_args_list
+            autoflake_cmd = calls[0][0][0]
+            flake8_cmd = calls[1][0][0]
+            # autoflake: python -m autoflake --flags... <files>
+            autoflake_files = [a for a in autoflake_cmd[7:] if not a.startswith("-")]
+            # flake8: python -m flake8 <files> --flags...
+            flake8_files = [a for a in flake8_cmd[4:] if not a.startswith("-")]
+            assert autoflake_files == flake8_files
+
     def test_check_files_missing(self, evaluator, tmp_path):
         passed, msg = evaluator._check_files_exist(["missing.py"], tmp_path)
         assert not passed
