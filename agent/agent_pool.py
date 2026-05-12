@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from core.models import AgentMessage
@@ -314,6 +315,9 @@ Evaluate against:
         context: ExecutionContext | None = None,
     ) -> dict[str, Any]:
         """Internal execute implementation."""
+        # Inject runtime environment context so LLM doesn't guess paths (#144)
+        runtime_context = self._build_runtime_context()
+
         # Build context from input artifacts
         artifact_context = self._format_artifacts(input_artifacts)
 
@@ -439,6 +443,34 @@ Execute using your available tools. Produce clear, verifiable output.
             "artifacts": self.worker.artifacts,
             "output": final.content if final else "",
         }
+
+    def _build_runtime_context(self) -> str:
+        """Build runtime environment info for agent prompt (#144).
+
+        Injects OS, CWD, PROJECT_ROOT, and PYTHON so the LLM doesn't
+        need to guess paths or make platform-specific assumptions.
+        """
+        import platform
+        import sys
+
+        project_root = (
+            getattr(self.tool_registry, "base_cwd", None)
+            or Path.cwd()
+        )
+        return (
+            "## Runtime Environment\n"
+            f"- OS: {platform.system()} {platform.release()}\n"
+            f"- CWD: {Path.cwd().resolve()}\n"
+            f"- PROJECT_ROOT: {Path(project_root).resolve()}\n"
+            f"- PYTHON: {sys.executable}\n"
+            "\nPath rules:\n"
+            "- Use PROJECT_ROOT as working directory for all bash commands.\n"
+            "- Prefer relative paths from PROJECT_ROOT, e.g. "
+            "`python -m pytest tests/test_x.py -v`.\n"
+            "- Do not invent paths like /home/user on Windows.\n"
+            "- Do not cd into unknown directories; "
+            "bash already runs inside the project workspace.\n"
+        )
 
     def _format_artifacts(self, artifacts: list[HandoffArtifact]) -> str:
         """Format input artifacts as context for the agent."""
