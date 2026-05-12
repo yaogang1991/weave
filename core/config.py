@@ -105,6 +105,11 @@ class WatchdogConfig(BaseModel):
     enabled: bool = True
     heartbeat_interval_sec: float = 30.0
     heartbeat_miss_threshold: int = 8  # was 5; raised to reduce false kills
+    # Fraction of miss_threshold at which heartbeat_missed events are
+    # emitted.  With threshold=8 and fraction=0.5, alerts fire at
+    # missed_count >= 4 instead of the old hardcoded 2 — reducing noise
+    # for slow but healthy LLM API responses.
+    alert_threshold_fraction: float = Field(default=0.5, ge=0.0, le=1.0)
     agent_overrides: dict[str, AgentWatchdogOverride] = Field(
         default_factory=lambda: dict(_DEFAULT_AGENT_WATCHDOG_OVERRIDES),
     )
@@ -124,6 +129,10 @@ class WatchdogConfig(BaseModel):
         )
         return interval, threshold
 
+    def alert_threshold_for(self, agent_type: str) -> int:
+        """Minimum missed_count to emit heartbeat_missed event."""
+        _, threshold = self.settings_for(agent_type)
+        return max(2, int(threshold * self.alert_threshold_fraction))
     @classmethod
     def from_env(cls) -> WatchdogConfig:
         """Create from HARNESS_WATCHDOG_* environment variables."""
@@ -148,6 +157,9 @@ class WatchdogConfig(BaseModel):
             ),
             heartbeat_miss_threshold=int(
                 os.getenv("HARNESS_WATCHDOG_THRESHOLD", "8")
+            ),
+            alert_threshold_fraction=float(
+                os.getenv("HARNESS_WATCHDOG_ALERT_FRACTION", "0.5")
             ),
             agent_overrides=overrides,
         )

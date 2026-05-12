@@ -293,6 +293,10 @@ async def cmd_execute(args, dag: DAG | None = None):
             if ov.heartbeat_interval_sec is not None
             and ov.heartbeat_miss_threshold is not None
         },
+        alert_thresholds={
+            agent_type: wd_cfg.alert_threshold_for(agent_type)
+            for agent_type in wd_cfg.agent_overrides
+        },
     )
 
     # ── Visualization setup ──────────────────────────────────

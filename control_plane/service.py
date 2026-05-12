@@ -973,6 +973,10 @@ class RunService:
                 if ov.heartbeat_interval_sec is not None
                 and ov.heartbeat_miss_threshold is not None
             },
+            alert_thresholds={
+                agent_type: self.watchdog_config.alert_threshold_for(agent_type)
+                for agent_type in self.watchdog_config.agent_overrides
+            },
         )
 
         # Register event handler: forward DAG node events to session store

@@ -72,6 +72,8 @@ class DAGExecutionEngine:
         backoff_cap: float = 60.0,
         # Per-agent-type heartbeat overrides: {agent_type: (interval, threshold)}
         watchdog_overrides: dict[str, tuple[float, int]] | None = None,
+        # Per-agent-type alert thresholds: {agent_type: min_missed_for_alert}
+        alert_thresholds: dict[str, int] | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -90,9 +92,10 @@ class DAGExecutionEngine:
         self.heartbeat_miss_threshold = heartbeat_miss_threshold
         self.enable_watchdog = enable_watchdog
         self._watchdog_overrides = watchdog_overrides or {}
+        self._alert_thresholds = alert_thresholds or {}
         self._watchdog_task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
-        self._running_tasks: dict[str, asyncio.Task] = {}  # M2.0: Tasks for cancellation
+        self._running_tasks: dict[str, asyncio.Task] = {}
         # M3.2: Memory integration
         self.memory_manager = memory_manager
         self._session_id = session_id
@@ -110,6 +113,12 @@ class DAGExecutionEngine:
         if agent_type in self._watchdog_overrides:
             return self._watchdog_overrides[agent_type]
         return self.heartbeat_interval_sec, self.heartbeat_miss_threshold
+
+    def _get_alert_threshold(self, agent_type: str) -> int:
+        """Minimum missed_count to emit heartbeat_missed event."""
+        if agent_type in self._alert_thresholds:
+            return self._alert_thresholds[agent_type]
+        return 2
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -159,19 +168,19 @@ class DAGExecutionEngine:
         """
         Watchdog coroutine: monitors running nodes' heartbeats.
 
-        Checks all running nodes every watchdog interval (1.5x heartbeat
-        interval to avoid timing collisions). A single missed heartbeat
-        is logged as DEBUG (common timing artifact); two or more missed
-        heartbeats trigger a formal ``heartbeat_missed`` event.
+        Per-agent-type overrides are respected: generator nodes get more
+        generous intervals and thresholds.
 
         Nodes exceeding miss_threshold are marked UNHEALTHY and killed.
 
         Per-agent-type overrides are respected: generator nodes, for
         example, are allowed longer timeouts than planner/evaluator.
 
+        Alert events use a configurable threshold (default 50% of kill
+        threshold) to reduce noise from slow-but-healthy LLM APIs (#146).
+
         This runs as a background task during execute().
         """
-        # Use 1.5x heartbeat interval to avoid watchdog/refresh timing collision
         check_interval = self.heartbeat_interval_sec * 1.5
         while True:
             try:
@@ -187,11 +196,10 @@ class DAGExecutionEngine:
                     node.agent_type,
                 )
                 health = node.check_health(interval, threshold)
+                alert_min = self._get_alert_threshold(node.agent_type)
 
                 if health == NodeHealth.MISSED:
-                    # First missed heartbeat is likely a timing artifact —
-                    # log at DEBUG only. Emit event at missed_count >= 2.
-                    if node.missed_heartbeats >= 2:
+                    if node.missed_heartbeats >= alert_min:
                         await self._emit(ExecutionEvent(
                             node_id=node_id,
                             event_type="heartbeat_missed",
@@ -207,14 +215,13 @@ class DAGExecutionEngine:
                         ))
                     else:
                         logger.debug(
-                            "Node %s heartbeat missed (count=%d, threshold=%d) "
-                            "— likely timing artifact, not emitting event",
+                            "Node %s heartbeat missed (count=%d, threshold=%d)"
+                            " — below alert_min=%d, not emitting event",
                             node_id, node.missed_heartbeats,
-                            threshold,
+                            threshold, alert_min,
                         )
 
                 elif health == NodeHealth.UNHEALTHY:
-                    # Kill the node! Fail-fast path
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
                         event_type="unhealthy_killed",
@@ -226,7 +233,6 @@ class DAGExecutionEngine:
                         },
                     ))
 
-                    # Mark node as failed via fail-fast
                     node.health_status = NodeHealth.DEAD
                     node.status = NodeStatus.FAILED
                     node.error = (
@@ -236,15 +242,12 @@ class DAGExecutionEngine:
                     )
                     node.completed_at = datetime.now(timezone.utc)
 
-                    # Cancel the running task to unblock gather
                     task = self._running_tasks.pop(node_id, None)
                     if task and not task.done():
                         task.cancel()
 
-                    # Remove from running nodes
                     self._running_nodes.pop(node_id, None)
 
-                    # Emit workflow health alert
                     await self._emit(ExecutionEvent(
                         node_id="",
                         event_type="health_alert",
@@ -640,39 +643,41 @@ class DAGExecutionEngine:
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
     ) -> dict[str, Any]:
-        """Execute a node while periodically refreshing heartbeat."""
+        """Execute a node with a dedicated heartbeat coroutine.
+
+        A background task records heartbeats at the per-agent-type interval
+        independently of the executor task.  This avoids timing gaps that
+        could occur with the previous ``asyncio.wait_for`` polling approach
+        when the LLM API response time is close to the heartbeat interval.
+        """
         task = asyncio.create_task(self.agent_executor(node, input_artifacts))
         heartbeat_interval, _ = self._get_heartbeat_settings(node.agent_type)
 
-        while not task.done():
-            try:
-                # Shield the executor task so heartbeat polling timeouts do not
-                # cancel a healthy long-running node execution.
-                return await asyncio.wait_for(
-                    asyncio.shield(task),
-                    timeout=heartbeat_interval,
-                )
-            except asyncio.TimeoutError:
-                # The shielded task is still running (not done, not raised).
-                # Record heartbeat to indicate the executor coroutine is alive.
-                # A truly hung coroutine (e.g. blocked on unresolved future)
-                # will still appear alive here — but that is indistinguishable
-                # from a slow but healthy task at the async level. The watchdog
-                # protects against process-level hangs, not async-level stalls.
-                node.record_heartbeat()
-                continue
-            except asyncio.CancelledError:
-                # Watchdog (or caller) cancelled outer task: explicitly cancel
-                # the inner executor task and wait for cleanup to finish.
+        async def _heartbeat_loop() -> None:
+            while not task.done():
+                await asyncio.sleep(heartbeat_interval)
                 if not task.done():
-                    task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-                raise
+                    node.record_heartbeat()
 
-        return await task
+        hb = asyncio.create_task(_heartbeat_loop())
+        try:
+            return await task
+        except asyncio.CancelledError:
+            # Watchdog (or caller) cancelled the task.
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            raise
+        finally:
+            if not hb.done():
+                hb.cancel()
+            try:
+                await hb
+            except asyncio.CancelledError:
+                pass
 
     def _collect_input_artifacts(self, dag: DAG, node_id: str) -> list[HandoffArtifact]:
         """Collect output artifacts from all dependency nodes."""
