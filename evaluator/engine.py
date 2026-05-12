@@ -367,15 +367,15 @@ class EvaluatorEngine:
                                 except ValueError:
                                     continue
 
-            # Fallback: if pytest itself passed, assume coverage OK
-            if result.returncode == 0:
-                return (
-                    True,
-                    f"Tests passed; could not parse coverage (assumed OK, "
-                    f"target: {target}%)",
-                )
-
-            return False, "Could not parse coverage report"
+            # Could not parse TOTAL line — fail rather than assume OK
+            # (false positive is worse than false negative for evaluator)
+            stdout_tail = result.stdout[-200:] if result.stdout else ""
+            stderr_tail = result.stderr[-200:] if result.stderr else ""
+            return False, (
+                f"Coverage report could not be parsed; pytest passed but "
+                f"coverage target {target}% was not verified. "
+                f"stdout_tail=...{stdout_tail} stderr_tail=...{stderr_tail}"
+            )
         except Exception as e:
             return False, f"Coverage check error: {e}"
 
