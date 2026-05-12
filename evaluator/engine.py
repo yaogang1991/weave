@@ -18,6 +18,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from core.models import (
     CriterionType,
@@ -114,6 +115,8 @@ class EvaluatorEngine:
     def __init__(self, session_store: SessionStore):
         self.session_store = session_store
         self._last_autofixed: list[str] = []
+        self._last_lint_new_issues: list[str] = []
+        self._last_lint_all_issues: list[str] = []
 
     def evaluate_stage(
         self,
@@ -164,12 +167,20 @@ class EvaluatorEngine:
                 f"{', '.join(uncheckable)}"
             )
 
+        # Build metadata with structured lint issue data (#151)
+        eval_metadata: dict[str, Any] = {}
+        if self._last_lint_all_issues:
+            eval_metadata["lint_all_issues"] = self._last_lint_all_issues
+        if self._last_lint_new_issues:
+            eval_metadata["lint_new_issues"] = self._last_lint_new_issues
+
         result = EvaluationResult(
             passed=overall_passed,
             score=round(score, 1),
             criteria_results=results,
             feedback=feedback,
             suggestions=uncheckable,
+            metadata=eval_metadata,
         )
 
         self.session_store.emit_event(
@@ -360,6 +371,8 @@ class EvaluatorEngine:
         (same as pre-#150 behavior).
         """
         self._last_autofixed = []
+        self._last_lint_new_issues = []
+        self._last_lint_all_issues = []
 
         resolved = []
         for t in targets:
@@ -461,6 +474,8 @@ class EvaluatorEngine:
             msg = f"Lint issues:\n{lint_stdout[:500]}"
             if autofixed:
                 msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
+            self._last_lint_all_issues = []
+            self._last_lint_new_issues = []
             return False, msg
 
         # Delta lint: use git diff to find changed lines (#150)
@@ -472,6 +487,11 @@ class EvaluatorEngine:
                 rel_targets.append(Path(r).name)
 
         changed = get_changed_lines(rel_targets, work_dir)
+
+        # Store issues for regression tracking (#151)
+        self._last_lint_all_issues = [
+            f"{i.path}:{i.line}:{i.code}" for i in all_issues
+        ]
 
         if changed:
             # Only issues on changed lines are "new"
@@ -491,6 +511,10 @@ class EvaluatorEngine:
                     new_issues.append(issue)
                 else:
                     existing_issues.append(issue)
+
+            self._last_lint_new_issues = [
+                f"{i.path}:{i.line}:{i.code}" for i in new_issues
+            ]
 
             if not new_issues:
                 msg = "Lint clean (all issues are pre-existing)"
@@ -528,6 +552,7 @@ class EvaluatorEngine:
                 for i in all_issues
             ]
             msg = "Lint issues (delta unavailable):\n" + "\n".join(lines)
+            self._last_lint_new_issues = self._last_lint_all_issues
 
         if autofixed:
             msg = f"Autoflake auto-fixed: {', '.join(autofixed)}\n{msg}"
