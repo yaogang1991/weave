@@ -397,7 +397,6 @@ class AgentPool:
         self.job_id = job_id
         self.approval_repo = approval_repo
         self.run_id = run_id
-        self._instances: dict[str, WorkerAgent] = {}
 
     def _is_api_error(self, exc: Exception) -> bool:
         """Check if an exception is likely an LLM API error (auth, rate limit, etc.)."""
@@ -501,12 +500,3 @@ class AgentPool:
                         continue
 
         return _executor
-
-    def reset_context(self, agent_type: str) -> None:
-        """Reset an agent's context (for context isolation between tasks)."""
-        if agent_type in self._instances:
-            del self._instances[agent_type]
-
-    def reset_all(self) -> None:
-        """Reset all agent contexts."""
-        self._instances.clear()
