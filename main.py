@@ -421,6 +421,7 @@ async def cmd_run(args):
         project=args.project,
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
+        non_interactive=getattr(args, "non_interactive", False),
         viz=args.viz,
         visualize=args.visualize,
         no_browser=args.no_browser,
