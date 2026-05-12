@@ -277,6 +277,9 @@ class EvaluatorEngine:
         if not resolved:
             return True, "No targets to lint"
 
+        # Snapshot file hashes before autoflake for audit trail
+        pre_hashes = {f: self._file_hash(f) for f in resolved}
+
         # Auto-fix unused imports / variables before linting (graceful
         # degradation if autoflake is not installed).
         try:
@@ -294,6 +297,20 @@ class EvaluatorEngine:
         except Exception:
             pass
 
+        # Detect which files autoflake actually changed
+        autofixed = [
+            f for f in resolved
+            if pre_hashes[f] is not None and self._file_hash(f) != pre_hashes[f]
+        ]
+        autofix_note = ""
+        if autofixed:
+            autofix_note = f" [autoflake modified: {', '.join(Path(f).name for f in autofixed)}]"
+            self.session_store.emit_event(
+                "",  # session_id not available at this layer
+                EventType.EVAL_AUTOFIX_APPLIED,
+                {"tool": "autoflake", "files": autofixed},
+            )
+
         try:
             result = subprocess.run(
                 ["python", "-m", "flake8"] + resolved + ["--max-line-length=100"],
@@ -301,8 +318,8 @@ class EvaluatorEngine:
                 encoding="utf-8", errors="replace", timeout=60,
             )
             if result.returncode == 0:
-                return True, "Lint clean"
-            return False, f"Lint issues:\n{result.stdout[:500]}"
+                return True, f"Lint clean{autofix_note}"
+            return False, f"Lint issues:\n{result.stdout[:500]}{autofix_note}"
         except FileNotFoundError:
             try:
                 result = subprocess.run(
@@ -311,12 +328,20 @@ class EvaluatorEngine:
                     encoding="utf-8", errors="replace", timeout=60,
                 )
                 if result.returncode == 0:
-                    return True, "Ruff clean"
-                return False, f"Ruff issues:\n{result.stdout[:500]}"
+                    return True, f"Ruff clean{autofix_note}"
+                return False, f"Ruff issues:\n{result.stdout[:500]}{autofix_note}"
             except FileNotFoundError:
                 return False, "No linter available (install flake8 or ruff)"
         except Exception as e:
             return False, f"Lint error: {e}"
+
+    @staticmethod
+    def _file_hash(path: str) -> str | None:
+        """Return a quick hash of file contents, or None if unreadable."""
+        try:
+            return Path(path).read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return None
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
         missing = [f for f in files if not (base / f).exists()]

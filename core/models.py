@@ -355,6 +355,7 @@ class EventType(str, Enum):
     EVAL_START = "eval.start"
     EVAL_RESULT = "eval.result"
     EVAL_CONTRACT_CHECK = "eval.contract_check"
+    EVAL_AUTOFIX_APPLIED = "eval.autofix_applied"
 
     # Checkpoint events
     CHECKPOINT_CREATED = "checkpoint.created"

@@ -142,6 +142,72 @@ class TestCriterionChecking:
             flake8_files = [a for a in flake8_cmd[4:] if not a.startswith("-")]
             assert autoflake_files == flake8_files
 
+    def test_lint_autoflake_no_changes_no_audit_note(self, evaluator, tmp_path):
+        """When autoflake makes no changes, feedback has no audit note."""
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            # autoflake and flake8 both succeed, file unchanged
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            passed, msg = evaluator._run_lint(["code.py"], tmp_path)
+            assert passed
+            assert "autoflake modified" not in msg
+
+    def test_lint_autoflake_changes_tracked_in_feedback(self, evaluator, tmp_path):
+        """When autoflake changes a file, feedback includes audit note."""
+        code_file = tmp_path / "code.py"
+        code_file.write_text("import os\nimport sys\n", encoding="utf-8")
+        call_count = [0]
+
+        def fake_run(cmd, **kwargs):
+            call_count[0] += 1
+            # First call = autoflake: simulate removing unused import
+            if "autoflake" in cmd[2]:
+                # Remove one import to simulate autoflake change
+                code_file.write_text("import os\n", encoding="utf-8")
+            return MagicMock(returncode=0, stdout="")
+
+        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+            passed, msg = evaluator._run_lint(["code.py"], tmp_path)
+            assert passed
+            assert "autoflake modified" in msg
+            assert "code.py" in msg
+
+    def test_lint_autoflake_changes_emits_event(self, evaluator, tmp_path):
+        """When autoflake changes files, an EVAL_AUTOFIX_APPLIED event is emitted."""
+        code_file = tmp_path / "code.py"
+        code_file.write_text("import os\nimport sys\n", encoding="utf-8")
+
+        def fake_run(cmd, **kwargs):
+            if "autoflake" in cmd[2]:
+                code_file.write_text("import os\n", encoding="utf-8")
+            return MagicMock(returncode=0, stdout="")
+
+        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+            with patch.object(evaluator.session_store, "emit_event") as mock_emit:
+                evaluator._run_lint(["code.py"], tmp_path)
+                # Find the autofix event among any emitted events
+                autofix_calls = [
+                    c for c in mock_emit.call_args_list
+                    if c[0][1] == "eval.autofix_applied"
+                ]
+                assert len(autofix_calls) == 1
+                event_data = autofix_calls[0][0][2]
+                assert event_data["tool"] == "autoflake"
+                assert len(event_data["files"]) == 1
+
+    def test_lint_autoflake_no_changes_no_event(self, evaluator, tmp_path):
+        """When autoflake makes no changes, no autofix event is emitted."""
+        (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
+        with patch("evaluator.engine.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="")
+            with patch.object(evaluator.session_store, "emit_event") as mock_emit:
+                evaluator._run_lint(["code.py"], tmp_path)
+                autofix_calls = [
+                    c for c in mock_emit.call_args_list
+                    if c[0][1] == "eval.autofix_applied"
+                ]
+                assert len(autofix_calls) == 0
+
     def test_check_files_missing(self, evaluator, tmp_path):
         passed, msg = evaluator._check_files_exist(["missing.py"], tmp_path)
         assert not passed
