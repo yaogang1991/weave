@@ -5,17 +5,83 @@ Validates:
 - Duplicate node IDs → raise PlanValidationError (no auto-fix, DAG semantics ambiguous)
 - Dangling edges → raise PlanValidationError
 - Cycle detection → raise PlanValidationError
+- Stdlib module name shadowing → warning (#238)
 
 Design: validation-only, never silently mutates the plan. This avoids
 introducing subtle semantic changes when duplicate IDs make edge
 ownership ambiguous. Instead, the orchestrator is asked to replan.
 """
-
 from __future__ import annotations
+
+import re
+import sys
 
 
 class PlanValidationError(Exception):
     """Raised when a plan has structural errors."""
+
+
+def check_stdlib_conflict(name: str) -> str | None:
+    """Check if a name conflicts with a Python stdlib module.
+
+    Returns the stdlib module name if there's a conflict, None otherwise.
+    Uses sys.stdlib_module_names (Python 3.10+) with a hardcoded fallback.
+    """
+    name_lower = name.lower().replace("-", "_")
+    stdlib_names = _get_stdlib_names()
+    if name_lower in stdlib_names:
+        return name_lower
+    return None
+
+
+_stdlib_cache: set[str] | None = None
+
+
+def _get_stdlib_names() -> set[str]:
+    global _stdlib_cache
+    if _stdlib_cache is not None:
+        return _stdlib_cache
+    try:
+        _stdlib_cache = sys.stdlib_module_names  # Python 3.10+
+    except AttributeError:
+        # Fallback for Python < 3.10
+        _stdlib_cache = {
+            "abc", "aifc", "argparse", "array", "ast", "asynchat", "asyncio",
+            "asyncore", "atexit", "audioop", "base64", "bdb", "binascii",
+            "bisect", "builtins", "bz2", "calendar", "cgi", "cgitb", "chunk",
+            "cmath", "cmd", "code", "codecs", "codeop", "collections",
+            "colorsys", "compileall", "concurrent", "configparser", "contextlib",
+            "contextvars", "copy", "copyreg", "cProfile", "crypt", "csv",
+            "ctypes", "curses", "dataclasses", "datetime", "dbm", "decimal",
+            "difflib", "dis", "distutils", "doctest", "email", "encodings",
+            "enum", "errno", "faulthandler", "fcntl", "filecmp", "fileinput",
+            "fnmatch", "fractions", "ftplib", "functools", "gc", "getopt",
+            "getpass", "gettext", "glob", "graphlib", "grp", "gzip", "hashlib",
+            "heapq", "hmac", "html", "http", "idlelib", "imaplib", "imghdr",
+            "imp", "importlib", "inspect", "io", "ipaddress", "itertools",
+            "json", "keyword", "lib2to3", "linecache", "locale", "logging",
+            "lzma", "mailbox", "mailcap", "marshal", "math", "mimetypes",
+            "mmap", "modulefinder", "multiprocessing", "netrc", "nis", "nntplib",
+            "numbers", "operator", "optparse", "os", "ossaudiodev", "pathlib",
+            "pdb", "pickle", "pickletools", "pipes", "pkgutil", "platform",
+            "plistlib", "poplib", "posix", "posixpath", "pprint", "profile",
+            "pstats", "pty", "pwd", "py_compile", "pyclbr", "pydoc",
+            "queue", "quopri", "random", "re", "readline", "reprlib",
+            "resource", "rlcompleter", "runpy", "sched", "secrets", "select",
+            "selectors", "shelve", "shlex", "shutil", "signal", "site",
+            "smtpd", "smtplib", "sndhdr", "socket", "socketserver", "spwd",
+            "sqlite3", "ssl", "stat", "statistics", "string", "stringprep",
+            "struct", "subprocess", "sunau", "symtable", "sys", "sysconfig",
+            "syslog", "tabnanny", "tarfile", "telnetlib", "tempfile", "termios",
+            "test", "textwrap", "threading", "time", "timeit", "tkinter",
+            "token", "tokenize", "tomllib", "trace", "traceback", "tracemalloc",
+            "tty", "turtle", "turtledemo", "types", "typing", "unicodedata",
+            "unittest", "urllib", "uu", "uuid", "venv", "warnings", "wave",
+            "weakref", "webbrowser", "winreg", "winsound", "wsgiref", "xdrlib",
+            "xml", "xmlrpc", "zipapp", "zipfile", "zipimport", "zlib",
+            "zoneinfo",
+        }
+    return _stdlib_cache
 
 
 class PlanValidator:
@@ -81,4 +147,36 @@ class PlanValidator:
                 if has_cycle(nid):
                     raise PlanValidationError("Plan contains a cycle")
 
+        # Stdlib shadowing detection (#238)
+        self._check_stdlib_shadowing(nodes)
+
         return plan_data
+
+    def _check_stdlib_shadowing(self, nodes: list[dict]) -> None:
+        """Warn if task descriptions reference stdlib module names as packages.
+
+        Detects patterns like "create a urllib library" or quoted module names
+        where the name matches a Python stdlib module.
+        """
+        for node in nodes:
+            task = node.get("task", "")
+            if not task:
+                continue
+            # Extract potential package names from task descriptions
+            candidates = set(re.findall(r'["\'](\w+)["\']', task))
+            for prefix in ("library", "module", "package", "named", "called"):
+                candidates.update(
+                    re.findall(
+                        rf"{prefix}\s+(\w+)", task, re.IGNORECASE,
+                    )
+                )
+
+            for candidate in candidates:
+                conflict = check_stdlib_conflict(candidate)
+                if conflict:
+                    self.warnings.append(
+                        f"Node '{node.get('id')}' task may create a package "
+                        f"named '{conflict}' which shadows Python stdlib. "
+                        f"Use a prefixed alternative (e.g., 'my_{conflict}', "
+                        f"'{conflict}_lib')."
+                    )

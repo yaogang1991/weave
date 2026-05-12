@@ -63,6 +63,13 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
 7. **Scope isolation**: For tasks that create independent libraries or utilities,
    task descriptions must explicitly state "create a standalone module that does NOT
    import from or depend on existing project modules". List specific features required.
+8. **Avoid stdlib shadowing**: NEVER name a package/module the same as a Python
+   standard library module (e.g., urllib, json, collections, typing, io, os, sys,
+   pathlib, http, email, html, xml, asyncio, logging, unittest, ctypes, importlib,
+   multiprocessing, sqlite3, xmlrpc, lib2to3, distutils, curses, tkinter). If the
+   user's requirement mentions such a name, use a prefixed alternative (e.g.,
+   "myurl_lib" instead of "urllib", "json_utils" instead of "json"). Shadowing
+   stdlib causes catastrophic import failures in pytest and the entire runtime.
 
 ## Output Format
 
