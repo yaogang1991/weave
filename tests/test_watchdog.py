@@ -558,3 +558,192 @@ class TestHealthEventChain:
         assert len(decision_events) >= 1
         assert decision_events[0].details["action"] == "skip"
 
+
+# ---------------------------------------------------------------------------
+# TestPerAgentWatchdog -- per-agent-type heartbeat overrides (#142)
+# ---------------------------------------------------------------------------
+
+
+class TestPerAgentWatchdog:
+    """Verify that generator nodes receive more generous heartbeat settings."""
+
+    @pytest.mark.asyncio
+    async def test_generator_not_killed_with_long_override(self):
+        """Generator node with generous override should survive a long task."""
+
+        async def slow_executor(node, artifacts):
+            # Simulate a task that takes ~0.6s (would kill with strict defaults)
+            for _ in range(12):
+                await asyncio.sleep(0.05)
+            return {"summary": "ok"}
+
+        async def mock_failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort")
+
+        engine = DAGExecutionEngine(
+            agent_executor=slow_executor,
+            failure_handler=mock_failure_handler,
+            heartbeat_interval_sec=0.1,
+            heartbeat_miss_threshold=2,
+            enable_watchdog=True,
+            watchdog_overrides={
+                "generator": (0.3, 20),  # Very generous for generator
+            },
+        )
+
+        dag = DAG(
+            nodes={
+                "gen1": DAGNode(
+                    id="gen1",
+                    agent_type="generator",
+                    task_description="long task",
+                ),
+            },
+        )
+
+        result_dag = await engine.execute(dag)
+
+        # Generator should succeed with the generous override
+        assert result_dag.nodes["gen1"].status == NodeStatus.SUCCESS
+        assert result_dag.nodes["gen1"].health_status == NodeHealth.HEALTHY
+
+    @pytest.mark.asyncio
+    async def test_non_overridden_agent_killed_normally(self):
+        """Agent types without overrides use global (strict) defaults."""
+
+        async def hanging_executor(node, artifacts):
+            await asyncio.sleep(10)
+
+        async def mock_failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort")
+
+        engine = DAGExecutionEngine(
+            agent_executor=hanging_executor,
+            failure_handler=mock_failure_handler,
+            heartbeat_interval_sec=0.05,
+            heartbeat_miss_threshold=2,
+            enable_watchdog=True,
+            watchdog_overrides={
+                "generator": (1.0, 20),  # Only generator gets override
+            },
+        )
+
+        # Override _execute_with_heartbeat to NOT record automatic heartbeats
+        async def no_heartbeat_wrapper(node, input_artifacts):
+            return await engine.agent_executor(node, input_artifacts)
+        engine._execute_with_heartbeat = no_heartbeat_wrapper
+
+        dag = DAG(
+            nodes={
+                "eval1": DAGNode(
+                    id="eval1",
+                    agent_type="evaluator",
+                    task_description="eval task",
+                ),
+            },
+        )
+
+        result_dag = await engine.execute(dag)
+
+        # Evaluator (no override) should be killed
+        assert result_dag.nodes["eval1"].status == NodeStatus.FAILED
+        assert result_dag.nodes["eval1"].health_status == NodeHealth.DEAD
+
+    def test_get_heartbeat_settings_default(self):
+        """_get_heartbeat_settings returns global defaults when no override."""
+        async def noop_executor(node, artifacts):
+            return {"summary": "ok"}
+
+        async def noop_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort")
+
+        engine = DAGExecutionEngine(
+            agent_executor=noop_executor,
+            failure_handler=noop_handler,
+            heartbeat_interval_sec=30.0,
+            heartbeat_miss_threshold=5,
+        )
+
+        interval, threshold = engine._get_heartbeat_settings("planner")
+        assert interval == 30.0
+        assert threshold == 5
+
+    def test_get_heartbeat_settings_with_override(self):
+        """_get_heartbeat_settings returns per-agent override when set."""
+        async def noop_executor(node, artifacts):
+            return {"summary": "ok"}
+
+        async def noop_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort")
+
+        engine = DAGExecutionEngine(
+            agent_executor=noop_executor,
+            failure_handler=noop_handler,
+            heartbeat_interval_sec=30.0,
+            heartbeat_miss_threshold=5,
+            watchdog_overrides={
+                "generator": (60.0, 10),
+            },
+        )
+
+        interval, threshold = engine._get_heartbeat_settings("generator")
+        assert interval == 60.0
+        assert threshold == 10
+
+        # Non-overridden type still uses defaults
+        interval, threshold = engine._get_heartbeat_settings("evaluator")
+        assert interval == 30.0
+        assert threshold == 5
+
+    @pytest.mark.asyncio
+    async def test_watchdog_event_includes_agent_type(self):
+        """Unhealthy kill event should include agent_type in details."""
+
+        async def hanging_executor(node, artifacts):
+            await asyncio.sleep(10)
+
+        async def mock_failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort")
+
+        events: list[ExecutionEvent] = []
+
+        async def capture_event(event: ExecutionEvent):
+            events.append(event)
+
+        engine = DAGExecutionEngine(
+            agent_executor=hanging_executor,
+            failure_handler=mock_failure_handler,
+            heartbeat_interval_sec=0.05,
+            heartbeat_miss_threshold=2,
+            enable_watchdog=True,
+        )
+        engine.on_event(capture_event)
+
+        # No heartbeat wrapper
+        async def no_heartbeat_wrapper(node, input_artifacts):
+            return await engine.agent_executor(node, input_artifacts)
+        engine._execute_with_heartbeat = no_heartbeat_wrapper
+
+        dag = DAG(
+            nodes={
+                "gen1": DAGNode(
+                    id="gen1",
+                    agent_type="generator",
+                    task_description="hang test",
+                ),
+            },
+        )
+
+        await engine.execute(dag)
+
+        killed_event = next(
+            (e for e in events if e.event_type == "unhealthy_killed"), None,
+        )
+        assert killed_event is not None
+        assert killed_event.details["agent_type"] == "generator"
+
