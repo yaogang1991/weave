@@ -99,6 +99,8 @@ class DAGExecutionEngine:
             max_workers=max_parallel,
             thread_name_prefix="dag-engine",
         )
+        # Best-attempt tracking to prevent retry regression (#129).
+        self._best_attempts: dict[str, dict] = {}
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -513,11 +515,35 @@ class DAGExecutionEngine:
                 )
 
                 if not eval_result.passed:
+                    # Track best attempt to detect retry regression (#129).
+                    prev_best = self._best_attempts.get(node_id)
+                    if prev_best is None or eval_result.score > prev_best["score"]:
+                        self._best_attempts[node_id] = {
+                            "score": eval_result.score,
+                            "artifacts": node.output_artifacts.copy(),
+                            "feedback": eval_result.feedback,
+                        }
+                    else:
+                        logger.warning(
+                            "Node %s retry score %.1f <= best %.1f (regression risk)",
+                            node_id, eval_result.score, prev_best["score"],
+                        )
                     node.retry_count += 1
+                    # Build retry feedback with regression awareness.
+                    best = self._best_attempts[node_id]
+                    regression_hint = ""
+                    if eval_result.score < best["score"]:
+                        regression_hint = (
+                            "\n\nWARNING: Your previous attempt scored higher "
+                            f"({best['score']:.1f} vs current {eval_result.score:.1f}). "
+                            "The code may already be correct — only fix the "
+                            "specific issues reported, do NOT rewrite working code."
+                        )
                     node.eval_feedback = (
                         f"{eval_result.feedback}\n\n"
                         f"Output artifacts: {node.output_artifacts or 'none'}\n"
                         f"Fix ALL issues listed above."
+                        f"{regression_hint}"
                     )
                     node.error = f"Evaluation failed (score: {eval_result.score}): {eval_result.feedback}"
                     node.status = NodeStatus.FAILED
