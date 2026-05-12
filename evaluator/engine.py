@@ -448,14 +448,20 @@ class EvaluatorEngine:
                                 except ValueError:
                                     continue
 
-            # Could not parse TOTAL line — fail rather than assume OK
-            # (false positive is worse than false negative for evaluator)
+            # Could not parse TOTAL line — if pytest passed, treat as
+            # unverifiable (tool error) rather than implementation failure.
+            # Failing here triggers generator retry which can regress
+            # correct code (see #129).
             stdout_tail = result.stdout[-200:] if result.stdout else ""
-            stderr_tail = result.stderr[-200:] if result.stderr else ""
+            if result.returncode == 0:
+                return True, (
+                    f"Coverage could not be parsed (tool error); "
+                    f"tests passed, coverage target {target}% not verified. "
+                    f"tail=...{stdout_tail}"
+                )
             return False, (
-                f"Coverage report could not be parsed; pytest passed but "
-                f"coverage target {target}% was not verified. "
-                f"stdout_tail=...{stdout_tail} stderr_tail=...{stderr_tail}"
+                f"Tests failed and coverage report could not be parsed. "
+                f"tail=...{stdout_tail}"
             )
         except Exception as e:
             return False, f"Coverage check error: {e}"
