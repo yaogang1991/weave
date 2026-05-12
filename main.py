@@ -402,7 +402,8 @@ async def cmd_execute(args, dag: DAG | None = None):
     )
 
     # Create DAG engine + M3 memory integration
-    project_work_dir = str(Path(args.project).resolve()) if args.project else None
+    # args.project is always set by _resolve_project_path (never None)
+    project_work_dir = str(Path(args.project).resolve())
     wd_cfg = config.watchdog
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),

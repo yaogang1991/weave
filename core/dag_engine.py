@@ -653,7 +653,13 @@ class DAGExecutionEngine:
                         return
 
             if self.evaluator and node.success_criteria and node.agent_type == "generator":
-                eval_work_dir = self.work_dir or os.getcwd()
+                eval_work_dir = self.work_dir or os.getcwd()  # fallback for backward compat
+                if not self.work_dir:
+                    logger.warning(
+                        "Node %s: work_dir not set, evaluating in cwd=%s. "
+                        "This may indicate --project was not passed correctly.",
+                        node_id, eval_work_dir,
+                    )
                 eval_result = await asyncio.get_running_loop().run_in_executor(
                     self._executor,
                     functools.partial(
