@@ -386,7 +386,7 @@ Return a JSON object with this exact structure:
         for nid, node in dag.nodes.items():
             dag_status.append(
                 f"- {nid}: {node.agent_type} = {node.status.value}"
-                f"{' (FAILED: ' + node.error[:100] + ')' if node.status.value == 'failed' else ''}"
+                f"{' (FAILED: ' + node.error[:300] + ')' if node.status.value == 'failed' else ''}"
             )
 
         # Build adaptation prompt
@@ -394,7 +394,7 @@ Return a JSON object with this exact structure:
             node_id=failed_node_id,
             agent_type=failed_node.agent_type,
             task=failed_node.task_description,
-            error=failed_node.error[:500],
+            error=failed_node.error[:2000],
             retry_count=failed_node.retry_count,
             dag_status="\n".join(dag_status),
         )

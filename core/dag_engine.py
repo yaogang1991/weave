@@ -366,7 +366,7 @@ class DAGExecutionEngine:
                                             details={
                                                 "reason": "evaluator_failed",
                                                 "evaluator": failed_id,
-                                                "feedback": node.eval_feedback[:200],
+                                                "feedback": node.eval_feedback[:1000],
                                             },
                                         ))
                                         # Retry generator with feedback.
@@ -624,7 +624,9 @@ class DAGExecutionEngine:
                         lint_guidance = ""
                     node.eval_feedback = (
                         f"{eval_result.feedback}\n\n"
-                        f"Output artifacts: {node.output_artifacts or 'none'}\n"
+                        f"Output artifacts: {node.output_artifacts or 'none'}\n\n"
+                        f"IMPORTANT: Fix the issues INCREMENTALLY. Do NOT rewrite working "
+                        f"code from scratch. Use the edit tool to fix specific problems.\n"
                         f"Fix ALL issues listed above."
                         f"{regression_hint}"
                         f"{lint_guidance}"
