@@ -207,7 +207,10 @@ async def cmd_execute(args, dag: DAG | None = None):
     )
 
     # Create guardrails (interactive: accept_edits, non-interactive: dont_ask)
-    non_interactive = os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+    non_interactive = (
+        getattr(args, "non_interactive", False)
+        or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+    )
     if non_interactive:
         policy = GuardrailPolicy(
             mode=PermissionMode.DONT_ASK,
@@ -248,6 +251,7 @@ async def cmd_execute(args, dag: DAG | None = None):
             pass
 
     # Create agent pool with guardrails + M3 integration
+    approval_repo = ApprovalRepository()
     pool = AgentPool(
         llm_config=config.llm,
         session_store=store,
@@ -259,6 +263,8 @@ async def cmd_execute(args, dag: DAG | None = None):
         max_context_tokens=config.max_context_tokens,
         llm_router=llm_router,
         memory_manager=memory_manager,
+        job_id=f"cli_{session_id}",
+        approval_repo=approval_repo,
     )
 
     # Create orchestrator for failure handling + M3 learning
@@ -365,9 +371,16 @@ async def cmd_execute(args, dag: DAG | None = None):
         store.emit_event(session_id, EventType.SESSION_ERROR, {
             "error": f"Approval required: {exc.ticket_id}",
         })
-        print(f"\nAgent requested approval for a high-risk operation (ticket: {exc.ticket_id}).")
-        print("Interactive approval is not supported in CLI run mode.")
-        print("Set HARNESS_NON_INTERACTIVE=true to auto-approve, or use worker mode.")
+        if exc.ticket_id:
+            print(f"\nAgent requested approval for a high-risk operation.")
+            print(f"  Ticket ID: {exc.ticket_id}")
+            print(f"  Approve:   python main.py approve {exc.ticket_id}")
+            print(f"  Reject:    python main.py reject {exc.ticket_id}")
+            print("Then rerun to continue, or use worker mode for automatic poll.")
+        else:
+            print("\nAgent requested approval but no ticket was created.")
+            print("This may be a configuration issue.")
+        print("For local auto-approval: set HARNESS_NON_INTERACTIVE=true or use --non-interactive.")
         return None
     except Exception as exc:
         store.emit_event(session_id, EventType.SESSION_ERROR, {
@@ -422,6 +435,7 @@ async def cmd_run(args):
         project=args.project,
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
+        non_interactive=getattr(args, "non_interactive", False),
         viz=args.viz,
         visualize=args.visualize,
         no_browser=args.no_browser,
@@ -1103,6 +1117,10 @@ Examples:
         "--max-iterations", type=int, default=50,
         help="Max iterations per agent loop (default: 50)",
     )
+    exec_parser.add_argument(
+        "--non-interactive", action="store_true",
+        help="Auto-approve all tool calls (no human approval needed)",
+    )
     exec_parser.set_defaults(func=cmd_execute)
 
     # run command (plan + execute)
@@ -1129,6 +1147,10 @@ Examples:
     run_parser.add_argument(
         "--max-iterations", type=int, default=50,
         help="Max iterations per agent loop (default: 50)",
+    )
+    run_parser.add_argument(
+        "--non-interactive", action="store_true",
+        help="Auto-approve all tool calls (no human approval needed)",
     )
     run_parser.set_defaults(func=cmd_run)
 
