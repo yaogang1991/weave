@@ -665,8 +665,35 @@ class TaskWorker:
                     status=JobStatus.SUCCEEDED.value,
                 )
             else:
-                # Run finished but not succeeded — raise to outer handler.
-                raise RuntimeError(f"Run ended with status {run.status.value}")
+                # run_job has already performed RUNNING -> FAILED -> QUEUED
+                # (or DEAD_LETTER).  Check current job state and only raise
+                # if the job is still stuck in RUNNING.
+                current_job = await asyncio.to_thread(
+                    self.repository.get_job, job_id
+                )
+                if current_job is None:
+                    raise RuntimeError("Job disappeared during execution")
+                if current_job.status == JobStatus.QUEUED:
+                    _json_log(
+                        "INFO",
+                        f"Job re-queued by run_job (attempt {current_job.attempt})",
+                        job_id=job_id,
+                        status=JobStatus.QUEUED.value,
+                    )
+                elif current_job.status == JobStatus.DEAD_LETTER:
+                    _json_log(
+                        "WARNING",
+                        "Job moved to dead_letter by run_job",
+                        job_id=job_id,
+                        status=JobStatus.DEAD_LETTER.value,
+                    )
+                else:
+                    # Job still in RUNNING (or other unexpected state) —
+                    # let outer handler deal with it.
+                    raise RuntimeError(
+                        f"Run ended with status {run.status.value}, "
+                        f"job status is {current_job.status.value}"
+                    )
 
         except asyncio.CancelledError:
             # Worker is shutting down — try to return the job to the queue.

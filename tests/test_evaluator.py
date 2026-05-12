@@ -183,6 +183,18 @@ class TestCriterionChecking:
         )
         assert result.passed
 
+    @patch("evaluator.engine.subprocess.run")
+    def test_coverage_no_total_line_returns_fail(self, mock_run, evaluator, tmp_path):
+        """If pytest returns 0 but stdout has no TOTAL line, coverage must fail."""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="2 passed in 0.01s\n",
+            stderr="",
+        )
+        passed, msg = evaluator._check_coverage(tmp_path, 80)
+        assert not passed
+        assert "could not be parsed" in msg
+        assert "80%" in msg
+
 
 class TestEvaluateStage:
     @patch("evaluator.engine.subprocess.run")
