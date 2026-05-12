@@ -25,11 +25,15 @@ from pathlib import Path
 # Must be set before any other imports that may read files.
 os.environ.setdefault("PYTHONUTF8", "1")
 
+# Ensure unbuffered output for real-time monitoring (#186).
+# PYTHONUNBUFFERED propagates to child processes (e.g. pytest via subprocess).
+os.environ.setdefault("PYTHONUNBUFFERED", "1")
+
 # Ensure UTF-8 encoding on Windows (default is GBK/cp936)
 if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 if hasattr(sys.stderr, "reconfigure"):
-    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
 
 sys.path.insert(0, str(Path(__file__).parent))
 
