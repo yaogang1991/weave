@@ -181,7 +181,7 @@ Evaluate against:
             f"You are the {capability.name} agent. {capability.description}"
         )
 
-        base_cwd = str(tool_registry.base_cwd) if tool_registry.base_cwd else None
+        base_cwd = str(tool_registry.base_cwd) if getattr(tool_registry, "base_cwd", None) else None
         self.worker = AgentWorker(
             llm_config, session_store,
             max_context_tokens=max_context_tokens,

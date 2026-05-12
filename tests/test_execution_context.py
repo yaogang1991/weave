@@ -48,6 +48,7 @@ def _make_worker(
         {"name": "write"},
         {"name": "bash"},
     ]
+    tool_registry.base_cwd = None
     return WorkerAgent(
         capability=_make_capability(agent_type),
         llm_config=LLMConfig(api_key="test"),
@@ -163,6 +164,7 @@ class TestConcurrentContextIsolation:
         session_store = MagicMock()
         tool_registry = MagicMock()
         tool_registry.schemas = [{"name": "bash"}, {"name": "write"}]
+        tool_registry.base_cwd = None
 
         guardrails = MagicMock()
 

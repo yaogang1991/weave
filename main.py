@@ -176,7 +176,7 @@ async def cmd_execute(args, dag: DAG | None = None):
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
-    tool_registry = ToolRegistry()
+    tool_registry = ToolRegistry(base_cwd=args.project) if args.project else ToolRegistry()
 
     # Create session
     session_id = str(uuid.uuid4())
