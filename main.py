@@ -475,6 +475,13 @@ async def cmd_execute(args, dag: DAG | None = None):
 
 async def cmd_run(args):
     """Plan + Execute in one command."""
+    # Safety: resolve project path before plan to ensure consistency
+    project = _resolve_project_path(
+        args.project,
+        allow_self_modify=getattr(args, "allow_self_modify", False),
+    )
+    args.project = project
+
     # Plan
     dag = await cmd_plan(args)
 
@@ -485,6 +492,7 @@ async def cmd_run(args):
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
         non_interactive=getattr(args, "non_interactive", False),
+        allow_self_modify=getattr(args, "allow_self_modify", False),
         viz=args.viz,
         visualize=args.visualize,
         no_browser=args.no_browser,
