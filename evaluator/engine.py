@@ -263,14 +263,14 @@ class EvaluatorEngine:
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
         """Auto-fix then verify lint for resolved target files.
 
-        Phase 1 (auto-fix): Runs autoflake --remove-all-unused-imports
-        --remove-unused-variables --in-place on resolved targets only.
-        Snapshots file contents before/after to detect which files were
-        actually modified.
+        Phase 1 (auto-fix): Runs autoflake (F401/F841) and autopep8 (E501)
+        --in-place on resolved targets.  Snapshots file contents before/after
+        autoflake to detect which files were actually modified.
 
         Phase 2 (verify): Runs flake8 (or ruff as fallback) on the same
-        targets.  If autoflake is not installed, the verify phase proceeds
-        without it; if flake8/ruff is not installed, returns failure.
+        targets.  If auto-fix tools are not installed, the verify phase
+        proceeds without them; if flake8/ruff is not installed, returns
+        failure.
 
         Only lints specific files — does NOT recursively scan directories.
         """
@@ -296,8 +296,7 @@ class EvaluatorEngine:
             if p.exists():
                 pre_contents[fpath] = p.read_bytes()
 
-        # Auto-fix unused imports / variables before linting (graceful
-        # degradation if autoflake is not installed).
+        # Auto-fix: F401 unused imports / F841 unused variables
         try:
             subprocess.run(
                 [
@@ -324,6 +323,22 @@ class EvaluatorEngine:
                     autofixed.append(p.name)
 
         self._last_autofixed = autofixed
+
+        # Auto-fix: E501 line too long
+        try:
+            subprocess.run(
+                [
+                    "python", "-m", "autopep8",
+                    "--select", "E501",
+                    "--max-line-length", "100",
+                    "--in-place",
+                ] + resolved,
+                capture_output=True, text=True, timeout=30,
+            )
+        except FileNotFoundError:
+            pass
+        except Exception:
+            pass
 
         try:
             result = subprocess.run(

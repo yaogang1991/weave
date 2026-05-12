@@ -283,7 +283,24 @@ class ToolRegistry:
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
-            return ToolResult(tool_call_id="", success=True, output=f"Written {len(content)} chars to {file_path}")
+
+            msg = f"Written {len(content)} chars to {file_path}"
+
+            # Warn about long lines in Python files (E501 will fail lint).
+            if file_path.endswith(".py"):
+                long_lines = [
+                    (i, len(line))
+                    for i, line in enumerate(content.split("\n"), 1)
+                    if len(line) > 100
+                ]
+                if long_lines:
+                    preview = ", ".join(
+                        f"L{i}:{n}c" for i, n in long_lines[:5]
+                    )
+                    suffix = f" (+{len(long_lines) - 5} more)" if len(long_lines) > 5 else ""
+                    msg += f"\nWARNING: {len(long_lines)} line(s) over 100 chars ({preview}{suffix}). Fix before finishing."
+
+            return ToolResult(tool_call_id="", success=True, output=msg)
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
 
