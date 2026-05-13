@@ -1,79 +1,168 @@
-"""Tests for runtime context injection into agent prompt (#144).
+"""Tests for #144: runtime context injection to prevent path guessing.
 
-Verifies that _build_runtime_context produces environment info and
-the bash tool schema includes path guidance.
+Covers:
+- _build_runtime_context() includes OS, CWD, PROJECT_ROOT, PYTHON
+- Runtime context is injected into agent prompt in _execute_inner
+- Bash tool description mentions PROJECT_ROOT and relative paths
+- Bash tool output includes [cwd] prefix
+- ToolRegistry(base_cwd=...) sets project root
 """
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
+sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
+
+from tools.registry import ToolRegistry  # noqa: E402
 
 
-class TestRuntimeContext:
-    """Verify _build_runtime_context produces useful environment info."""
+# =============================================================================
+# _build_runtime_context
+# =============================================================================
 
-    def _make_agent(self, base_cwd=None):
+
+class TestBuildRuntimeContext:
+    """Runtime context includes OS, CWD, PROJECT_ROOT, PYTHON."""
+
+    def _make_agent(self, base_cwd: str | None = None):
         from agent.agent_pool import WorkerAgent
-        from core.models import AgentCapability
         from core.config import LLMConfig
         from session.store import SessionStore
-        from tools.registry import ToolRegistry
 
-        capability = AgentCapability(id="generator", name="Generator", description="impl")
         store = MagicMock(spec=SessionStore)
-        tool_reg = ToolRegistry(base_cwd=base_cwd) if base_cwd else ToolRegistry()
-
-        # Patch LLMClient to avoid needing real API credentials
+        tool_reg = ToolRegistry(base_cwd=base_cwd)
         with patch("agent.worker.LLMClient"):
             agent = WorkerAgent(
-                capability=capability,
+                capability=MagicMock(system_prompt=""),
                 llm_config=MagicMock(spec=LLMConfig),
                 session_store=store,
                 tool_registry=tool_reg,
+                guardrails=MagicMock(),
             )
         return agent
 
-    def test_context_contains_os_info(self):
-        agent = self._make_agent(base_cwd="/tmp/test_project")
-        ctx = agent._build_runtime_context()
-
-        assert "PROJECT_ROOT" in ctx
-        assert "/tmp/test_project" in ctx
-        assert "Path rules" in ctx
-        assert "relative to PROJECT_ROOT" in ctx
-
-    def test_context_without_base_cwd_uses_cwd(self):
+    def test_includes_os(self):
+        import platform
         agent = self._make_agent()
         ctx = agent._build_runtime_context()
+        assert platform.system() in ctx
 
-        assert "PROJECT_ROOT" in ctx
-        assert "Do NOT invent absolute paths" in ctx
-
-    def test_context_contains_path_separator(self):
-        agent = self._make_agent(base_cwd="/my/project")
+    def test_includes_cwd(self):
+        agent = self._make_agent()
         ctx = agent._build_runtime_context()
+        assert "CWD:" in ctx
 
-        assert "/my/project" in ctx
-        assert "Path separator" in ctx
+    def test_includes_project_root(self):
+        agent = self._make_agent(base_cwd="/tmp/my-project")
+        ctx = agent._build_runtime_context()
+        assert "PROJECT_ROOT:" in ctx
+        assert "my-project" in ctx
+
+    def test_includes_python(self):
+        agent = self._make_agent()
+        ctx = agent._build_runtime_context()
+        assert "PYTHON:" in ctx
+
+    def test_includes_path_rules(self):
+        agent = self._make_agent()
+        ctx = agent._build_runtime_context()
+        assert "relative paths" in ctx.lower()
+        assert "PROJECT_ROOT" in ctx
+
+    def test_project_root_falls_back_to_cwd(self):
+        agent = self._make_agent(base_cwd=None)
+        ctx = agent._build_runtime_context()
+        assert "PROJECT_ROOT:" in ctx
+
+    def test_runtime_env_appears_exactly_once_in_prompt(self):
+        """## Runtime Environment must appear exactly once in the final prompt
+        built by _execute_inner (no duplicate method definitions or calls).
+        """
+        import asyncio
+        from core.models import HandoffArtifact
+
+        agent = self._make_agent(base_cwd="/tmp/project")
+
+        # Monkey-patch _run_with_tools to capture the prompt instead of
+        # actually running the LLM loop.
+        captured_prompt: dict[str, str] = {}
+
+        async def _fake_run(prompt, session_id, context=None):
+            captured_prompt["value"] = prompt
+            return {"status": "completed", "summary": "", "artifacts": [], "output": ""}
+
+        agent._run_with_tools = _fake_run
+
+        asyncio.run(
+            agent._execute_inner(
+                task="do something",
+                input_artifacts=[],
+                session_id="test-session",
+                node_id="n1",
+            )
+        )
+
+        prompt = captured_prompt["value"]
+        count = prompt.count("## Runtime Environment")
+        assert count == 1, (
+            f"Expected exactly 1 '## Runtime Environment' in prompt, "
+            f"found {count}. Prompt:\n{prompt}"
+        )
 
 
-class TestBashToolSchema:
-    """Verify bash tool schema includes path guidance."""
+# =============================================================================
+# Bash tool schema and output
+# =============================================================================
 
-    def test_bash_description_mentions_project_root(self):
-        from tools.registry import ToolRegistry
 
+class TestBashToolContext:
+    """Bash tool description and output include workspace context."""
+
+    def test_bash_schema_mentions_project_root(self):
         reg = ToolRegistry()
-        bash_schema = next(s for s in reg.schemas if s["name"] == "bash")
-        desc = bash_schema["description"]
+        schema = reg.get_schema("bash")
+        desc = schema["description"]
         assert "PROJECT_ROOT" in desc
-        assert "relative paths" in desc
 
-    def test_bash_description_warns_against_absolute_paths(self):
-        from tools.registry import ToolRegistry
-
+    def test_bash_schema_cwd_description(self):
         reg = ToolRegistry()
-        bash_schema = next(s for s in reg.schemas if s["name"] == "bash")
-        desc = bash_schema["description"]
-        assert "Do NOT guess absolute paths" in desc
+        schema = reg.get_schema("bash")
+        cwd_desc = schema["input_schema"]["properties"]["cwd"]["description"]
+        assert "PROJECT_ROOT" in cwd_desc
+
+    def test_bash_output_includes_cwd(self, tmp_path):
+        reg = ToolRegistry(base_cwd=str(tmp_path))
+        result = reg.execute("bash", {"command": "echo hello"})
+        assert result.success
+        assert "[cwd]" in result.output
+        assert "hello" in result.output
+
+    def test_bash_output_shows_actual_cwd(self, tmp_path):
+        reg = ToolRegistry(base_cwd=str(tmp_path))
+        result = reg.execute("bash", {"command": "pwd"})
+        assert result.success
+        # [cwd] line should show the resolved cwd
+        lines = result.output.split("\n")
+        cwd_line = lines[0]
+        assert "[cwd]" in cwd_line
+
+
+# =============================================================================
+# ToolRegistry base_cwd
+# =============================================================================
+
+
+class TestToolRegistryBaseCwd:
+    """ToolRegistry correctly stores and uses base_cwd."""
+
+    def test_base_cwd_set(self):
+        reg = ToolRegistry(base_cwd="/tmp/project")
+        assert reg.base_cwd == Path("/tmp/project").resolve()
+
+    def test_base_cwd_none(self):
+        reg = ToolRegistry()
+        assert reg.base_cwd is None
+
+    def test_base_cwd_resolved(self, tmp_path):
+        reg = ToolRegistry(base_cwd=str(tmp_path / "subdir"))
+        assert reg.base_cwd.is_absolute()

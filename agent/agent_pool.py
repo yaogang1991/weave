@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from core.models import AgentMessage
@@ -211,39 +212,6 @@ Evaluate against:
         allowed = self.TOOL_ALLOWLIST.get(capability.id, {"read", "glob", "grep"})
         self.tools = [s for s in tool_registry.schemas if s["name"] in allowed]
 
-    def _build_runtime_context(self) -> str:
-        """Build runtime environment context for agent prompt.
-
-        Injects OS, CWD, project root, and path rules so the agent
-        doesn't waste iterations guessing paths (#144).
-        """
-        import platform
-        import sys
-
-        project_root = getattr(self.tool_registry, "base_cwd", None)
-        if project_root:
-            project_root = str(project_root)
-        else:
-            from pathlib import Path
-            project_root = str(Path.cwd().resolve())
-
-        os_name = platform.system()
-        path_sep = "\\" if os_name == "Windows" else "/"
-
-        return (
-            f"## Runtime Environment\n"
-            f"- OS: {os_name} {platform.release()}\n"
-            f"- PROJECT_ROOT: {project_root}\n"
-            f"- Python: {sys.executable}\n"
-            f"- Path separator: '{path_sep}'\n"
-            f"\n"
-            f"Path rules:\n"
-            f"- All file paths must be relative to PROJECT_ROOT.\n"
-            f"- For bash commands, use: python -m pytest tests/test_x.py -v\n"
-            f"- Do NOT invent absolute paths like /home/user or C:\\Users\\.\n"
-            f"- The workspace is already at PROJECT_ROOT; do NOT cd elsewhere.\n"
-        )
-
     def _execute_tool(
         self,
         name: str,
@@ -314,11 +282,11 @@ Evaluate against:
         context: ExecutionContext | None = None,
     ) -> dict[str, Any]:
         """Internal execute implementation."""
+        # Inject runtime environment context so LLM doesn't guess paths (#144)
+        runtime_context = self._build_runtime_context()
+
         # Build context from input artifacts
         artifact_context = self._format_artifacts(input_artifacts)
-
-        # Inject runtime environment context (#144)
-        runtime_context = self._build_runtime_context()
 
         # Detect retry and inject differentiation instruction
         retry_instruction = ""
@@ -439,6 +407,34 @@ Execute using your available tools. Produce clear, verifiable output.
             "artifacts": self.worker.artifacts,
             "output": final.content if final else "",
         }
+
+    def _build_runtime_context(self) -> str:
+        """Build runtime environment info for agent prompt (#144).
+
+        Injects OS, CWD, PROJECT_ROOT, and PYTHON so the LLM doesn't
+        need to guess paths or make platform-specific assumptions.
+        """
+        import platform
+        import sys
+
+        project_root = (
+            getattr(self.tool_registry, "base_cwd", None)
+            or Path.cwd()
+        )
+        return (
+            "## Runtime Environment\n"
+            f"- OS: {platform.system()} {platform.release()}\n"
+            f"- CWD: {Path.cwd().resolve()}\n"
+            f"- PROJECT_ROOT: {Path(project_root).resolve()}\n"
+            f"- PYTHON: {sys.executable}\n"
+            "\nPath rules:\n"
+            "- Use PROJECT_ROOT as working directory for all bash commands.\n"
+            "- Prefer relative paths from PROJECT_ROOT, e.g. "
+            "`python -m pytest tests/test_x.py -v`.\n"
+            "- Do not invent paths like /home/user on Windows.\n"
+            "- Do not cd into unknown directories; "
+            "bash already runs inside the project workspace.\n"
+        )
 
     def _format_artifacts(self, artifacts: list[HandoffArtifact]) -> str:
         """Format input artifacts as context for the agent."""

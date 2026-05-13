@@ -121,7 +121,14 @@ class ToolRegistry:
                 "properties": {
                     "command": {"type": "string", "description": "Command to execute (runs in PROJECT_ROOT)"},
                     "timeout": {"type": "integer", "default": 120},
-                    "cwd": {"type": "string", "description": "Optional working directory (must stay within project root)"},
+                    "cwd": {
+                        "type": "string",
+                        "description": (
+                            "Optional cwd relative to PROJECT_ROOT. "
+                            "Must stay within project root. "
+                            "Usually leave empty."
+                        ),
+                    },
                 },
                 "required": ["command"],
             },
@@ -393,7 +400,7 @@ class ToolRegistry:
                 returncode = result.returncode
                 stdout = result.stdout
                 stderr = result.stderr
-            output = stdout
+            output = f"[cwd] {run_cwd}\n{stdout}"
             if stderr:
                 output += "\n" + stderr
             return ToolResult(
