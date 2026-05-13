@@ -4,6 +4,7 @@ Tests for evaluator/engine.py — criterion checking, scoring, evaluation flow.
 import json
 import sys
 import pytest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from core.models import EvaluationResult, SuccessCriterion, CriterionType
@@ -277,3 +278,79 @@ class TestEvaluateStage:
         result = evaluator.evaluate_stage("s1", "impl", [node], str(tmp_path))
         assert result.passed  # Now passes with warning instead of hard-failing
         assert "cannot auto-verify" in result.feedback.lower()
+
+
+class TestShadowInitDetection:
+    """Tests for #221: detect shadowing __init__.py in test subdirs.
+
+    The evaluator must NOT modify/delete workspace files. It should only
+    report shadowing as diagnostic feedback so the generator can fix it.
+    """
+
+    def test_detect_shadowing_init(self, evaluator, tmp_path):
+        """_detect_shadowing_test_inits reports shadowing but does not delete."""
+        # Create root package
+        (tmp_path / "configlib").mkdir()
+        (tmp_path / "configlib" / "__init__.py").write_text("# root pkg", encoding="utf-8")
+        # Create shadowing test subdir init
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "configlib").mkdir()
+        shadow_file = tmp_path / "tests" / "configlib" / "__init__.py"
+        shadow_file.write_text("# shadow pkg", encoding="utf-8")
+
+        warnings = EvaluatorEngine._detect_shadowing_test_inits(tmp_path)
+        assert len(warnings) == 1
+        assert "tests/configlib/__init__.py shadows root configlib/ package" in warnings[0]
+        # File must NOT be deleted — evaluator only reports
+        assert shadow_file.exists(), "evaluator must not delete shadowing __init__.py"
+
+    def test_no_shadowing_when_no_root_package(self, evaluator, tmp_path):
+        """No warning if test subdir has __init__.py but no root package."""
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "mylib").mkdir()
+        (tmp_path / "tests" / "mylib" / "__init__.py").write_text("# ok", encoding="utf-8")
+
+        warnings = EvaluatorEngine._detect_shadowing_test_inits(tmp_path)
+        assert warnings == []
+
+    def test_no_shadowing_when_no_tests_dir(self, evaluator, tmp_path):
+        """No warning if tests/ directory does not exist."""
+        warnings = EvaluatorEngine._detect_shadowing_test_inits(tmp_path)
+        assert warnings == []
+
+    @patch("evaluator.engine.subprocess.run")
+    def test_shadowing_warning_in_test_failure_feedback(self, mock_run, evaluator, tmp_path):
+        """Shadowing diagnostic is appended to test failure feedback."""
+        # Set up shadowing structure
+        (tmp_path / "configlib").mkdir()
+        (tmp_path / "configlib" / "__init__.py").write_text("# root", encoding="utf-8")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "configlib").mkdir()
+        shadow_file = tmp_path / "tests" / "configlib" / "__init__.py"
+        shadow_file.write_text("# shadow", encoding="utf-8")
+
+        mock_run.return_value = MagicMock(returncode=1, stdout="FAILED test_something")
+        passed, msg = evaluator._run_tests(tmp_path)
+        assert not passed
+        assert "shadow" in msg.lower()
+        assert "tests/configlib" in msg
+        # File must still exist — no deletion
+        assert shadow_file.exists()
+
+    @patch("evaluator.engine.subprocess.run")
+    def test_shadowing_warning_in_test_pass_feedback(self, mock_run, evaluator, tmp_path):
+        """Shadowing diagnostic is included even when tests pass."""
+        (tmp_path / "configlib").mkdir()
+        (tmp_path / "configlib" / "__init__.py").write_text("# root", encoding="utf-8")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "configlib").mkdir()
+        shadow_file = tmp_path / "tests" / "configlib" / "__init__.py"
+        shadow_file.write_text("# shadow", encoding="utf-8")
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="2 passed")
+        passed, msg = evaluator._run_tests(tmp_path)
+        assert passed
+        assert "shadow" in msg.lower()
+        assert "tests/configlib" in msg
+        # File must still exist — no deletion
+        assert shadow_file.exists()
