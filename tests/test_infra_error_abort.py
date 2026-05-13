@@ -52,11 +52,13 @@ class TestInfrastructureErrorDetection:
     def test_command_not_found(self):
         assert _is_infrastructure_error("bash: python: command not found")
 
-    def test_module_not_found(self):
-        assert _is_infrastructure_error("ModuleNotFoundError: No module named 'flake8'")
+    def test_module_not_found_not_infra(self):
+        """ModuleNotFoundError is often a code issue, not infra."""
+        assert not _is_infrastructure_error("ModuleNotFoundError: No module named 'flake8'")
 
-    def test_no_such_file(self):
-        assert _is_infrastructure_error("FileNotFoundError: No such file or directory: /tmp/x")
+    def test_no_such_file_not_infra(self):
+        """FileNotFoundError is often a code issue, not infra."""
+        assert not _is_infrastructure_error("FileNotFoundError: No such file or directory: reporter/report.py")
 
     def test_permission_denied(self):
         assert _is_infrastructure_error("Permission denied: /root/secret")
@@ -64,8 +66,9 @@ class TestInfrastructureErrorDetection:
     def test_connection_refused(self):
         assert _is_infrastructure_error("Connection refused: localhost:5432")
 
-    def test_no_module_named(self):
-        assert _is_infrastructure_error("No module named 'pytest'")
+    def test_no_module_named_not_infra(self):
+        """No module named is often a code issue, not infra."""
+        assert not _is_infrastructure_error("No module named 'pytest'")
 
     def test_code_quality_error_not_infra(self):
         """Normal code errors should NOT be classified as infrastructure."""
@@ -96,15 +99,17 @@ class TestAdaptToFailureInfraAbort:
         assert "infrastructure" in decision.reasoning.lower()
 
     @pytest.mark.asyncio
-    async def test_module_not_found_aborts(self, orchestrator):
+    async def test_module_not_found_goes_to_llm(self, orchestrator):
+        """ModuleNotFoundError may be fixable by retry — should reach LLM."""
         dag, node_id = _make_dag_with_failed_node(
             "ModuleNotFoundError: No module named 'requests'"
         )
-        with patch.object(orchestrator.llm, "call") as mock_llm:
+        with patch.object(orchestrator.llm, "call", return_value={
+            "content": '{"action": "retry", "reasoning": "fix the import"}',
+        }):
             decision = await orchestrator.adapt_to_failure(dag, node_id)
-            mock_llm.assert_not_called()
 
-        assert decision.action == "abort"
+        assert decision.action == "retry"
 
     @pytest.mark.asyncio
     async def test_code_error_does_not_abort_early(self, orchestrator):

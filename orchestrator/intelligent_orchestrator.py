@@ -37,20 +37,19 @@ from orchestrator.prompts import PromptRegistry, get_prompt_registry
 logger = logging.getLogger(__name__)
 from templates.library import TemplateRegistry
 
-logger = logging.getLogger(__name__)
 
 # Infrastructure errors cannot be fixed by retrying with the same environment.
 # Detect early and abort instead of wasting retry budget (#187).
 INFRASTRUCTURE_ERROR_PATTERNS: list[str] = [
+    # Explicit tool/command missing — always infra
     "no linter available",
     "command not found",
-    "modulenotfounderror",
-    "no such file or directory",
+    "pytest not installed",
+    "no python interpreter",
+    # Network / permission — always infra
     "permission denied",
     "connection refused",
     "connection timed out",
-    "no module named",
-    "fatal error",
 ]
 
 
