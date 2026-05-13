@@ -484,6 +484,36 @@ class DAGExecutionEngine:
         """Compute exponential backoff delay in seconds."""
         return min(self.backoff_base ** retry_count, self.backoff_cap)
 
+    # Codes that are purely formatting/whitespace and safe to tolerate on retry.
+    # E999 is intentionally excluded — it indicates SyntaxError, not formatting.
+    _RETRY_TOLERABLE_CODES: frozenset[str] = frozenset({
+        # Whitespace / formatting
+        "E501",  # line too long
+        "E303",  # too many blank lines
+        "W291",  # trailing whitespace
+        "W293",  # whitespace before ':'
+        "E203",  # whitespace before ':'
+        "E302",  # expected 2 blank lines
+        "E261",  # at least two spaces before inline comment
+        "E265",  # block comment should start with '# '
+        # Unused imports/variables — cosmetic, not functional
+        "F401",  # module imported but unused
+        "F841",  # local variable assigned but never used
+    })
+
+    @classmethod
+    def _is_retry_tolerable_lint_issue(cls, issue: str) -> bool:
+        """Check if a lint issue is formatting-only and safe to tolerate.
+
+        Expects issues in 'path:line:CODE' format from evaluator metadata.
+        E999 (SyntaxError) is NOT tolerable — it blocks execution.
+        """
+        import re as _re
+        m = _re.search(r":([A-Z]\d{2,3})(?:\s|$)", issue)
+        if m:
+            return m.group(1) in cls._RETRY_TOLERABLE_CODES
+        return False
+
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
         """Execute a single DAG node with retry logic."""
         node = dag.nodes[node_id]
@@ -598,12 +628,10 @@ class DAGExecutionEngine:
 
                         # Check if all current issues are lint-only (#154).
                         # Lint-only failures should not block retry progress.
-                        lint_keywords = ("E501", "E999", "lint", "flake8",
-                                         "line too long", "whitespace")
                         all_issues_lint_only = (
                             len(current_issues) > 0
                             and all(
-                                any(kw in iss for kw in lint_keywords)
+                                self._is_retry_tolerable_lint_issue(iss)
                                 for iss in current_issues
                             )
                         )
