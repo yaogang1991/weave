@@ -229,6 +229,108 @@ class TestAutoEvalResultAlignment:
             "Should NOT pass auto_eval_result when passed=False"
         )
 
+    def test_threshold_pass_with_warnings_handoff(self):
+        """auto_eval_result passed=True via threshold but with WARN criteria.
+
+        When pass_threshold is used and some soft criteria fail but score
+        meets threshold, the handoff must indicate warnings exist so the
+        downstream evaluator doesn't assume everything is clean (#202, #145).
+        """
+        from core.dag_engine import DAGExecutionEngine
+
+        dag = DAG(reasoning="test")
+        gen_node = DAGNode(
+            id="gen",
+            agent_type="generator",
+            task_description="impl",
+            success_criteria=["tests pass", "lint clean"],
+        )
+        gen_node.status = NodeStatus.SUCCESS
+        gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
+        gen_node.output_artifacts = ["main.py"]
+        # Threshold-assisted pass: passed=True but lint failed
+        gen_node.auto_eval_result = {
+            "passed": True,
+            "score": 8.0,
+            "criteria_results": {"tests pass": True, "lint clean": False},
+            "feedback": "WARN lint clean: 2 style issues found",
+        }
+
+        eval_node = DAGNode(
+            id="eval",
+            agent_type="evaluator",
+            task_description="review",
+        )
+
+        dag.add_node(gen_node)
+        dag.add_node(eval_node)
+        dag.add_edge("gen", "eval")
+
+        async def noop_executor(node, artifacts):
+            return {"status": "completed", "summary": "ok", "artifacts": []}
+
+        async def noop_failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort", reasoning="test")
+
+        engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
+        artifacts = engine._collect_input_artifacts(dag, "eval")
+
+        eval_handoff = [a for a in artifacts if a.from_agent == "auto_evaluator"]
+        assert len(eval_handoff) == 1
+        # Metadata must flag warnings
+        assert eval_handoff[0].metadata["has_warnings"] is True
+        # Content must indicate threshold-assisted pass, not "already verified"
+        assert "WARNINGS" in eval_handoff[0].content
+        assert "threshold" in eval_handoff[0].content.lower()
+
+    def test_clean_pass_no_warnings(self):
+        """Clean pass (all criteria True) has has_warnings=False."""
+        from core.dag_engine import DAGExecutionEngine
+
+        dag = DAG(reasoning="test")
+        gen_node = DAGNode(
+            id="gen",
+            agent_type="generator",
+            task_description="impl",
+            success_criteria=["tests pass"],
+        )
+        gen_node.status = NodeStatus.SUCCESS
+        gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
+        gen_node.output_artifacts = ["main.py"]
+        gen_node.auto_eval_result = {
+            "passed": True,
+            "score": 10.0,
+            "criteria_results": {"tests pass": True},
+            "feedback": "All good",
+        }
+
+        eval_node = DAGNode(
+            id="eval",
+            agent_type="evaluator",
+            task_description="review",
+        )
+
+        dag.add_node(gen_node)
+        dag.add_node(eval_node)
+        dag.add_edge("gen", "eval")
+
+        async def noop_executor(node, artifacts):
+            return {"status": "completed", "summary": "ok", "artifacts": []}
+
+        async def noop_failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort", reasoning="test")
+
+        engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
+        artifacts = engine._collect_input_artifacts(dag, "eval")
+
+        eval_handoff = [a for a in artifacts if a.from_agent == "auto_evaluator"]
+        assert len(eval_handoff) == 1
+        assert eval_handoff[0].metadata["has_warnings"] is False
+        # Clean pass should use "already verified" header
+        assert "already verified" in eval_handoff[0].content
+
     def test_regression_restore_updates_auto_eval_to_best(self):
         """After regression, auto_eval_result reflects the best attempt.
 

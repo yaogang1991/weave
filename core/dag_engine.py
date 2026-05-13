@@ -946,11 +946,22 @@ class DAGExecutionEngine:
                     and dag.nodes[node_id].agent_type == "evaluator"
                 ):
                     eval_info = dep_node.auto_eval_result
+                    criteria = eval_info.get("criteria_results", {})
+                    has_warnings = (
+                        criteria
+                        and not all(criteria.values())
+                    )
+                    header = (
+                        "AUTOMATED EVALUATION RESULTS "
+                        "(passed via threshold — some criteria have WARNINGS)"
+                        if has_warnings
+                        else "AUTOMATED EVALUATION RESULTS (already verified)"
+                    )
                     summary = (
-                        f"AUTOMATED EVALUATION RESULTS (already verified):\n"
+                        f"{header}:\n"
                         f"- Passed: {eval_info.get('passed')}\n"
                         f"- Score: {eval_info.get('score')}\n"
-                        f"- Criteria: {eval_info.get('criteria_results')}\n"
+                        f"- Criteria: {criteria}\n"
                         f"- Feedback:\n{eval_info.get('feedback', '')}\n"
                     )
                     artifacts.append(HandoffArtifact(
@@ -961,8 +972,9 @@ class DAGExecutionEngine:
                             "type": "evaluation_result",
                             "passed": eval_info.get("passed"),
                             "score": eval_info.get("score"),
-                            "criteria_results": eval_info.get("criteria_results"),
+                            "criteria_results": criteria,
                             "feedback": eval_info.get("feedback"),
+                            "has_warnings": has_warnings,
                         },
                     ))
 

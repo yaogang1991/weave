@@ -156,9 +156,13 @@ Rules:
 If upstream AUTOMATED EVALUATION RESULTS are provided (from auto_evaluator):
 - Do NOT blindly re-run the same tests/lint/coverage checks
 - Use the provided results as evidence — they were already verified
+- BUT: if the results show WARNINGS (criteria that passed via threshold
+  override, not cleanly), investigate those specific criteria further
 - Only re-run commands when:
   * Files changed after the evidence was produced
   * The prior result is incomplete or contradictory
+  * WARNINGS indicate soft criteria that failed auto-check but were
+    overridden by score threshold
 - Focus your effort on what the automated evaluator CANNOT check:
   * Architecture and design quality
   * Edge cases and error handling
