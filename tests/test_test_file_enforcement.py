@@ -49,7 +49,7 @@ class TestTestFileEnforcement:
         dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
-            task_description="impl",
+            task_description="Create a new module and write tests for it",
             success_criteria=["tests pass"],
         ))
 
@@ -150,7 +150,7 @@ class TestTestFileEnforcement:
         dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
-            task_description="impl",
+            task_description="Create a new library and implement it",
             success_criteria=["tests pass"],
         ))
 
@@ -170,3 +170,27 @@ class TestTestFileEnforcement:
         feedback = result.nodes["impl"].eval_feedback
         assert "write tool" in feedback.lower() or "write" in feedback.lower()
         assert "test_*.py" in feedback or "test file" in feedback.lower()
+
+    @pytest.mark.asyncio
+    async def test_skip_enforcement_for_bugfix_tasks(self):
+        """Bug-fix tasks without creation keywords should not enforce test file creation."""
+        dag = DAG(reasoning="test")
+        dag.add_node(DAGNode(
+            id="fix",
+            agent_type="generator",
+            task_description="Fix the null pointer bug in parser.py",
+            success_criteria=["tests pass"],
+        ))
+
+        async def executor(node, artifacts):
+            return {"status": "completed", "summary": "ok", "artifacts": ["parser.py"]}
+
+        async def failure_handler(dag, node_id, error):
+            from core.models import FailureDecision
+            return FailureDecision(action="abort", reasoning="test")
+
+        engine = DAGExecutionEngine(executor, failure_handler)
+        result = await engine.execute(dag)
+        # Should NOT fail — bug-fix tasks don't require creating new test files
+        assert result.nodes["fix"].status != NodeStatus.FAILED or \
+            "no test files" not in (result.nodes["fix"].error or "").lower()
