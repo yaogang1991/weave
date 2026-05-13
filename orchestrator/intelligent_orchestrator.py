@@ -70,6 +70,18 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
    user's requirement mentions such a name, use a prefixed alternative (e.g.,
    "myurl_lib" instead of "urllib", "json_utils" instead of "json"). Shadowing
    stdlib causes catastrophic import failures in pytest and the entire runtime.
+9. **Cross-node naming consistency**: When creating PARALLEL generator nodes that
+   share a library namespace (e.g., one node creates source files, another creates
+   tests for those sources), you MUST do ONE of the following to prevent naming
+   mismatches:
+   a. **Preferred — serialize**: Add an edge from the source node to the test node
+      so tests are generated AFTER source code exists. The test generator will read
+      the source files and use the exact class/function names.
+   b. **Alternative — explicit naming contract**: If parallel execution is required,
+      include an explicit "NAMING CONTRACT" section in EACH node's task description
+      listing all class names, function names, and module paths that both nodes must
+      use. Example: "NAMING CONTRACT: class TokenBucket (not TokenBucketLimiter),
+      module path ratelib.token_bucket".
 
 ## Output Format
 

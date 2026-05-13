@@ -128,6 +128,14 @@ Rules:
     if you need surrounding context not shown in the tool result, or if a
     later test/lint error references that file. Prefer running targeted
     tests or lint over re-reading whole files to confirm edits.
+16. CROSS-NODE NAMING: If your task description includes a "NAMING CONTRACT"
+    or specifies exact class/function names, you MUST use those exact names.
+    Do NOT invent alternative names. If the task says "class TokenBucket",
+    create "class TokenBucket" — not "TokenBucketLimiter" or "Token_Bucket".
+17. TEST GENERATION: When writing tests for code created by another node,
+    FIRST read the source files (use glob to find them, then read) to discover
+    the exact class names, function signatures, and module paths. NEVER guess
+    class names — always verify by reading the actual source code first.
 
 Work systematically: gather context → implement → verify.
 """,
