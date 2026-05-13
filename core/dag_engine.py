@@ -31,6 +31,7 @@ from core.models import (
     FailureDecision,
     HandoffArtifact,
     CriterionType,
+    SuccessCriterion,
 )
 from core.exceptions import PendingApprovalError
 
@@ -577,6 +578,27 @@ class DAGExecutionEngine:
         """Compute exponential backoff delay in seconds."""
         return min(self.backoff_base ** retry_count, self.backoff_cap)
 
+    @staticmethod
+    def _requires_output_artifacts(node: DAGNode) -> bool:
+        """Check whether a node is expected to produce output file artifacts.
+
+        Returns True if the node is a generator with success_criteria, or if
+        any criterion references file-based checks (FILE_EXISTS, FILE_CHANGED,
+        FILE_PATTERN).  Such nodes should be fast-failed when they produce
+        zero artifacts, regardless of evaluator presence.
+        """
+        if node.agent_type == "generator" and node.success_criteria:
+            return True
+        file_criteria = {
+            CriterionType.FILE_EXISTS,
+            CriterionType.FILE_CHANGED,
+            CriterionType.FILE_PATTERN,
+        }
+        for crit in node.success_criteria:
+            if isinstance(crit, SuccessCriterion) and crit.type in file_criteria:
+                return True
+        return False
+
     # Codes that are purely formatting/whitespace and safe to tolerate on retry.
     # E999 is intentionally excluded — it indicates SyntaxError, not formatting.
     _RETRY_TOLERABLE_CODES: frozenset[str] = frozenset({
@@ -692,6 +714,36 @@ class DAGExecutionEngine:
                 )
             node.output_artifacts = reported_artifacts
             logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
+
+            # -- Zero-output fast-fail (#229) --
+            # If a node that should produce files has zero artifacts, fail
+            # immediately with a clear message — regardless of evaluator presence.
+            if (
+                not node.output_artifacts
+                and self._requires_output_artifacts(node)
+            ):
+                node.error = (
+                    f"Node produced zero output artifacts. "
+                    f"Agent type: {node.agent_type}, task: {node.task_description[:200]}. "
+                    f"This typically indicates the agent exhausted its iteration "
+                    f"budget without writing any files."
+                )
+                node.status = NodeStatus.FAILED
+                node.completed_at = datetime.now(timezone.utc)
+                node.retry_count += 1
+                logger.warning(
+                    "Node %s (%s) fast-failed: zero output artifacts",
+                    node_id, node.agent_type,
+                )
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="failed",
+                    details={
+                        "reason": "zero_output_artifacts",
+                        "agent_type": node.agent_type,
+                    },
+                ))
+                return
 
             # Test file enforcement (#247): only enforce when the DAG
             # explicitly includes a TEST_FILE_EXISTS criterion. This is
