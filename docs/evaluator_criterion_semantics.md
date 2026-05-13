@@ -195,3 +195,14 @@ When `pass_threshold` is set (0 < threshold ≤ 10):
 - Hard criteria failures veto the threshold override
 
 Without pass_threshold (default): all criteria must pass (strict mode).
+
+### Rule 7: Threshold-assisted pass is not a clean pass
+
+When `pass_threshold` lets a node pass despite having `was_auto=False` (WARN) criteria:
+
+- The node `overall_passed = True`, but the evaluation result still contains soft criteria with `passed=False`.
+- **Auto-eval handoff** must NOT report the node as fully `already verified`. The handoff metadata includes `has_warnings=True` to signal unverified criteria.
+- **Evaluator prompts** should instruct downstream evaluators to investigate these WARN criteria rather than skipping them.
+- Threshold-assisted pass means "good enough to proceed", not "all criteria confirmed".
+
+This distinction matters for the orchestrator's retry/adapt decisions: a threshold-assisted pass may still warrant a follow-up evaluation if the WARN criteria involve correctness-sensitive checks (e.g., test coverage, pattern compliance).
