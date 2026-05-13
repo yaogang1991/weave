@@ -231,3 +231,27 @@ class TestBackendManagerSetupNode:
 
         assert ws.strategy == NodeWorkspaceStrategy.SHARED
         assert ws.workspace_path == str(run_workdir)
+
+    def test_worktree_without_repo_root_falls_back_to_copy(self, tmp_path):
+        """WORKTREE without repo_root falls back to COPY strategy."""
+        manager = BackendManager(
+            workspace="local",
+            base_path=str(tmp_path / "backends"),
+            repo_root=None,
+        )
+        run_workdir = tmp_path / "run_workdir"
+        run_workdir.mkdir()
+        (run_workdir / "base.py").write_text("x = 1")
+
+        with patch.object(manager, "_get_workspace_backend") as mock_get:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.setup.return_value = run_workdir
+            mock_backend.get_work_dir.return_value = run_workdir
+            mock_get.return_value = mock_backend
+            manager.setup("job1", "run1")
+
+        ws = manager.setup_node("job1", "run1", "node1", strategy="worktree")
+        # Should fall back to COPY (not WORKTREE) since no repo_root
+        assert ws.strategy == NodeWorkspaceStrategy.COPY
+        assert (Path(ws.workspace_path) / "base.py").read_text() == "x = 1"

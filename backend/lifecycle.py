@@ -252,6 +252,10 @@ class BackendManager:
                 workspace_path=str(run_work_dir) if run_work_dir else "",
             )
 
+        # WORKTREE requires repo_root; fall back to COPY if missing
+        if ws_strategy == NodeWorkspaceStrategy.WORKTREE and not self.repo_root:
+            ws_strategy = NodeWorkspaceStrategy.COPY
+
         # WORKTREE / COPY: create isolated workspace
         node_work_dir = Path(self.base_path) / "nodes" / run_id / node_id
         node_work_dir.mkdir(parents=True, exist_ok=True)
