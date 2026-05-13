@@ -459,6 +459,10 @@ class EvaluatorEngine:
         if not resolved:
             return True, "No targets to lint"
 
+        # Auto-format detection via dry-run (#206).
+        # Returns suggestions without modifying files — evaluation is read-only.
+        format_hints = self._auto_format(resolved)
+
         # Detect auto-fixable issues via dry-run (no in-place modification).
         # This prevents parallel DAG nodes from corrupting each other's files.
         autofix_suggestions: list[str] = []
@@ -610,7 +614,39 @@ class EvaluatorEngine:
                 f"\n{msg}"
             )
 
+        if format_hints:
+            msg = (
+                f"Auto-format suggestions (run autopep8 to fix):\n"
+                + "\n".join(format_hints[:10])
+                + f"\n\n{msg}"
+            )
+
         return len(new_issues) == 0, msg
+
+    def _auto_format(self, resolved: list[str]) -> list[str]:
+        """Detect auto-formatting suggestions via dry-run (#206).
+
+        Runs autopep8 --diff (dry-run) to detect whitespace, blank-line,
+        and trailing-comma issues that would cause flake8 failures.
+        Returns a list of suggestion lines for inclusion in feedback.
+        Does NOT modify files — evaluation should be read-only.
+        Silently skipped when autopep8 is not installed.
+        """
+        if not resolved:
+            return []
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "autopep8", "--diff",
+                    "--select=E203,E303,W291,W293,W605,E302",
+                ] + resolved,
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.stdout and result.stdout.strip():
+                return result.stdout.strip().split("\n")
+            return []
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return []  # autopep8 unavailable — not an error
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
         missing = [f for f in files if not (base / f).exists()]
