@@ -268,13 +268,20 @@ class BackendManager:
                 )
                 if result.returncode == 0:
                     baseline_commit = result.stdout.strip()
-                subprocess.run(
+                wt_result = subprocess.run(
                     ["git", "worktree", "add", str(node_work_dir), "HEAD"],
                     capture_output=True, text=True,
                     cwd=self.repo_root, timeout=30,
                 )
-            except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-                # Git not available, fall back to SHARED
+                if wt_result.returncode != 0:
+                    raise RuntimeError(
+                        f"git worktree add failed (rc={wt_result.returncode}): "
+                        f"{wt_result.stderr.strip()}"
+                    )
+            except (FileNotFoundError, subprocess.TimeoutExpired, RuntimeError, Exception):
+                # Git not available or worktree failed, fall back to SHARED
+                import shutil
+                shutil.rmtree(node_work_dir, ignore_errors=True)
                 return NodeWorkspace(
                     node_id=node_id,
                     strategy=NodeWorkspaceStrategy.SHARED,
@@ -290,7 +297,13 @@ class BackendManager:
                     dirs_exist_ok=True,
                 )
             except OSError:
-                pass
+                shutil.rmtree(node_work_dir, ignore_errors=True)
+                return NodeWorkspace(
+                    node_id=node_id,
+                    strategy=NodeWorkspaceStrategy.SHARED,
+                    base_path=str(run_work_dir),
+                    workspace_path=str(run_work_dir),
+                )
 
         # Track node workspace for cleanup
         key = f"{run_id}:{node_id}"

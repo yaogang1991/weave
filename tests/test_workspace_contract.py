@@ -202,3 +202,32 @@ class TestBackendManagerSetupNode:
         ws_a = manager.setup_node("job1", "run1", "node_a", strategy="copy")
         ws_b = manager.setup_node("job1", "run1", "node_b", strategy="copy")
         assert ws_a.workspace_path != ws_b.workspace_path
+
+    def test_worktree_failure_falls_back_to_shared(self, tmp_path):
+        """When git worktree add fails, falls back to SHARED strategy."""
+        manager = BackendManager(
+            workspace="local",
+            base_path=str(tmp_path / "backends"),
+            repo_root=str(tmp_path),
+        )
+        run_workdir = tmp_path / "run_workdir"
+        run_workdir.mkdir()
+
+        with patch.object(manager, "_get_workspace_backend") as mock_get:
+            mock_backend = MagicMock()
+            mock_backend.is_available.return_value = True
+            mock_backend.setup.return_value = run_workdir
+            mock_backend.get_work_dir.return_value = run_workdir
+            mock_get.return_value = mock_backend
+            manager.setup("job1", "run1")
+
+        # Mock subprocess.run so git worktree add fails
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=0, stdout="abc123"),  # git rev-parse
+                MagicMock(returncode=1, stderr="worktree add failed"),  # git worktree add
+            ]
+            ws = manager.setup_node("job1", "run1", "node1", strategy="worktree")
+
+        assert ws.strategy == NodeWorkspaceStrategy.SHARED
+        assert ws.workspace_path == str(run_workdir)
