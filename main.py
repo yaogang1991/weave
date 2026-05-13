@@ -216,11 +216,12 @@ def _check_stdlib_shadowing(project: str | None) -> None:
         "true", "1", "yes",
     )
     if non_interactive:
-        # Auto-remove in non-interactive mode to prevent cascade failures
-        for path, _ in shadowing:
-            import shutil
-            shutil.rmtree(path, ignore_errors=True)
-            sys.stderr.write(f"Removed shadowing directory: {path.name}/\n")
+        # Non-interactive: warn only, do NOT auto-delete user files (#240)
+        sys.stderr.write(msg)
+        sys.stderr.write(
+            "Proceeding without removal. These directories may cause "
+            "import failures during evaluation.\n"
+        )
         return
 
     # Interactive: ask user
