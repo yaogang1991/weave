@@ -43,13 +43,28 @@ from templates.library import TemplateRegistry
 INFRASTRUCTURE_ERROR_PATTERNS: list[str] = [
     # Explicit tool/command missing — always infra
     "no linter available",
-    "command not found",
     "pytest not installed",
     "no python interpreter",
     # Network / permission — always infra
     "permission denied",
     "connection refused",
     "connection timed out",
+]
+
+# Known infrastructure tool commands — only "command not found" for these
+# counts as an infrastructure error.  Other missing commands (project CLIs,
+# make targets, etc.) may be fixable by the agent via retry.
+_KNOWN_TOOL_COMMANDS: list[str] = [
+    "python",
+    "python3",
+    "pytest",
+    "flake8",
+    "ruff",
+    "autopep8",
+    "pip",
+    "node",
+    "npm",
+    "git",
 ]
 
 
@@ -59,7 +74,17 @@ def _is_infrastructure_error(error: str) -> bool:
     if not error:
         return False
     lower = error.lower()
-    return any(pattern in lower for pattern in INFRASTRUCTURE_ERROR_PATTERNS)
+    if any(pattern in lower for pattern in INFRASTRUCTURE_ERROR_PATTERNS):
+        return True
+    # Check for "command not found" only when it refers to a known tool.
+    if "command not found" in lower:
+        # Match both "bash: python: command not found" and "command not found: python"
+        return any(
+            f"{tool}: command not found" in lower
+            or f"command not found: {tool}" in lower
+            for tool in _KNOWN_TOOL_COMMANDS
+        )
+    return False
 
 
 class IntelligentOrchestrator:

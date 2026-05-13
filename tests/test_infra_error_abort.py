@@ -12,6 +12,7 @@ from orchestrator.intelligent_orchestrator import (
     IntelligentOrchestrator,
     _is_infrastructure_error,
     INFRASTRUCTURE_ERROR_PATTERNS,
+    _KNOWN_TOOL_COMMANDS,
 )
 
 
@@ -51,6 +52,20 @@ class TestInfrastructureErrorDetection:
 
     def test_command_not_found(self):
         assert _is_infrastructure_error("bash: python: command not found")
+
+    def test_command_not_found_pytest(self):
+        assert _is_infrastructure_error("bash: pytest: command not found")
+
+    def test_command_not_found_flake8(self):
+        assert _is_infrastructure_error("bash: flake8: command not found")
+
+    def test_command_not_found_unknown_tool_not_infra(self):
+        """Project-specific CLI commands should NOT be classified as infra."""
+        assert not _is_infrastructure_error("bash: my_project_cli: command not found")
+
+    def test_command_not_found_make_target_not_infra(self):
+        """Make targets should NOT be classified as infra."""
+        assert not _is_infrastructure_error("make: generate: command not found")
 
     def test_module_not_found_not_infra(self):
         """ModuleNotFoundError is often a code issue, not infra."""
