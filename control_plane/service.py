@@ -719,25 +719,6 @@ class RunService:
 
         return result_dag
 
-    def _load_project_hooks(self, project_path: str | None) -> dict[str, str]:
-        """Load lifecycle hooks from .harness/config.yaml if present."""
-        hooks: dict[str, str] = {}
-        if not project_path:
-            return hooks
-        try:
-            config_path = Path(project_path) / ".harness" / "config.yaml"
-            if config_path.exists():
-                import yaml
-                with open(config_path, "r", encoding="utf-8") as f:
-                    cfg = yaml.safe_load(f) or {}
-                hook_cfg = cfg.get("hooks", {})
-                for key in ("after_create", "before_run", "after_run", "before_remove"):
-                    if key in hook_cfg:
-                        hooks[key] = hook_cfg[key]
-        except Exception:
-            pass
-        return hooks
-
     def _load_project_guardrails(self, work_dir: Path | None) -> dict[str, Any]:
         """Load guardrail overrides from .harness/config.yaml if present."""
         result: dict[str, Any] = {}
