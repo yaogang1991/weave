@@ -34,6 +34,16 @@ TOOL_REQUIRED_ARGS: dict[str, list[str]] = {
     "grep": ["pattern"],
 }
 
+# Fields that must not be empty strings even when present and non-None.
+# Tools like write/edit legitimately use content="" or new_string="" (e.g. clearing
+# a file), but bash.command, read.file_path, and grep.pattern are meaningless when blank.
+TOOL_NON_EMPTY_ARGS: dict[str, list[str]] = {
+    "bash": ["command"],
+    "read": ["file_path"],
+    "grep": ["pattern"],
+    "glob": ["pattern"],
+}
+
 
 class AgentWorker:
     """
@@ -132,23 +142,28 @@ class AgentWorker:
                         f"Your call had arguments: {json.dumps(args)}. "
                         f"Please retry with all required arguments."
                     )
-                    tool_results.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "content": error_content,
-                    })
-                    # Emit AGENT_TOOL_RESULT for observability (#215)
-                    self.session_store.emit_event(
-                        session_id,
-                        EventType.AGENT_TOOL_RESULT,
-                        {
-                            "tool": tool_name,
-                            "success": False,
-                            "error": error_content,
-                            "tool_call_id": tool_call_id,
-                        },
+                    self._append_invalid_tool_result(
+                        session_id, tool_call_id, tool_name, error_content, tool_results,
                     )
                     logger.warning("Tool %s called with missing args: %s", tool_name, missing)
+                    continue
+
+                # Tool-specific empty-string validation (#215).
+                # Some fields (bash.command, read.file_path, grep.pattern) must
+                # not be blank — unlike write.content or edit.new_string which
+                # are legitimately empty strings.
+                non_empty = TOOL_NON_EMPTY_ARGS.get(tool_name, [])
+                blank = [k for k in non_empty if isinstance(args.get(k), str) and args[k].strip() == ""]
+                if blank:
+                    error_content = (
+                        f"Error: '{tool_name}' tool argument(s) "
+                        f"{', '.join(blank)} must not be empty/blank. "
+                        f"Please retry with non-empty values."
+                    )
+                    self._append_invalid_tool_result(
+                        session_id, tool_call_id, tool_name, error_content, tool_results,
+                    )
+                    logger.warning("Tool %s called with blank args: %s", tool_name, blank)
                     continue
 
                 result = tool_executor.execute(tool_name, args)
@@ -176,6 +191,35 @@ class AgentWorker:
 
             messages.append(assistant_message)
             messages.extend(tool_results)
+
+    def _append_invalid_tool_result(
+        self,
+        session_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        error_content: str,
+        tool_results: list[dict],
+    ) -> None:
+        """Append a tool result error and emit AGENT_TOOL_RESULT event.
+
+        Ensures the session trace stays complete — every AGENT_TOOL_USE must be
+        paired with an AGENT_TOOL_RESULT, even for validation failures.
+        """
+        tool_results.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": error_content,
+        })
+        self.session_store.emit_event(
+            session_id,
+            EventType.AGENT_TOOL_RESULT,
+            {
+                "tool": tool_name,
+                "success": False,
+                "error": error_content,
+                "tool_call_id": tool_call_id,
+            },
+        )
 
     # -- Context window management ------------------------------------------
 
