@@ -3,10 +3,11 @@ Tests for #211: evaluator work_dir must never fall back to harness cwd.
 
 Ensures:
 - cmd_execute always sets project_work_dir (never None after _resolve_project_path)
-- dag_engine logs a warning when work_dir is unset (defensive)
+- dag_engine fast-fails when work_dir is not set and evaluation is needed
 """
+import asyncio
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock
 from pathlib import Path
 
 
@@ -15,7 +16,7 @@ class TestProjectWorkDirAlwaysSet:
 
     def test_resolve_project_path_returns_string(self):
         from main import _resolve_project_path
-        import tempfile, os
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
             result = _resolve_project_path(tmp)
@@ -33,40 +34,68 @@ class TestProjectWorkDirAlwaysSet:
             assert Path(result).exists()
 
 
-class TestDagEngineWorkDirFallback:
-    """DAG engine warns when work_dir is None."""
+class TestDagEngineWorkDirFastFail:
+    """DAG engine fast-fails when work_dir is None and evaluation is needed."""
 
     @pytest.mark.asyncio
-    async def test_warns_when_work_dir_unset(self, tmp_path):
-        """When work_dir is None, dag_engine logs a warning."""
+    async def test_fast_fails_when_work_dir_unset(self, tmp_path):
+        """When work_dir is None, node requiring evaluation fast-fails."""
         from core.dag_engine import DAGExecutionEngine
         from core.models import DAG, DAGNode, NodeStatus
-        import logging
 
         dag = DAG(reasoning="test")
-        node = DAGNode(
+        dag.add_node(DAGNode(
             id="gen",
             agent_type="generator",
             task_description="test",
-            status=NodeStatus.SUCCESS,
             success_criteria=["tests pass"],
-        )
-        dag.add_node(node)
+        ))
+
+        async def executor(node, artifacts):
+            return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
 
         mock_evaluator = MagicMock()
         mock_evaluator.evaluate_stage.return_value = MagicMock(passed=True, score=10.0)
 
         engine = DAGExecutionEngine(
-            agent_executor=MagicMock(return_value=[]),
-            failure_handler=MagicMock(),
-            work_dir=None,  # explicitly None
+            agent_executor=executor,
+            failure_handler=AsyncMock(return_value=MagicMock(action="abort")),
+            work_dir=None,
             evaluator=mock_evaluator,
         )
 
-        # Should trigger the warning path
-        with patch.object(engine, '_execute_single_node') as mock_exec:
-            mock_exec.return_value = node
-            # Can't easily test the full execute_dag, but verify the fallback logic
-            import os
-            eval_work_dir = engine.work_dir or os.getcwd()
-            assert eval_work_dir == os.getcwd()  # current fallback behavior
+        result = await engine.execute(dag)
+        assert result.nodes["gen"].status == NodeStatus.FAILED
+        assert "work_dir" in result.nodes["gen"].error.lower()
+
+    @pytest.mark.asyncio
+    async def test_succeeds_when_work_dir_set(self, tmp_path):
+        """When work_dir is set, evaluation proceeds normally."""
+        from core.dag_engine import DAGExecutionEngine
+        from core.models import DAG, DAGNode, NodeStatus, EvaluationResult
+
+        dag = DAG(reasoning="test")
+        dag.add_node(DAGNode(
+            id="gen",
+            agent_type="generator",
+            task_description="test",
+            success_criteria=["tests pass"],
+        ))
+
+        async def executor(node, artifacts):
+            return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
+
+        mock_evaluator = MagicMock()
+        mock_evaluator.evaluate_stage.return_value = EvaluationResult(
+            passed=True, score=10.0, feedback="OK",
+        )
+
+        engine = DAGExecutionEngine(
+            agent_executor=executor,
+            failure_handler=AsyncMock(return_value=MagicMock(action="abort")),
+            work_dir=str(tmp_path),
+            evaluator=mock_evaluator,
+        )
+
+        result = await engine.execute(dag)
+        assert result.nodes["gen"].status == NodeStatus.SUCCESS
