@@ -825,12 +825,23 @@ class EvaluatorEngine:
 
         Unlike file_exists (exact path), file_pattern accepts any matching
         non-empty file. Used when the exact filename is a generator choice (#160).
+        Automatically falls back to recursive glob (``**/``) when the initial
+        pattern only matches one level deep (#253).
         """
         pattern = crit.pattern or crit.path
         if not pattern:
             return True, "file_pattern: no pattern specified (skipped)", True
 
-        matches = list(work_dir.glob(pattern))
+        matches = set(work_dir.glob(pattern))
+        # Merge recursive results for single-level globs (#253).
+        # e.g. "validlib/*.py" also finds "validlib/core/validator.py"
+        if "*" in pattern and "**" not in pattern:
+            parts = pattern.split("/")
+            if len(parts) >= 2:
+                recursive_parts = parts[:-1] + ["**"] + parts[-1:]
+                recursive_pattern = "/".join(recursive_parts)
+                matches.update(work_dir.glob(recursive_pattern))
+
         files = [
             m for m in matches
             if m.is_file() and m.stat().st_size > 0
