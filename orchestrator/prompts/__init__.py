@@ -72,7 +72,14 @@ class PromptRegistry:
         if name in self._cache:
             return self._cache[name][0]
 
-        content = _load_builtin(name)
+        prompt_file = self._dir / f"{name}.md"
+        try:
+            content = prompt_file.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise ValueError(
+                f"Prompt file not found: {prompt_file}. "
+                f"Available prompts: {list(self._dir.glob('*.md'))}"
+            )
         content_hash = _content_hash(content)
         self._cache[name] = (content, content_hash)
         return content

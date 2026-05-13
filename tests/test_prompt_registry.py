@@ -79,6 +79,36 @@ class TestPromptRegistry:
         r2 = get_prompt_registry()
         assert r1 is r2
 
+    def test_custom_prompts_dir_overrides_default(self, tmp_path):
+        custom = tmp_path / "planning.md"
+        custom.write_text("CUSTOM PROMPT {agent_descriptions}", encoding="utf-8")
+        registry = PromptRegistry(prompts_dir=tmp_path)
+        prompt = registry.load("planning")
+        assert prompt == "CUSTOM PROMPT {agent_descriptions}"
+
+    def test_custom_prompts_dir_does_not_affect_default(self, tmp_path):
+        custom = tmp_path / "planning.md"
+        custom.write_text("OVERRIDDEN", encoding="utf-8")
+        registry = PromptRegistry(prompts_dir=tmp_path)
+        default = get_prompt_registry()
+        assert default.load("planning") != "OVERRIDDEN"
+
+
+class TestPlanningPromptCriticalRules:
+    """Ensure externalized planning prompt contains all required rules."""
+
+    def test_planning_contains_stdlib_shadowing_rule(self):
+        registry = PromptRegistry()
+        prompt = registry.load("planning")
+        assert "standard library module" in prompt.lower()
+        assert "stdlib" in prompt.lower()
+
+    def test_planning_contains_naming_contract_rule(self):
+        registry = PromptRegistry()
+        prompt = registry.load("planning")
+        assert "NAMING CONTRACT" in prompt
+        assert "cross-node naming" in prompt.lower()
+
 
 class TestOrchestratorPromptIntegration:
     def test_orchestrator_uses_prompt_registry(self):
