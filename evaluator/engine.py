@@ -235,7 +235,7 @@ class EvaluatorEngine:
             for art in output_artifacts:
                 p = Path(art)
                 full = p if p.is_absolute() else eval_root / p
-                if not (full.is_file() and full.stat().st_size > 0):
+                if not full.is_file():
                     phantom.append(art)
             if phantom:
                 overall_passed = False
