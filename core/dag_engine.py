@@ -26,6 +26,7 @@ from core.models import (
     DAGNode,
     NodeStatus,
     NodeHealth,
+    EvalStatus,
     ExecutionEvent,
     FailureDecision,
     HandoffArtifact,
@@ -137,6 +138,29 @@ class DAGExecutionEngine:
                 logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
 
     @staticmethod
+    def _eval_status_to_node_status(eval_status: EvalStatus) -> NodeStatus:
+        """Map EvalStatus from evaluator to NodeStatus for DAG nodes (#270)."""
+        mapping = {
+            EvalStatus.CLEAN_PASS: NodeStatus.SUCCESS,
+            EvalStatus.PARTIAL_PASS: NodeStatus.PARTIAL_PASS,
+            EvalStatus.WARNED: NodeStatus.WARNED,
+            EvalStatus.FAILED: NodeStatus.FAILED,
+        }
+        return mapping.get(eval_status, NodeStatus.SUCCESS)
+
+    @staticmethod
+    def _is_terminal_success(status: NodeStatus) -> bool:
+        """Check if a node status represents a successful terminal state (#270).
+
+        SUCCESS, PARTIAL_PASS, and WARNED all allow downstream to continue.
+        """
+        return status in (
+            NodeStatus.SUCCESS,
+            NodeStatus.PARTIAL_PASS,
+            NodeStatus.WARNED,
+        )
+
+    @staticmethod
     def _is_test_file_exists_criterion(criterion: str | object) -> bool:
         """Check if a criterion requires test files to exist (#247)."""
         # Handle structured SuccessCriterion
@@ -165,7 +189,7 @@ class DAGExecutionEngine:
         """
         merged = new_dag
         for node_id, node in old_dag.nodes.items():
-            if node.status == NodeStatus.SUCCESS and node_id in merged.nodes:
+            if self._is_terminal_success(node.status) and node_id in merged.nodes:
                 merged.nodes[node_id].status = node.status
                 merged.nodes[node_id].result = node.result
                 merged.nodes[node_id].output_artifacts = node.output_artifacts
@@ -390,7 +414,7 @@ class DAGExecutionEngine:
                                         gen_node.error = ""
                                         await self._execute_single_node(dag, target_id)
 
-                                        if dag.nodes[target_id].status == NodeStatus.SUCCESS:
+                                        if self._is_terminal_success(dag.nodes[target_id].status):
                                             # Re-run evaluator after generator fix
                                             node.status = NodeStatus.RETRYING
                                             node.error = ""
@@ -407,7 +431,7 @@ class DAGExecutionEngine:
                                 await self._execute_single_node(dag, failed_id)
 
                             # Check if retry resolved this failure
-                            if dag.nodes[failed_id].status != NodeStatus.SUCCESS:
+                            if not self._is_terminal_success(dag.nodes[failed_id].status):
                                 # This failure was not resolved — but don't skip
                                 # all remaining levels (#259). Instead, let
                                 # downstream nodes decide via dependency check
@@ -532,7 +556,7 @@ class DAGExecutionEngine:
         node = dag.nodes[node_id]
 
         # Skip if already executed (from merged DAG after replan)
-        if node.status == NodeStatus.SUCCESS:
+        if self._is_terminal_success(node.status):
             return
 
         if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
@@ -812,7 +836,11 @@ class DAGExecutionEngine:
                     ))
                     return
 
-            node.status = NodeStatus.SUCCESS
+            # Map evaluator result to node status (#270).
+            if self.evaluator and node.success_criteria and node.agent_type == "generator":
+                node.status = self._eval_status_to_node_status(eval_result.eval_status)
+            else:
+                node.status = NodeStatus.SUCCESS
             node.completed_at = datetime.now(timezone.utc)
             node.result = result
             node.output_artifacts = result.get("artifacts", [])
@@ -923,7 +951,7 @@ class DAGExecutionEngine:
 
         for dep_id in dependencies:
             dep_node = dag.nodes[dep_id]
-            if dep_node.status == NodeStatus.SUCCESS:
+            if self._is_terminal_success(dep_node.status):
                 artifact = HandoffArtifact(
                     from_agent=dep_node.agent_type,
                     to_agent=dag.nodes[node_id].agent_type,
@@ -1019,12 +1047,16 @@ class DAGExecutionEngine:
         """Generate a summary of DAG execution results."""
         total = len(dag.nodes)
         success = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SUCCESS)
+        partial_pass = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.PARTIAL_PASS)
+        warned = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.WARNED)
         failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
         skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
 
         return {
             "total_nodes": total,
             "success": success,
+            "partial_pass": partial_pass,
+            "warned": warned,
             "failed": failed,
             "skipped": skipped,
             "all_succeeded": failed == 0 and skipped == 0,

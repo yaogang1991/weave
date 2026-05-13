@@ -42,6 +42,8 @@ class NodeStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
+    PARTIAL_PASS = "partial_pass"  # Passed via threshold (soft failures overridden)
+    WARNED = "warned"              # Passed but has uncheckable/warned criteria
     FAILED = "failed"
     SKIPPED = "skipped"
     RETRYING = "retrying"
@@ -93,6 +95,14 @@ class NodeWorkspaceResult(BaseModel):
     conflicts: list[str] = Field(default_factory=list)
 
 
+class EvalStatus(str, Enum):
+    """Evaluation result status — maps to NodeStatus in DAG engine."""
+    CLEAN_PASS = "clean_pass"      # All criteria passed
+    PARTIAL_PASS = "partial_pass"  # Passed via threshold (soft failures)
+    WARNED = "warned"              # Passed with uncheckable/warned criteria
+    FAILED = "failed"              # Did not pass
+
+
 class EvaluationResult(BaseModel):
     """Result of an evaluation pass."""
     passed: bool
@@ -101,6 +111,7 @@ class EvaluationResult(BaseModel):
     feedback: str = ""
     suggestions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    eval_status: EvalStatus = EvalStatus.CLEAN_PASS
 
 
 class CriterionType(str, Enum):

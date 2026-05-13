@@ -23,6 +23,7 @@ from typing import Any
 
 from core.models import (
     CriterionType,
+    EvalStatus,
     EvaluationResult,
     EventType,
     SuccessCriterion,
@@ -202,6 +203,7 @@ class EvaluatorEngine:
             label for label, ok in results.items() if not ok
         ]
         failed_hard = [label for label in failed_auto if label in hard_labels]
+        threshold_pass = False  # Track whether pass is via threshold override
         if self.pass_threshold is not None and not all_auto_passed:
             # Hard criteria veto threshold override
             if failed_hard:
@@ -221,6 +223,7 @@ class EvaluatorEngine:
                     feedback_parts_new.append(part)
                 feedback_parts = feedback_parts_new
                 overall_passed = True
+                threshold_pass = True
             else:
                 overall_passed = False
         else:
@@ -260,6 +263,16 @@ class EvaluatorEngine:
         if self._last_lint_new_issues:
             eval_metadata["lint_new_issues"] = self._last_lint_new_issues
 
+        # Determine eval_status for DAG engine node state mapping (#270).
+        if not overall_passed:
+            eval_status = EvalStatus.FAILED
+        elif threshold_pass:
+            eval_status = EvalStatus.PARTIAL_PASS
+        elif has_uncheckable:
+            eval_status = EvalStatus.WARNED
+        else:
+            eval_status = EvalStatus.CLEAN_PASS
+
         result = EvaluationResult(
             passed=overall_passed,
             score=round(score, 1),
@@ -267,6 +280,7 @@ class EvaluatorEngine:
             feedback=feedback,
             suggestions=uncheckable,
             metadata=eval_metadata,
+            eval_status=eval_status,
         )
 
         self.session_store.emit_event(
