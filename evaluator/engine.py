@@ -122,6 +122,11 @@ class EvaluatorEngine:
         # When set, score >= threshold means overall pass even if some
         # criteria fail (reported as WARNING instead of FAIL).  None = strict
         # mode (all criteria must pass, same as before #194).
+        if pass_threshold is not None and pass_threshold <= 0:
+            raise ValueError(
+                f"pass_threshold must be > 0, got {pass_threshold}. "
+                "A threshold of 0 would pass all criteria regardless."
+            )
         self.pass_threshold = pass_threshold
         self._last_autofixed: list[str] = []
         self._last_lint_new_issues: list[str] = []

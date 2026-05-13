@@ -127,15 +127,15 @@ class TestThresholdMode:
         assert result.passed
         assert result.score == 10.0
 
-    def test_zero_threshold_always_passes(self, tmp_store, tmp_path):
-        ev = EvaluatorEngine(tmp_store, pass_threshold=0.0)
-        # Even with all criteria failing, score=0.0 >= 0.0 → pass
-        result = ev.evaluate_stage(
-            "s1", "impl",
-            [SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing.py", description="file")],
-            str(tmp_path),
-        )
-        assert result.passed
+    def test_zero_threshold_rejected(self, tmp_store, tmp_path):
+        """pass_threshold=0 is invalid — would pass all criteria regardless."""
+        with pytest.raises(ValueError, match="pass_threshold must be > 0"):
+            EvaluatorEngine(tmp_store, pass_threshold=0.0)
+
+    def test_negative_threshold_rejected(self, tmp_store, tmp_path):
+        """Negative pass_threshold is invalid."""
+        with pytest.raises(ValueError, match="pass_threshold must be > 0"):
+            EvaluatorEngine(tmp_store, pass_threshold=-1.0)
 
     def test_feedback_shows_warn_for_failed_criteria(self, threshold_evaluator, tmp_path):
         """Failed criteria are downgraded from FAIL to WARN in feedback."""

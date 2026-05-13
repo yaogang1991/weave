@@ -1330,7 +1330,7 @@ Examples:
     )
     run_parser.add_argument(
         "--pass-threshold", type=float, default=None,
-        help="Evaluation pass threshold 0-10 (default: strict, all criteria must pass)",
+        help="Evaluation pass threshold >0-10 (default: strict, all criteria must pass)",
     )
     run_parser.add_argument(
         "--non-interactive", action="store_true",
