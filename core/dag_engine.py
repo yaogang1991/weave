@@ -597,18 +597,6 @@ class DAGExecutionEngine:
                 # Store auto-eval result for downstream evaluator agents (#145)
                 node.auto_eval_result = eval_result.model_dump()
 
-            # After regression logic, ensure auto_eval_result reflects
-            # the best attempt, not a regressed round (#145 review).
-            if node.auto_eval_result and not eval_result.passed:
-                best = self._best_attempts.get(node_id)
-                if best and eval_result.score < best["score"]:
-                    node.auto_eval_result["passed"] = False
-                    node.auto_eval_result["score"] = best["score"]
-                    node.auto_eval_result["feedback"] = best["feedback"]
-                    node.auto_eval_result["_note"] = (
-                        "Updated to best-attempt result (regression detected)"
-                    )
-
                 if not eval_result.passed:
                     # Track best attempt to detect retry regression (#129, #151).
                     prev_best = self._best_attempts.get(node_id)
@@ -724,6 +712,25 @@ class DAGExecutionEngine:
                     node.status = NodeStatus.FAILED
                     node.completed_at = datetime.now(timezone.utc)
 
+                    # On regression, align auto_eval_result with the best
+                    # attempt so downstream evaluators get accurate info
+                    # (#145 review feedback).
+                    if is_regression and best:
+                        node.auto_eval_result = {
+                            "passed": False,
+                            "score": best["score"],
+                            "feedback": best["feedback"],
+                            "_note": (
+                                "Updated to best-attempt result "
+                                "(regression detected)"
+                            ),
+                        }
+                    # If node exhausted retries and is ultimately not
+                    # successful, clear auto_eval_result so no stale
+                    # result leaks to downstream evaluators (#145).
+                    if node.retry_count >= node.max_retries:
+                        node.auto_eval_result = None
+
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
                         event_type="failed",
@@ -784,6 +791,8 @@ class DAGExecutionEngine:
             else:
                 node.status = NodeStatus.FAILED
                 node.completed_at = datetime.now(timezone.utc)
+                # Clear stale auto_eval_result on terminal failure (#145).
+                node.auto_eval_result = None
 
                 await self._emit(ExecutionEvent(
                     node_id=node_id,
@@ -857,9 +866,13 @@ class DAGExecutionEngine:
                 )
                 artifacts.append(artifact)
 
-                # Pass auto-eval results to downstream evaluator agents (#145)
+                # Pass auto-eval results to downstream evaluator agents (#145).
+                # Only pass when dep_node is SUCCESS (already guaranteed by the
+                # enclosing if) AND auto_eval_result corresponds to the current
+                # output_artifacts (i.e., evaluation passed).
                 if (
                     dep_node.auto_eval_result
+                    and dep_node.auto_eval_result.get("passed") is True
                     and dag.nodes[node_id].agent_type == "evaluator"
                 ):
                     eval_info = dep_node.auto_eval_result
