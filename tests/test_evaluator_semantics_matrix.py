@@ -17,7 +17,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from core.models import CriterionType, SuccessCriterion
+from core.models import CriterionType, EvalStatus, SuccessCriterion
 from evaluator.engine import EvaluatorEngine
 
 
@@ -622,3 +622,82 @@ class TestFalseFailPrevention:
                 SuccessCriterion(type=CriterionType.LINT, description="lint"),
             ], str(tmp_path), output_artifacts=["app.py"])
             assert r.passed
+
+
+# =====================================================================
+# Evaluation Status (Threshold-Assisted Pass vs Clean Pass)
+# =====================================================================
+
+class TestEvaluationStatus:
+    """Verify eval_status correctly distinguishes pass quality (#276)."""
+
+    def test_clean_pass_all_criteria_passed(self, evaluator, tmp_path):
+        """All criteria pass → CLEAN_PASS."""
+        _file(tmp_path / "app.py")
+        r = evaluator.evaluate_stage("s1", "impl", [
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="app.py",
+                             description="file"),
+        ], str(tmp_path), output_artifacts=["app.py"])
+        assert r.passed
+        assert r.eval_status == EvalStatus.CLEAN_PASS
+
+    def test_partial_pass_threshold_override(self, tmp_store, tmp_path):
+        """Threshold-assisted pass → PARTIAL_PASS, not CLEAN_PASS."""
+        _file(tmp_path / "a.py", "# TODO: fix\n")
+        _file(tmp_path / "b.py", "ok\n")
+        _file(tmp_path / "c.py", "ok\n")
+        ev = EvaluatorEngine(tmp_store, pass_threshold=5.0)
+        r = ev.evaluate_stage("s1", "impl", [
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py",
+                             description="a"),
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py",
+                             description="b"),
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="c.py",
+                             description="c"),
+            SuccessCriterion(type=CriterionType.NO_CRITICAL,
+                             description="markers"),
+        ], str(tmp_path), output_artifacts=["a.py"])
+        assert r.passed
+        assert r.eval_status == EvalStatus.PARTIAL_PASS
+        assert "WARN" in r.feedback
+
+    def test_partial_pass_has_warnings_metadata(self, tmp_store, tmp_path):
+        """Threshold-assisted pass: criteria_results show soft failures.
+
+        Downstream evaluator (DAG engine handoff) uses criteria_results to
+        detect has_warnings = not all(criteria_results.values()).
+        """
+        _file(tmp_path / "a.py", "# TODO: fix\n")
+        _file(tmp_path / "b.py", "ok\n")
+        ev = EvaluatorEngine(tmp_store, pass_threshold=3.0)
+        r = ev.evaluate_stage("s1", "impl", [
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py",
+                             description="a"),
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py",
+                             description="b"),
+            SuccessCriterion(type=CriterionType.NO_CRITICAL,
+                             description="markers"),
+        ], str(tmp_path), output_artifacts=["a.py"])
+        assert r.passed
+        assert r.eval_status == EvalStatus.PARTIAL_PASS
+        # criteria_results contains the soft failure → has_warnings = True
+        assert not all(r.criteria_results.values())
+
+    def test_failed_status(self, evaluator, tmp_path):
+        """Hard criterion failure → FAILED."""
+        r = evaluator.evaluate_stage("s1", "impl", [
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing.py",
+                             description="missing"),
+        ], str(tmp_path))
+        assert not r.passed
+        assert r.eval_status == EvalStatus.FAILED
+
+    def test_warned_status_uncheckable(self, evaluator, tmp_path):
+        """All checked criteria pass but uncheckable criterion → WARNED."""
+        _file(tmp_path / "app.py")
+        r = evaluator.evaluate_stage("s1", "impl", [
+            SuccessCriterion(type=CriterionType.CUSTOM,
+                             description="manual review"),
+        ], str(tmp_path))
+        assert r.passed
+        assert r.eval_status == EvalStatus.WARNED

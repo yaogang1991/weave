@@ -198,6 +198,42 @@ have created files that were never written.
 | Nested files missed by glob | Recursive glob fallback for single-level patterns |
 | Pytest hangs forever | 60s timeout with actionable feedback |
 
+## Evaluation Status
+
+Each evaluation produces an `eval_status` that distinguishes the quality of the
+pass:
+
+| Status | Meaning |
+|--------|---------|
+| `CLEAN_PASS` | All criteria passed, no warnings |
+| `PARTIAL_PASS` | Passed via `pass_threshold` override — soft failures downgraded to WARN |
+| `WARNED` | All checked criteria passed, but some criteria are uncheckable (manual review needed) |
+| `FAILED` | Overall evaluation failed |
+
+### Threshold-Assisted Pass ≠ Clean Pass
+
+A threshold-assisted pass (`PARTIAL_PASS`) is **not** equivalent to a clean
+pass. When `pass_threshold` is set and `score >= pass_threshold` but some soft
+criteria failed:
+
+1. Failed soft criteria are reported as `WARN` instead of `FAIL` in feedback.
+2. The evaluation result metadata sets `has_warnings=True`.
+3. The downstream evaluator must still investigate the WARN criteria — they
+   cannot be treated as fully verified.
+
+The auto-eval handoff to the downstream evaluator reflects this distinction:
+
+- **Clean pass** (`has_warnings=False`): header reads
+  `AUTOMATED EVALUATION RESULTS (already verified)` — downstream evaluator may
+  reuse these results without re-running checks.
+- **Threshold-assisted pass** (`has_warnings=True`): header reads
+  `AUTOMATED EVALUATION RESULTS (passed via threshold — some criteria have WARNINGS)`
+  — downstream evaluator **must** investigate the specific WARN criteria further.
+
+This prevents the auto-eval handoff from presenting a threshold pass as a fully
+verified result, ensuring downstream evaluators do not skip investigating soft
+criteria that failed auto-checking.
+
 ## Feedback Format
 
 Each criterion result produces one feedback line:
