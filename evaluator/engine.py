@@ -274,7 +274,10 @@ class EvaluatorEngine:
             elif output_artifacts:
                 test_targets = self._find_test_files(output_artifacts, Path(work_dir))
             if not test_targets:
-                return True, "No test files to run (passed by default)", True
+                return True, (
+                    "No test files found to run — tests not verified. "
+                    "Consider adding test files or adjusting criteria."
+                ), False
             passed, msg = self._run_tests(Path(work_dir), test_targets)
             return passed, msg, True
 
