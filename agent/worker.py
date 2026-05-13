@@ -13,10 +13,36 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterator
 
+import json
+import logging
+
 from core.models import AgentMessage, ToolCall, ToolResult, EventType
 from core.config import LLMConfig
 from core.llm_client import LLMClient
 from session.store import SessionStore
+
+logger = logging.getLogger(__name__)
+
+# Required arguments for known tools — used to validate LLM tool calls
+# before execution, catching empty/malformed arguments from some models (#215).
+TOOL_REQUIRED_ARGS: dict[str, list[str]] = {
+    "write": ["file_path", "content"],
+    "edit": ["file_path", "old_string", "new_string"],
+    "read": ["file_path"],
+    "bash": ["command"],
+    "glob": ["pattern"],
+    "grep": ["pattern"],
+}
+
+# Fields that must not be empty strings even when present and non-None.
+# Tools like write/edit legitimately use content="" or new_string="" (e.g. clearing
+# a file), but bash.command, read.file_path, and grep.pattern are meaningless when blank.
+TOOL_NON_EMPTY_ARGS: dict[str, list[str]] = {
+    "bash": ["command"],
+    "read": ["file_path"],
+    "grep": ["pattern"],
+    "glob": ["pattern"],
+}
 
 
 class AgentWorker:
@@ -103,7 +129,44 @@ class AgentWorker:
                     tc,
                 )
 
-                result = tool_executor.execute(tc["name"], tc.get("arguments", {}))
+                # Validate required arguments before execution (#215)
+                tool_name = tc["name"]
+                args = tc.get("arguments", {})
+                required = TOOL_REQUIRED_ARGS.get(tool_name, [])
+                missing = [k for k in required if k not in args or args[k] is None]
+
+                if missing:
+                    error_content = (
+                        f"Error: '{tool_name}' tool is missing required argument(s): "
+                        f"{', '.join(missing)}. "
+                        f"Your call had arguments: {json.dumps(args)}. "
+                        f"Please retry with all required arguments."
+                    )
+                    self._append_invalid_tool_result(
+                        session_id, tool_call_id, tool_name, error_content, tool_results,
+                    )
+                    logger.warning("Tool %s called with missing args: %s", tool_name, missing)
+                    continue
+
+                # Tool-specific empty-string validation (#215).
+                # Some fields (bash.command, read.file_path, grep.pattern) must
+                # not be blank — unlike write.content or edit.new_string which
+                # are legitimately empty strings.
+                non_empty = TOOL_NON_EMPTY_ARGS.get(tool_name, [])
+                blank = [k for k in non_empty if isinstance(args.get(k), str) and args[k].strip() == ""]
+                if blank:
+                    error_content = (
+                        f"Error: '{tool_name}' tool argument(s) "
+                        f"{', '.join(blank)} must not be empty/blank. "
+                        f"Please retry with non-empty values."
+                    )
+                    self._append_invalid_tool_result(
+                        session_id, tool_call_id, tool_name, error_content, tool_results,
+                    )
+                    logger.warning("Tool %s called with blank args: %s", tool_name, blank)
+                    continue
+
+                result = tool_executor.execute(tool_name, args)
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -128,6 +191,35 @@ class AgentWorker:
 
             messages.append(assistant_message)
             messages.extend(tool_results)
+
+    def _append_invalid_tool_result(
+        self,
+        session_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        error_content: str,
+        tool_results: list[dict],
+    ) -> None:
+        """Append a tool result error and emit AGENT_TOOL_RESULT event.
+
+        Ensures the session trace stays complete — every AGENT_TOOL_USE must be
+        paired with an AGENT_TOOL_RESULT, even for validation failures.
+        """
+        tool_results.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": error_content,
+        })
+        self.session_store.emit_event(
+            session_id,
+            EventType.AGENT_TOOL_RESULT,
+            {
+                "tool": tool_name,
+                "success": False,
+                "error": error_content,
+                "tool_call_id": tool_call_id,
+            },
+        )
 
     # -- Context window management ------------------------------------------
 

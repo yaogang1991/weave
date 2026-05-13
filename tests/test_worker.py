@@ -87,7 +87,7 @@ class TestArtifactTracking:
         ))
         worker.llm.call = MagicMock(side_effect=[
             {"role": "assistant", "content": "",
-             "tool_calls": [{"id": "tc1", "name": "write", "arguments": {"file_path": str(f)}}]},
+             "tool_calls": [{"id": "tc1", "name": "write", "arguments": {"file_path": str(f), "content": "x = 1"}}]},
             {"role": "assistant", "content": "done"},
         ])
         list(worker.run("s1", "sys", "do it", [], mock_exec))
@@ -102,7 +102,7 @@ class TestArtifactTracking:
         ))
         worker.llm.call = MagicMock(side_effect=[
             {"role": "assistant", "content": "",
-             "tool_calls": [{"id": "tc1", "name": "edit", "arguments": {"file_path": str(f)}}]},
+             "tool_calls": [{"id": "tc1", "name": "edit", "arguments": {"file_path": str(f), "old_string": "old", "new_string": "new"}}]},
             {"role": "assistant", "content": "done"},
         ])
         list(worker.run("s1", "sys", "do it", [], mock_exec))
@@ -118,8 +118,8 @@ class TestArtifactTracking:
         worker.llm.call = MagicMock(side_effect=[
             {"role": "assistant", "content": "",
              "tool_calls": [
-                 {"id": "tc1", "name": "write", "arguments": {"file_path": str(f)}},
-                 {"id": "tc2", "name": "edit", "arguments": {"file_path": str(f)}},
+                 {"id": "tc1", "name": "write", "arguments": {"file_path": str(f), "content": "x = 1"}},
+                 {"id": "tc2", "name": "edit", "arguments": {"file_path": str(f), "old_string": "x = 1", "new_string": "x = 2"}},
              ]},
             {"role": "assistant", "content": "done"},
         ])
