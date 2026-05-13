@@ -395,9 +395,12 @@ class DAGExecutionEngine:
 
                             # Check if retry resolved this failure
                             if dag.nodes[failed_id].status != NodeStatus.SUCCESS:
-                                # This failure was not resolved
-                                self._skip_remaining(dag, levels, level_idx + 1)
-                                return dag
+                                # This failure was not resolved — but don't skip
+                                # all remaining levels (#259). Instead, let
+                                # downstream nodes decide via dependency check
+                                # in _execute_single_node. Only abort (full
+                                # skip) happens on explicit "abort" decision.
+                                pass
 
                         elif decision.action == "skip":
                             dag.nodes[failed_id].status = NodeStatus.SKIPPED
@@ -490,6 +493,26 @@ class DAGExecutionEngine:
             return
 
         if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
+            return
+
+        # Dependency-aware skip: only skip if a direct dependency failed (#259).
+        # Unlike _skip_remaining (which skips entire levels), this allows nodes
+        # whose dependencies all succeeded to continue executing.
+        deps = dag.get_dependencies(node_id)
+        failed_deps = [
+            d for d in deps
+            if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
+        ]
+        if failed_deps:
+            node.status = NodeStatus.SKIPPED
+            node.error = (
+                f"Skipped: upstream dependencies {failed_deps} "
+                f"failed/were skipped"
+            )
+            logger.info(
+                "Node %s skipped due to failed dependencies: %s",
+                node_id, failed_deps,
+            )
             return
 
         input_artifacts = self._collect_input_artifacts(dag, node_id)
