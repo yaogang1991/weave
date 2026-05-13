@@ -397,7 +397,7 @@ class EvaluatorEngine:
                 cmd,
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
-                timeout=120,
+                timeout=60,
                 cwd=str(work_dir) if work_dir.is_dir() else None,
             )
             passed = result.returncode == 0
@@ -410,6 +410,12 @@ class EvaluatorEngine:
                     failure_lines.append(line)
             detail = "\n".join(failure_lines[-20:]) if failure_lines else result.stdout[-500:]
             return passed, f"Tests failed:\n{detail}"
+        except subprocess.TimeoutExpired:
+            return False, (
+                "Tests timed out after 60s — likely a background thread or process leak. "
+                "Ensure all threads use daemon=True and add proper cleanup in test teardown "
+                "(e.g. @pytest.fixture with yield + stop() call)."
+            )
         except FileNotFoundError:
             return False, "pytest not installed"
         except Exception as e:
@@ -699,7 +705,7 @@ class EvaluatorEngine:
             result = subprocess.run(
                 cmd,
                 capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=120,
+                encoding="utf-8", errors="replace", timeout=60,
                 cwd=str(work_dir) if work_dir.is_dir() else None,
             )
 
@@ -740,6 +746,11 @@ class EvaluatorEngine:
                 f"Tests failed and coverage report could not be parsed. "
                 f"stdout_tail=...{stdout_tail} "
                 f"stderr_tail=...{stderr_tail}"
+            ), True
+        except subprocess.TimeoutExpired:
+            return False, (
+                "Coverage check timed out after 60s — likely a background thread leak. "
+                "Use daemon threads and proper test teardown."
             ), True
         except Exception as e:
             return False, f"Coverage check error: {e}", True
