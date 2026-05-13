@@ -597,6 +597,18 @@ class DAGExecutionEngine:
                 # Store auto-eval result for downstream evaluator agents (#145)
                 node.auto_eval_result = eval_result.model_dump()
 
+            # After regression logic, ensure auto_eval_result reflects
+            # the best attempt, not a regressed round (#145 review).
+            if node.auto_eval_result and not eval_result.passed:
+                best = self._best_attempts.get(node_id)
+                if best and eval_result.score < best["score"]:
+                    node.auto_eval_result["passed"] = False
+                    node.auto_eval_result["score"] = best["score"]
+                    node.auto_eval_result["feedback"] = best["feedback"]
+                    node.auto_eval_result["_note"] = (
+                        "Updated to best-attempt result (regression detected)"
+                    )
+
                 if not eval_result.passed:
                     # Track best attempt to detect retry regression (#129, #151).
                     prev_best = self._best_attempts.get(node_id)
