@@ -89,6 +89,7 @@ class BackendManager:
         self._backends: dict[str, ExecutionBackend] = {}
         self._sandbox_provider = self._create_sandbox()
         self._active_runs: dict[str, ExecutionBackend] = {}  # run_id -> backend
+        self._node_workspaces: dict[str, "NodeWorkspace"] = {}  # "run_id:node_id" -> NodeWorkspace
 
     def _get_workspace_backend(
         self, ws_type: WorkspaceIsolation
@@ -217,6 +218,130 @@ class BackendManager:
                 self.cleanup(job_id, run_id)
                 return None
             return self.preserve(job_id, run_id, reason=reason)
+
+    # ------------------------------------------------------------------
+    # Node-level workspace isolation (#176)
+    # ------------------------------------------------------------------
+
+    def setup_node(
+        self,
+        job_id: str,
+        run_id: str,
+        node_id: str,
+        strategy: str = "shared",
+    ) -> "NodeWorkspace":
+        """
+        Prepare an isolated workspace for a DAG node.
+
+        For SHARED strategy, returns the run's existing work_dir.
+        For WORKTREE/COPY, creates an isolated workspace.
+
+        Returns a NodeWorkspace with the node's workspace_path set.
+        """
+        from core.models import NodeWorkspace, NodeWorkspaceStrategy
+
+        ws_strategy = NodeWorkspaceStrategy(strategy)
+        run_backend = self._active_runs.get(run_id)
+        run_work_dir = run_backend.get_work_dir(job_id, run_id) if run_backend else None
+
+        if ws_strategy == NodeWorkspaceStrategy.SHARED or not run_work_dir:
+            return NodeWorkspace(
+                node_id=node_id,
+                strategy=NodeWorkspaceStrategy.SHARED,
+                base_path=str(run_work_dir) if run_work_dir else "",
+                workspace_path=str(run_work_dir) if run_work_dir else "",
+            )
+
+        # WORKTREE requires repo_root; fall back to COPY if missing
+        if ws_strategy == NodeWorkspaceStrategy.WORKTREE and not self.repo_root:
+            ws_strategy = NodeWorkspaceStrategy.COPY
+
+        # WORKTREE / COPY: create isolated workspace
+        node_work_dir = Path(self.base_path) / "nodes" / run_id / node_id
+        node_work_dir.mkdir(parents=True, exist_ok=True)
+
+        baseline_commit = ""
+        if ws_strategy == NodeWorkspaceStrategy.WORKTREE and self.repo_root:
+            # Create git worktree for the node
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    capture_output=True, text=True,
+                    cwd=self.repo_root, timeout=10,
+                )
+                if result.returncode == 0:
+                    baseline_commit = result.stdout.strip()
+                wt_result = subprocess.run(
+                    ["git", "worktree", "add", str(node_work_dir), "HEAD"],
+                    capture_output=True, text=True,
+                    cwd=self.repo_root, timeout=30,
+                )
+                if wt_result.returncode != 0:
+                    raise RuntimeError(
+                        f"git worktree add failed (rc={wt_result.returncode}): "
+                        f"{wt_result.stderr.strip()}"
+                    )
+            except (FileNotFoundError, subprocess.TimeoutExpired, RuntimeError, Exception):
+                # Git not available or worktree failed, fall back to SHARED
+                import shutil
+                shutil.rmtree(node_work_dir, ignore_errors=True)
+                return NodeWorkspace(
+                    node_id=node_id,
+                    strategy=NodeWorkspaceStrategy.SHARED,
+                    base_path=str(run_work_dir),
+                    workspace_path=str(run_work_dir),
+                )
+        elif ws_strategy == NodeWorkspaceStrategy.COPY and run_work_dir:
+            # Copy workspace files for the node
+            import shutil
+            try:
+                shutil.copytree(
+                    str(run_work_dir), str(node_work_dir),
+                    dirs_exist_ok=True,
+                )
+            except OSError:
+                shutil.rmtree(node_work_dir, ignore_errors=True)
+                return NodeWorkspace(
+                    node_id=node_id,
+                    strategy=NodeWorkspaceStrategy.SHARED,
+                    base_path=str(run_work_dir),
+                    workspace_path=str(run_work_dir),
+                )
+
+        # Track node workspace for cleanup
+        key = f"{run_id}:{node_id}"
+        self._node_workspaces[key] = NodeWorkspace(
+            node_id=node_id,
+            strategy=ws_strategy,
+            base_path=str(run_work_dir),
+            workspace_path=str(node_work_dir),
+            baseline_commit=baseline_commit,
+        )
+        return self._node_workspaces[key]
+
+    def cleanup_node(self, job_id: str, run_id: str, node_id: str) -> None:
+        """Clean up a node's isolated workspace after execution."""
+        key = f"{run_id}:{node_id}"
+        ws = self._node_workspaces.pop(key, None)
+        if not ws:
+            return
+
+        ws_path = Path(ws.workspace_path)
+        if ws.strategy.value == "worktree" and self.repo_root:
+            # Remove git worktree
+            try:
+                import subprocess
+                subprocess.run(
+                    ["git", "worktree", "remove", str(ws_path), "--force"],
+                    capture_output=True, text=True,
+                    cwd=self.repo_root, timeout=30,
+                )
+            except (FileNotFoundError, Exception):
+                pass
+        elif ws.strategy.value == "copy" and ws_path.exists():
+            import shutil
+            shutil.rmtree(ws_path, ignore_errors=True)
 
     async def execute_hook(
         self,
