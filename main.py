@@ -153,12 +153,64 @@ def _check_dirty_workspace(project: str | None) -> None:
         sys.exit(1)
 
 
-def _check_stdlib_shadowing(project: str | None) -> None:
-    """Check for directories that shadow Python stdlib modules (#240).
+def _is_legitimate_package(path: Path) -> bool:
+    """Heuristic: detect a legitimate package (not a leftover shadow dir).
+
+    A directory is considered a legitimate package if it contains meaningful
+    source files beyond a trivial ``__init__.py``. Leftover shadow directories
+    from harness runs typically have only an empty or tiny ``__init__.py``.
+    """
+    py_files = list(path.glob("**/*.py"))
+    if len(py_files) == 0:
+        # No Python files at all — likely leftover
+        return False
+    if len(py_files) == 1 and py_files[0].name == "__init__.py":
+        # Only __init__.py — check if it has real content
+        try:
+            content = py_files[0].read_text(encoding="utf-8", errors="replace").strip()
+            # Empty or trivial __init__.py → likely leftover
+            if len(content) < 50:
+                return False
+        except OSError:
+            return False
+    # Multiple .py files or substantial __init__.py → legitimate package
+    return True
+
+
+def _quarantine_shadowing_dir(path: Path, project_path: Path) -> Path:
+    """Move a shadowing directory to .harness/quarantine/<timestamp>/<name>.
+
+    Returns the quarantine destination path.
+    """
+    import shutil
+
+    quarantine_base = project_path / ".harness" / "quarantine"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    dest = quarantine_base / timestamp / path.name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(path), str(dest))
+    return dest
+
+
+def _check_stdlib_shadowing(
+    project: str | None,
+    cleanup: bool = False,
+) -> None:
+    """Check for directories that shadow Python stdlib modules (#240, #246).
 
     Previous runs may have created directories like 'urllib/' that shadow
     stdlib, causing catastrophic import failures in subsequent runs.
-    Detects and optionally removes them.
+
+    Behavior by mode:
+    - **Non-interactive**: warns and exits with code 1 (fail-fast). Will NOT
+      auto-delete user source code directories.
+    - **Interactive**: asks the user whether to quarantine each directory.
+    - **cleanup=True** (opt-in via ``--cleanup-stdlib-shadowing``): moves
+      leftover (non-legitimate) shadowing dirs to
+      ``.harness/quarantine/<timestamp>/`` instead of deleting them.
+
+    Only directories that appear to be *leftovers* (trivial content) are
+    quarantined; legitimate packages matching stdlib names are always kept.
     """
     if not project:
         return
@@ -215,24 +267,61 @@ def _check_stdlib_shadowing(project: str | None) -> None:
     non_interactive = os.environ.get("HARNESS_NON_INTERACTIVE", "").lower() in (
         "true", "1", "yes",
     )
+
     if non_interactive:
-        # Non-interactive: warn only, do NOT auto-delete user files (#240)
         sys.stderr.write(msg)
-        sys.stderr.write(
-            "Proceeding without removal. These directories may cause "
-            "import failures during evaluation.\n"
-        )
-        return
+        if cleanup:
+            # Opt-in quarantine mode: move leftovers, protect legitimate packages
+            quarantined = 0
+            protected = 0
+            for path, _ in shadowing:
+                if _is_legitimate_package(path):
+                    sys.stderr.write(
+                        f"  PROTECTED: {path.name}/ appears to be a legitimate "
+                        f"package — keeping.\n"
+                    )
+                    protected += 1
+                else:
+                    dest = _quarantine_shadowing_dir(path, project_path)
+                    sys.stderr.write(
+                        f"  Quarantined: {path.name}/ → {dest}\n"
+                    )
+                    quarantined += 1
+            sys.stderr.write(
+                f"Quarantined {quarantined} leftover dir(s), "
+                f"protected {protected} legitimate package(s).\n"
+            )
+            if protected > 0:
+                sys.stderr.write(
+                    "Cannot proceed: remaining legitimate package(s) still "
+                    "shadow stdlib. Rename or move them manually.\n"
+                )
+                sys.exit(1)
+            return
+        else:
+            # Default: fail-fast to prevent silent corruption
+            sys.stderr.write(
+                "Aborting: remove or rename these directories before running, "
+                "or use --cleanup-stdlib-shadowing to quarantine leftovers.\n"
+            )
+            sys.exit(1)
 
     # Interactive: ask user
     sys.stderr.write(msg)
     try:
-        answer = input("Remove these directories? [Y/n] ").strip().lower()
+        answer = input("Quarantine leftover directories? [Y/n] ").strip().lower()
         if answer in ("", "y", "yes"):
-            import shutil
             for path, _ in shadowing:
-                shutil.rmtree(path, ignore_errors=True)
-                sys.stderr.write(f"Removed: {path.name}/\n")
+                if _is_legitimate_package(path):
+                    sys.stderr.write(
+                        f"  PROTECTED: {path.name}/ appears to be a legitimate "
+                        f"package — keeping.\n"
+                    )
+                else:
+                    dest = _quarantine_shadowing_dir(path, project_path)
+                    sys.stderr.write(
+                        f"  Quarantined: {path.name}/ → {dest}\n"
+                    )
         else:
             sys.stderr.write("Kept. Proceeding may fail due to import conflicts.\n")
     except (EOFError, KeyboardInterrupt):
@@ -653,8 +742,11 @@ async def cmd_run(args):
     # Warn about dirty workspace to prevent accidental re-runs (#147)
     _check_dirty_workspace(args.project)
 
-    # Check for leftover stdlib-shadowing directories (#240)
-    _check_stdlib_shadowing(args.project)
+    # Check for leftover stdlib-shadowing directories (#240, #246)
+    _check_stdlib_shadowing(
+        args.project,
+        cleanup=getattr(args, "cleanup_stdlib_shadowing", False),
+    )
 
     # Plan
     dag = await cmd_plan(args)
@@ -1415,6 +1507,11 @@ Examples:
     run_parser.add_argument(
         "--non-interactive", action="store_true",
         help="Auto-approve all tool calls (no human approval needed)",
+    )
+    run_parser.add_argument(
+        "--cleanup-stdlib-shadowing", action="store_true",
+        help="Quarantine (not delete) leftover stdlib-shadowing directories to "
+             ".harness/quarantine/ instead of aborting",
     )
     run_parser.set_defaults(func=cmd_run)
 
