@@ -246,6 +246,8 @@ class EvaluatorEngine:
             lower = lower.replace(cn, en)
         if "test" in lower and "pass" in lower:
             return SuccessCriterion(type=CriterionType.TESTS_PASS, description=criterion)
+        if "test_file_exist" in lower or "test file exist" in lower:
+            return SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS, description=criterion)
         if "coverage" in lower:
             return SuccessCriterion(type=CriterionType.COVERAGE, target=float(self._extract_percentage(lower) or 80), description=criterion)
         if "lint" in lower or "clean" in lower:
@@ -379,6 +381,10 @@ class EvaluatorEngine:
 
         if crit.type == CriterionType.PATTERN_PRESENT:
             passed, msg = self._check_pattern_present(crit, Path(work_dir))
+            return passed, msg, True
+
+        if crit.type == CriterionType.TEST_FILE_EXISTS:
+            passed, msg = self._check_test_file_exists(output_artifacts)
             return passed, msg, True
 
         # CUSTOM + any unknown type → pass with warning (manual review recommended)
@@ -784,6 +790,44 @@ class EvaluatorEngine:
     def _extract_percentage(self, text: str) -> int | None:
         match = re.search(r'(\d+)%', text)
         return int(match.group(1)) if match else None
+
+    def _check_test_file_exists(
+        self,
+        output_artifacts: list[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Verify that test files were produced in output_artifacts (#247).
+
+        Unlike FILE_EXISTS (which checks specific paths on disk), this
+        criterion checks that the agent's output_artifacts contain at least
+        one file matching common test naming conventions (test_*.py,
+        *_test.py, *_spec.py, or .py files under tests/ or test/ dirs).
+        """
+        if not output_artifacts:
+            return False, (
+                "No output artifacts produced — test files required. "
+                "Create test files (e.g., test_*.py) for your implementation."
+            )
+
+        def _is_test_file(artifact_path: str) -> bool:
+            basename = artifact_path.lower().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+            if basename.startswith("test_") or basename.endswith("_test.py"):
+                return True
+            if basename.endswith("_spec.py"):
+                return True
+            lower_path = artifact_path.lower()
+            if "/tests/" in lower_path or "/test/" in lower_path:
+                if basename.endswith(".py"):
+                    return True
+            return False
+
+        test_files = [a for a in output_artifacts if _is_test_file(a)]
+        if test_files:
+            return True, f"Test files found: {test_files}"
+        return False, (
+            f"No test files in output artifacts: {output_artifacts}. "
+            f"You MUST create test files (e.g., test_*.py) for your "
+            f"implementation."
+        )
 
     # ------------------------------------------------------------------
     # Bug-fix verification checkers

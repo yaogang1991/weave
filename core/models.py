@@ -77,6 +77,7 @@ class CriterionType(str, Enum):
     FILE_CHANGED = "file_changed"
     PATTERN_ABSENT = "pattern_absent"
     PATTERN_PRESENT = "pattern_present"
+    TEST_FILE_EXISTS = "test_file_exists"
     CUSTOM = "custom"
 
 

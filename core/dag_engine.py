@@ -137,15 +137,15 @@ class DAGExecutionEngine:
                 logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
 
     @staticmethod
-    def _is_tests_pass_criterion(criterion: str | object) -> bool:
-        """Check if a criterion requires tests to pass (#247)."""
+    def _is_test_file_exists_criterion(criterion: str | object) -> bool:
+        """Check if a criterion requires test files to exist (#247)."""
         # Handle structured SuccessCriterion
         if hasattr(criterion, "type"):
-            return getattr(criterion.type, "value", "") == "tests_pass"
+            return getattr(criterion.type, "value", "") == "test_file_exists"
         # Handle string criteria
         if isinstance(criterion, str):
             lower = criterion.lower()
-            return "test" in lower and "pass" in lower
+            return "test_file_exist" in lower or "test file exist" in lower
         return False
 
     def _skip_remaining(self, dag: DAG, levels: list[list[str]], from_level: int) -> None:
@@ -565,66 +565,59 @@ class DAGExecutionEngine:
             node.output_artifacts = reported_artifacts
             logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
 
-            # Test file enforcement (#247): if criteria require tests and the
-            # task explicitly asks to CREATE new code (not just fix/modify),
-            # verify that test files were actually produced.
+            # Test file enforcement (#247): only enforce when the DAG
+            # explicitly includes a TEST_FILE_EXISTS criterion. This is
+            # distinct from TESTS_PASS which means "tests must pass", not
+            # "must create test files".
             if node.agent_type == "generator" and node.output_artifacts:
-                has_tests_criteria = any(
-                    self._is_tests_pass_criterion(c) for c in node.success_criteria
+                has_test_file_criteria = any(
+                    self._is_test_file_exists_criterion(c) for c in node.success_criteria
                 )
-                if has_tests_criteria:
-                    task_lower = node.task_description.lower()
-                    is_creation_task = any(
-                        kw in task_lower for kw in ("create", "write", "implement", "build")
-                    )
-                    if not is_creation_task:
-                        # Bug-fix / modify tasks: don't enforce test file creation
-                        pass
-                    else:
-                        # Broader test file detection: test_*.py, *_test.py, *_spec.py,
-                        # files under tests/ or test/ directories
-                        def _is_test_file(artifact_path: str) -> bool:
-                            basename = artifact_path.lower().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-                            if basename.startswith("test_") or basename.endswith("_test.py"):
+                if has_test_file_criteria:
+                    # Broader test file detection: test_*.py, *_test.py, *_spec.py,
+                    # files under tests/ or test/ directories
+                    def _is_test_file(artifact_path: str) -> bool:
+                        basename = artifact_path.lower().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+                        if basename.startswith("test_") or basename.endswith("_test.py"):
+                            return True
+                        if basename.endswith("_spec.py"):
+                            return True
+                        # Files inside tests/ or test/ directories
+                        lower_path = artifact_path.lower()
+                        if "/tests/" in lower_path or "/test/" in lower_path:
+                            if basename.endswith(".py"):
                                 return True
-                            if basename.endswith("_spec.py"):
-                                return True
-                            # Files inside tests/ or test/ directories
-                            lower_path = artifact_path.lower()
-                            if "/tests/" in lower_path or "/test/" in lower_path:
-                                if basename.endswith(".py"):
-                                    return True
-                            return False
+                        return False
 
-                        has_test_files = any(
-                            _is_test_file(a) for a in node.output_artifacts
+                    has_test_files = any(
+                        _is_test_file(a) for a in node.output_artifacts
+                    )
+                    if not has_test_files:
+                        logger.warning(
+                            "Node %s: TEST_FILE_EXISTS required but no test files "
+                            "in output_artifacts — failing fast (#247)",
+                            node_id,
                         )
-                        if not has_test_files:
-                            logger.warning(
-                                "Node %s: TESTS_PASS required but no test files "
-                                "in output_artifacts — failing fast (#247)",
-                                node_id,
-                            )
-                            node.eval_feedback = (
-                                f"EVALUATION FAILED: You were required to create test "
-                                f"files, but none were found in your output.\n"
-                                f"Output artifacts: {node.output_artifacts}\n\n"
-                                f"You MUST create test files (e.g., test_*.py) for "
-                                f"your implementation. Create them using the write "
-                                f"tool BEFORE finishing.\n"
-                                f"Focus on: functional tests, edge cases, import "
-                                f"validation. Each source module should have a "
-                                f"corresponding test file."
-                            )
-                            node.error = "No test files created (TESTS_PASS required)"
-                            node.status = NodeStatus.FAILED
-                            node.completed_at = datetime.now(timezone.utc)
-                            await self._emit(ExecutionEvent(
-                                node_id=node_id,
-                                event_type="failed",
-                                details={
-                                    "reason": "no_test_files",
-                                    "artifacts": node.output_artifacts,
+                        node.eval_feedback = (
+                            f"EVALUATION FAILED: You were required to create test "
+                            f"files, but none were found in your output.\n"
+                            f"Output artifacts: {node.output_artifacts}\n\n"
+                            f"You MUST create test files (e.g., test_*.py) for "
+                            f"your implementation. Create them using the write "
+                            f"tool BEFORE finishing.\n"
+                            f"Focus on: functional tests, edge cases, import "
+                            f"validation. Each source module should have a "
+                            f"corresponding test file."
+                        )
+                        node.error = "No test files created (TEST_FILE_EXISTS required)"
+                        node.status = NodeStatus.FAILED
+                        node.completed_at = datetime.now(timezone.utc)
+                        await self._emit(ExecutionEvent(
+                            node_id=node_id,
+                            event_type="failed",
+                            details={
+                                "reason": "no_test_files",
+                                "artifacts": node.output_artifacts,
                             },
                         ))
                         return
