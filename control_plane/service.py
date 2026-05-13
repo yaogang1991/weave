@@ -44,6 +44,8 @@ from evaluator.engine import EvaluatorEngine
 
 from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
 from control_plane.repository import JobRepository
+from control_plane.run_lifecycle import RunLifecycleManager
+from control_plane.job_result import JobResultWriter
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +142,10 @@ class RunService:
 
         self.default_backend = default_backend
         self.backend_base_path = backend_base_path
+
+        # Extracted collaborators (#177 PR 1)
+        self._lifecycle = RunLifecycleManager(repository)
+        self._result_writer = JobResultWriter(artifact_path)
 
     # ------------------------------------------------------------------
     # Public API — Job lifecycle
@@ -288,33 +294,22 @@ class RunService:
             )
             summary = engine.get_execution_summary(result_dag)
 
-            # Determine final status
+            # Determine final status via lifecycle manager
             if summary.get("all_succeeded", False):
-                run.status = RunStatus.SUCCEEDED
+                run = self._lifecycle.mark_succeeded(run, summary)
                 job_status = JobStatus.SUCCEEDED
             else:
-                run.status = RunStatus.FAILED
+                run = self._lifecycle.mark_failed(run, summary)
                 job_status = JobStatus.FAILED
-
-            run.dag_result = summary
-            run.completed_at = _utc_now()
-
-            # Persist run
-            self.repository.update_run(run)
 
             # Transition job to final state unless externally canceled/requeued.
             current_job = self.repository.get_job(job_id)
-            if current_job and current_job.status != JobStatus.RUNNING:
-                run.status = (
-                    RunStatus.CANCELED
-                    if current_job.status == JobStatus.CANCELED
-                    else RunStatus.FAILED
-                )
-                run.completed_at = _utc_now()
-                self.repository.update_run(run)
-                if work_dir is not None:
-                    backend_manager.preserve(job.id, run.id, reason="external_status_change")
-                return self.repository.get_run(run.id) or run
+            if current_job:
+                resolved = self._lifecycle.resolve_external_status(run, current_job)
+                if resolved:
+                    if work_dir is not None:
+                        backend_manager.preserve(job.id, run.id, reason="external_status_change")
+                    return self.repository.get_run(run.id) or run
 
             error_msg = ""
             error_cat = ""
@@ -361,16 +356,10 @@ class RunService:
             # --- Timeout handling ---
             current_job = self.repository.get_job(job_id)
             if current_job and current_job.status == JobStatus.CANCELED:
-                run.status = RunStatus.CANCELED
-                run.completed_at = _utc_now()
-                run.dag_result = {"error": "canceled", "reason": "Job canceled during execution"}
-                self.repository.update_run(run)
+                run = self._lifecycle.mark_canceled(run, "Job canceled during execution")
                 return self.repository.get_run(run.id) or run
 
-            run.status = RunStatus.TIMED_OUT
-            run.completed_at = _utc_now()
-            run.dag_result = {"error": "timeout", "reason": f"Exceeded {timeout}s"}
-            self.repository.update_run(run)
+            run = self._lifecycle.mark_timed_out(run, timeout)
 
             # Must transition RUNNING -> FAILED before handle_job_failure
             # (FAILED -> QUEUED/DEAD_LETTER is legal)
@@ -390,10 +379,7 @@ class RunService:
                     pass
 
         except asyncio.CancelledError:
-            run.status = RunStatus.CANCELED
-            run.completed_at = _utc_now()
-            run.dag_result = {"error": "canceled", "reason": "Run coroutine canceled"}
-            self.repository.update_run(run)
+            run = self._lifecycle.mark_canceled(run, "Run coroutine canceled")
             current_job = self.repository.get_job(job_id)
             if current_job and current_job.status == JobStatus.RUNNING:
                 self.repository.transition_job_status(
@@ -408,12 +394,7 @@ class RunService:
 
         except PendingApprovalError as exc:
             # --- Approval required: pause execution, do NOT cleanup/preserve ---
-            run.status = RunStatus.PENDING_APPROVAL
-            run.dag_result = {
-                "status": "pending_approval",
-                "ticket_id": exc.ticket_id,
-            }
-            self.repository.update_run(run)
+            run = self._lifecycle.mark_pending_approval(run, exc.ticket_id)
             # Re-raise so Worker can enter PENDING_APPROVAL poll loop.
             raise
 
@@ -421,19 +402,13 @@ class RunService:
             # --- Unexpected error handling ---
             current_job = self.repository.get_job(job_id)
             if current_job and current_job.status == JobStatus.CANCELED:
-                run.status = RunStatus.CANCELED
-                run.completed_at = _utc_now()
-                run.dag_result = {"error": "canceled", "reason": "Job canceled during execution"}
-                self.repository.update_run(run)
+                run = self._lifecycle.mark_canceled(run, "Job canceled during execution")
                 return self.repository.get_run(run.id) or run
 
             error_msg = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
             error_cat = _classify_error(str(exc))
 
-            run.status = RunStatus.FAILED
-            run.completed_at = _utc_now()
-            run.dag_result = {"error": "execution_error", "reason": str(exc)}
-            self.repository.update_run(run)
+            run = self._lifecycle.mark_failed(run, {"error": "execution_error", "reason": str(exc)})
 
             # Must transition RUNNING -> FAILED before handle_job_failure
             self.repository.transition_job_status(
@@ -458,7 +433,7 @@ class RunService:
                 final_run = self.repository.get_run(run.id)
                 if final_job and final_run:
                     summary = final_run.dag_result or {}
-                    self._generate_job_result(final_job, final_run, summary)
+                    self._result_writer.generate(final_job, final_run, summary)
             except Exception:
                 pass  # Job result generation must not mask original error
 
@@ -678,52 +653,6 @@ class RunService:
             "details": details,
         }
         print(json.dumps(event), flush=True)
-
-    def _generate_job_result(
-        self,
-        job: Job,
-        run: Run,
-        summary: dict[str, Any],
-    ) -> dict[str, Any]:
-        """Generate a standardized job_result.json artifact."""
-        result = {
-            "job": {
-                "id": job.id,
-                "requirement": job.requirement,
-                "project_path": job.project_path,
-                "attempt": job.attempt,
-            },
-            "run": {
-                "id": run.id,
-                "session_id": run.session_id,
-                "status": run.status.value,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-            },
-            "dag": summary,
-            "approvals": [],
-            "artifacts": [],
-            "errors": [],
-            "timestamps": {
-                "created_at": job.created_at.isoformat(),
-                "updated_at": job.updated_at.isoformat(),
-            },
-        }
-
-        if job.last_error:
-            result["errors"].append({
-                "message": job.last_error,
-                "category": job.error_category,
-            })
-
-        # Write to artifact path
-        artifact_dir = Path(self.artifact_path) / job.id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        result_path = artifact_dir / "job_result.json"
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, default=str, ensure_ascii=False)
-
-        return result
 
     # ------------------------------------------------------------------
     # Internal helpers
