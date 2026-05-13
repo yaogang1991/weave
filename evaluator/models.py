@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CheckSeverity(str, Enum):
@@ -37,4 +37,4 @@ class CheckResult(BaseModel):
     passed: bool
     message: str
     severity: CheckSeverity = CheckSeverity.NORMAL
-    metadata: dict[str, Any] = {}
+    metadata: dict[str, Any] = Field(default_factory=dict)

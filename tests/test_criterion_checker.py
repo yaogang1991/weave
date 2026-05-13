@@ -54,6 +54,13 @@ class TestCheckResult:
         )
         assert r.metadata["issues"] == 0
 
+    def test_metadata_isolation_between_instances(self):
+        """Two default-constructed CheckResults must not share metadata dict."""
+        r1 = CheckResult(passed=True, message="first")
+        r2 = CheckResult(passed=False, message="second")
+        r1.metadata["key"] = "value"
+        assert "key" not in r2.metadata
+
 
 class TestCheckerRegistration:
     def test_register_and_dispatch(self):
