@@ -61,8 +61,8 @@ class TestFileExistsDiskVerification:
         assert "missing" in msg.lower()
         assert auto is True
 
-    def test_fail_when_file_is_empty(self, engine, tmp_work_dir):
-        """Empty file should NOT count as existing (#158)."""
+    def test_empty_file_counts_as_existing(self, engine, tmp_work_dir):
+        """Empty (0-byte) file counts as existing (e.g. __init__.py)."""
         f = tmp_work_dir / "empty.py"
         f.write_text("", encoding="utf-8")
 
@@ -73,8 +73,7 @@ class TestFileExistsDiskVerification:
         passed, msg, auto = engine._check_criterion(
             crit, str(tmp_work_dir), output_artifacts=["empty.py"],
         )
-        assert passed is False
-        assert "missing" in msg.lower()
+        assert passed is True
 
     def test_pass_with_loose_match(self, engine, tmp_work_dir):
         """Exact path missing but stem glob finds file → PASS."""

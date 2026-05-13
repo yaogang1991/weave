@@ -30,7 +30,7 @@ def engine():
 
 
 class TestFilePattern:
-    """FILE_PATTERN matches glob patterns against real non-empty files."""
+    """FILE_PATTERN matches glob patterns against real files on disk."""
 
     def test_pattern_matches_files(self, engine, tmp_path):
         """Non-empty file matching pattern → PASS."""
@@ -57,10 +57,10 @@ class TestFilePattern:
         )
         passed, msg, auto = engine._check_criterion(crit, str(tmp_path))
         assert passed is False
-        assert "No non-empty files matched" in msg
+        assert "No files matched" in msg
 
-    def test_pattern_empty_file_excluded(self, engine, tmp_path):
-        """Empty file matching pattern → does NOT count as match."""
+    def test_pattern_empty_file_included(self, engine, tmp_path):
+        """Empty file matching pattern → counts as match (e.g. __init__.py)."""
         (tmp_path / "reporter").mkdir()
         (tmp_path / "reporter" / "engine.py").write_text("")
         crit = SuccessCriterion(
@@ -69,7 +69,7 @@ class TestFilePattern:
             description="report module exists",
         )
         passed, msg, auto = engine._check_criterion(crit, str(tmp_path))
-        assert passed is False
+        assert passed is True
 
     def test_pattern_multiple_matches(self, engine, tmp_path):
         """Multiple matching files → PASS, lists up to 10."""

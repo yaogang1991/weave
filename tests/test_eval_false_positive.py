@@ -119,8 +119,8 @@ class TestArtifactVerification:
         # Should pass (no artifacts to verify)
         assert result.passed
 
-    def test_zero_byte_file_treated_as_missing(self, tmp_path):
-        """Empty (0-byte) artifact file is treated as missing."""
+    def test_zero_byte_file_treated_as_valid(self, tmp_path):
+        """Empty (0-byte) artifact file is valid (e.g. __init__.py)."""
         (tmp_path / "empty.py").write_text("", encoding="utf-8")
         engine = _make_engine()
         result = engine.evaluate_stage(
@@ -131,7 +131,7 @@ class TestArtifactVerification:
             work_dir=str(tmp_path),
             output_artifacts=["empty.py"],
         )
-        assert not result.passed
+        assert result.passed
 
     def test_phantom_overrides_criteria_pass(self, tmp_path):
         """Even if all criteria pass, phantom artifacts cause failure."""

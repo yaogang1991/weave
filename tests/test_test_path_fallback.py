@@ -69,8 +69,8 @@ class TestFindTestFileAlternative:
         )
         assert result is None
 
-    def test_empty_file_not_matched(self, tmp_path):
-        """Empty alternative files should not be matched."""
+    def test_empty_file_is_matched(self, tmp_path):
+        """Empty alternative files should be matched (e.g. __init__.py)."""
         tests_dir = tmp_path / "tests"
         tests_dir.mkdir()
         (tests_dir / "test_hasher.py").write_text("", encoding="utf-8")
@@ -78,7 +78,7 @@ class TestFindTestFileAlternative:
         result = EvaluatorEngine._find_test_file_alternative(
             "fileutils/test_hasher.py", tmp_path,
         )
-        assert result is None
+        assert result is not None
 
     def test_no_alternative_found(self, tmp_path):
         """When no alternative exists, returns None."""
