@@ -159,6 +159,7 @@ class EvaluatorEngine:
     ) -> EvaluationResult:
         """Evaluate a stage against its success criteria."""
         eval_dir = work_dir or artifact_path
+        eval_id = f"{session_id}_{stage_name}"
 
         self.session_store.emit_event(
             session_id,
@@ -175,7 +176,7 @@ class EvaluatorEngine:
         uncheckable: list[str] = []
 
         for crit in structured:
-            passed, msg, auto = self._check_criterion(crit, eval_dir, output_artifacts)
+            passed, msg, auto = self._check_criterion(crit, eval_dir, output_artifacts, eval_id)
             label = crit.description or crit.path or crit.test_path or crit.type.value
             results[label] = passed
             if crit.type in self.HARD_CRITERIA:
@@ -333,6 +334,7 @@ class EvaluatorEngine:
         crit: SuccessCriterion,
         work_dir: str,
         output_artifacts: list[str] | None = None,
+        eval_id: str = "",
     ) -> tuple[bool, str, bool]:
         if crit.type == CriterionType.TESTS_PASS:
             test_targets = None
@@ -345,7 +347,7 @@ class EvaluatorEngine:
                     "No test files found to run — tests not verified. "
                     "Consider adding test files or adjusting criteria."
                 ), False
-            passed, msg = self._run_tests(Path(work_dir), test_targets)
+            passed, msg = self._run_tests(Path(work_dir), test_targets, eval_id)
             return passed, msg, True
 
         if crit.type == CriterionType.LINT:
@@ -432,7 +434,7 @@ class EvaluatorEngine:
         if crit.type == CriterionType.COVERAGE:
             target = int(crit.target) if crit.target else 80
             return self._check_coverage(
-                Path(work_dir), target, output_artifacts,
+                Path(work_dir), target, output_artifacts, eval_id,
             )
 
         if crit.type == CriterionType.NO_CRITICAL:
@@ -464,6 +466,27 @@ class EvaluatorEngine:
     # ------------------------------------------------------------------
     # Internal checkers — all return 2-tuple (bool, str)
     # ------------------------------------------------------------------
+    @staticmethod
+    def _safe_eval_id(eval_id: str) -> str:
+        """Sanitize eval_id for use as a filename component."""
+        import re as _re
+        return _re.sub(r"[^a-zA-Z0-9_\-]", "_", eval_id)
+
+    def _isolated_env(self, eval_id: str = "", work_dir: Path | None = None) -> dict[str, str]:
+        """Build env with a unique COVERAGE_FILE to prevent parallel node contention (#260).
+
+        Uses an absolute path so that coverage data is written to the work
+        directory regardless of the subprocess cwd.
+        """
+        import os
+        env = os.environ.copy()
+        if eval_id:
+            safe_id = self._safe_eval_id(eval_id)
+            if work_dir:
+                env["COVERAGE_FILE"] = str(work_dir / f".coverage.{safe_id}")
+            else:
+                env["COVERAGE_FILE"] = f".coverage.{safe_id}"
+        return env
 
     def _find_test_files(
         self,
@@ -510,7 +533,7 @@ class EvaluatorEngine:
 
         return test_files
 
-    def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None) -> tuple[bool, str]:
+    def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None, eval_id: str = "") -> tuple[bool, str]:
         """Run pytest with a fixed command. Never executes arbitrary commands."""
         try:
             cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
@@ -525,6 +548,7 @@ class EvaluatorEngine:
                 encoding="utf-8", errors="replace",
                 timeout=60,
                 cwd=str(work_dir) if work_dir.is_dir() else None,
+                env=self._isolated_env(eval_id, work_dir),
             )
             passed = result.returncode == 0
             if passed:
@@ -797,6 +821,7 @@ class EvaluatorEngine:
         work_dir: Path,
         target: int,
         output_artifacts: list[str] | None = None,
+        eval_id: str = "",
     ) -> tuple[bool, str, bool]:
         """Check test coverage against target percentage.
 
@@ -853,6 +878,7 @@ class EvaluatorEngine:
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=60,
                 cwd=str(work_dir) if work_dir.is_dir() else None,
+                env=self._isolated_env(eval_id, work_dir),
             )
 
             # Parse TOTAL line via regex — handles both compact and wide formats:
