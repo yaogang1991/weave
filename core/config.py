@@ -64,6 +64,11 @@ class LLMConfig(BaseModel):
     max_tokens: int = 4096
     temperature: float = 0.3
     timeout: int = 120
+    # Maximum concurrent API calls across all parallel nodes (#300).
+    # When unset (0/None), no limit.  Set to 3-5 for rate-limited APIs.
+    max_concurrent_api: int = Field(
+        default_factory=lambda: int(os.getenv("HARNESS_MAX_CONCURRENT_API", "0"))
+    )
 
 
 class SandboxConfig(BaseModel):

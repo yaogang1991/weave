@@ -7,12 +7,17 @@ AgentWorker internals.
 
 Includes built-in retry with exponential backoff for transient errors
 (rate limits, timeouts, connection issues) — transparent to all callers.
+
+For parallel DAG nodes sharing one process, a global semaphore limits
+concurrent API calls to prevent rate-limiting (#300).
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -21,10 +26,38 @@ from openai import OpenAI
 
 from core.config import LLMConfig
 
+logger = logging.getLogger(__name__)
+
 # Transient error name fragments that warrant retry
 _TRANSIENT_MARKERS = frozenset(
     ("rate", "timeout", "connection", "overload", "429", "503", "502", "ratelimit")
 )
+
+# Process-global semaphore to limit concurrent API calls across all
+# parallel DAG nodes (#300).  Initialized on first use.
+_global_api_semaphore: threading.Semaphore | None = None
+_semaphore_lock = threading.Lock()
+
+
+def _get_api_semaphore(max_concurrent: int) -> threading.Semaphore | None:
+    """Get or create the global API semaphore.
+
+    Returns None when max_concurrent <= 0 (no limit).
+    Thread-safe: only creates once.
+    """
+    global _global_api_semaphore
+    if max_concurrent <= 0:
+        return None
+    if _global_api_semaphore is not None:
+        return _global_api_semaphore
+    with _semaphore_lock:
+        if _global_api_semaphore is None:
+            _global_api_semaphore = threading.Semaphore(max_concurrent)
+            logger.info(
+                "API concurrency limit: %d concurrent requests (#300)",
+                max_concurrent,
+            )
+    return _global_api_semaphore
 
 
 class LLMClient:
@@ -107,7 +140,21 @@ class LLMClient:
     def _call_once(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> dict:
-        """Single LLM call — no retry."""
+        """Single LLM call — no retry. Acquires global semaphore if configured (#300)."""
+        sem = _get_api_semaphore(self.config.max_concurrent_api)
+        if sem is not None:
+            logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
+            sem.acquire()
+            try:
+                return self._do_call(messages, tools)
+            finally:
+                sem.release()
+        return self._do_call(messages, tools)
+
+    def _do_call(
+        self, messages: list[dict], tools: list[dict] | None = None
+    ) -> dict:
+        """Dispatch to provider-specific call."""
         if self.config.provider == "anthropic":
             return self._call_anthropic(messages, tools or [])
         else:
