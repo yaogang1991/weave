@@ -168,6 +168,7 @@ class FileExistsChecker:
         context: EvaluationContext,
     ) -> CheckResult:
         work_dir = context.work_dir
+        output_artifacts = context.artifacts
         pattern = crit.pattern or crit.path
         if not pattern:
             return CheckResult(
@@ -184,11 +185,48 @@ class FileExistsChecker:
 
         files = [m for m in matches if m.is_file()]
 
+        # Cross-reference against output_artifacts to avoid false PASS from
+        # pre-existing files (#332). When output_artifacts is available,
+        # at least one matched file must be in the node's own output.
+        if output_artifacts and files:
+            owned = self._filter_owned(files, output_artifacts, work_dir)
+            if not owned:
+                # All matches are pre-existing files from other nodes/harness
+                rel_preexisting = []
+                for f in files[:5]:
+                    try:
+                        rel_preexisting.append(str(f.relative_to(work_dir)))
+                    except ValueError:
+                        rel_preexisting.append(str(f))
+                return CheckResult(
+                    passed=False,
+                    message=(
+                        f"Pattern '{pattern}' matched {len(files)} pre-existing "
+                        f"file(s) but NONE were created by this node: "
+                        f"{rel_preexisting}. Output artifacts: {output_artifacts}"
+                    ),
+                )
+            # Report only owned files
+            files = owned
+
         if not files:
             alt = self._try_stdlib_rename(pattern, work_dir)
             if alt:
                 alt_files = [m for m in work_dir.glob(alt) if m.is_file()]
                 if alt_files:
+                    # Also check ownership for renamed pattern
+                    if output_artifacts:
+                        owned = self._filter_owned(alt_files, output_artifacts, work_dir)
+                        if not owned:
+                            return CheckResult(
+                                passed=False,
+                                message=(
+                                    f"Renamed pattern '{alt}' matched {len(alt_files)} "
+                                    f"pre-existing file(s) but NONE were created by this node. "
+                                    f"Output artifacts: {output_artifacts}"
+                                ),
+                            )
+                        alt_files = owned
                     rel = [
                         str(f.relative_to(work_dir))
                         for f in alt_files[:10] if f.is_file()
@@ -219,6 +257,39 @@ class FileExistsChecker:
                 f"{rel_names}"
             ),
         )
+
+    @staticmethod
+    def _filter_owned(
+        files: list[Path],
+        output_artifacts: list[str],
+        work_dir: Path,
+    ) -> list[Path]:
+        """Filter matched files to only those in output_artifacts (#332).
+
+        Compares relative paths so that absolute artifacts and glob results
+        can be matched correctly.
+        """
+        # Normalize output_artifacts to relative paths
+        owned_rels: set[str] = set()
+        for art in output_artifacts:
+            p = Path(art)
+            if p.is_absolute():
+                try:
+                    owned_rels.add(str(p.relative_to(work_dir)))
+                except ValueError:
+                    owned_rels.add(art)
+            else:
+                owned_rels.add(art)
+
+        owned = []
+        for f in files:
+            try:
+                rel = str(f.relative_to(work_dir))
+            except ValueError:
+                rel = str(f)
+            if rel in owned_rels or any(rel.endswith("/" + a) for a in owned_rels):
+                owned.append(f)
+        return owned
 
     # ------------------------------------------------------------------
     # TEST_FILE_EXISTS
