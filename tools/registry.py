@@ -292,6 +292,24 @@ class ToolRegistry:
                     tool_call_id="", success=False,
                     error="file_path is required and cannot be empty",
                 )
+
+            # Syntax validation for Python files before writing (#321).
+            # Catches unterminated strings, invalid syntax, etc. before
+            # the file hits disk, preventing import failures downstream.
+            if file_path.endswith(".py") and content.strip():
+                try:
+                    compile(content, file_path, "exec")
+                except SyntaxError as e:
+                    return ToolResult(
+                        tool_call_id="", success=False,
+                        error=(
+                            f"SyntaxError in {file_path}: line {e.lineno}: {e.msg}. "
+                            f"Fix the syntax error before writing. "
+                            f"Common causes: unterminated string literal, "
+                            f"missing colon, mismatched brackets."
+                        ),
+                    )
+
             path = self._resolve_path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
