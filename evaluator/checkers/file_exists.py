@@ -29,7 +29,7 @@ class FileExistsChecker:
             return self._check_file_pattern(criterion, context)
         if ct == CriterionType.TEST_FILE_EXISTS:
             return self._check_test_file_exists(criterion, context)
-        return CheckResult(passed=True, message="Unhandled criterion type")
+        return CheckResult(passed=False, message=f"Unhandled criterion type: {ct}")
 
     # ------------------------------------------------------------------
     # FILE_EXISTS
