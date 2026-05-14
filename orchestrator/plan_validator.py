@@ -176,24 +176,58 @@ class PlanValidator:
     _RENAMING_PREFIXES = ("app_", "my_", "")
 
     def _check_stdlib_shadowing(self, nodes: list[dict]) -> None:
-        """Warn if task descriptions reference stdlib module names as packages.
+        """Warn if task descriptions intend to create packages that shadow stdlib.
 
-        Detects patterns like "create a urllib library" or quoted module names
-        where the name matches a Python stdlib module.  Builds ``rename_map``
-        so callers (e.g. the orchestrator) can update criterion paths.
+        Only flags when the task explicitly mentions creating/naming a file or
+        module with a stdlib name (e.g. "create a module named 'json'"). Does NOT
+        flag mere references to using stdlib modules (e.g. "use json.dumps").
+        Builds ``rename_map`` so callers can update criterion paths.
         """
         for node in nodes:
             task = node.get("task", "")
             if not task:
                 continue
-            # Extract potential package names from task descriptions
-            candidates = set(re.findall(r'["\'](\w+)["\']', task))
-            for prefix in ("library", "module", "package", "named", "called"):
-                candidates.update(
-                    re.findall(
-                        rf"{prefix}\s+(\w+)", task, re.IGNORECASE,
-                    )
+            # Only match creation patterns — verbs that indicate the task will
+            # CREATE a file/module/package with this name. This avoids false
+            # positives from "use json", "import from collections", etc.
+            candidates = set()
+            # "create/named/called 'json'" — quoted name after creation verb
+            candidates.update(
+                re.findall(
+                    r'(?:create|build|implement|define|name|call)\w*\s+'
+                    r'(?:a\s+)?(?:file|module|package|library)\s+'
+                    r'(?:named|called)\s+["\'](\w+)["\']',
+                    task, re.IGNORECASE,
                 )
+            )
+            # "named 'json'" / "called 'json'" — explicit naming
+            candidates.update(
+                re.findall(
+                    r'(?:named|called)\s+["\'](\w+)["\']',
+                    task, re.IGNORECASE,
+                )
+            )
+            # "module/package/library named json" (unquoted)
+            candidates.update(
+                re.findall(
+                    r'(?:module|package|library)\s+(?:named|called)\s+(\w+)',
+                    task, re.IGNORECASE,
+                )
+            )
+            # "create a json module" — direct creation pattern
+            candidates.update(
+                re.findall(
+                    r'(?:create|build|implement|define)\w*\s+an?\s+(\w+)\s+'
+                    r'(?:module|package|library|\.py)',
+                    task, re.IGNORECASE,
+                )
+            )
+            # "file named json.py" or "json.py file"
+            candidates.update(
+                re.findall(
+                    r'(\w+)\.py\b', task,
+                )
+            )
 
             for candidate in candidates:
                 conflict = check_stdlib_conflict(candidate)
