@@ -6,6 +6,8 @@ Enhanced with:
 - Context window management (token estimation + message truncation)
 - API retry with exponential backoff for transient errors
 - Artifact tracking (files created/modified via write/edit tools)
+- Auto-retry for empty tool call args (#282)
+- Circuit breaker for consecutive empty iterations (#290)
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from typing import Iterator
 
 import json
 import logging
+import uuid
 
 from core.models import AgentMessage, ToolCall, ToolResult, EventType
 from core.config import LLMConfig
@@ -47,6 +50,12 @@ TOOL_NON_EMPTY_ARGS: dict[str, list[str]] = {
 # Circuit breaker: consecutive iterations where ALL tool calls have missing/blank
 # args trigger a forced exit to prevent infinite loops (#290).
 EMPTY_TOOL_CALL_LIMIT = 10
+
+# Auto-retry: when ALL tool calls in a single LLM response have missing/blank
+# args, re-request the LLM before advancing to the next iteration (#282).
+# Prevents cascading failures in parallel execution where some models produce
+# empty args under concurrent load.
+EMPTY_CALL_MAX_RETRIES = 3
 
 
 class AgentWorker:
@@ -99,102 +108,51 @@ class AgentWorker:
             # Truncate context if exceeding token budget
             messages = self._truncate_messages(messages, self.max_context_tokens)
 
-            # Call LLM with retry for transient errors (handled in LLMClient)
-            assistant_message = self.llm.call(messages, tools)
+            # Call LLM with auto-retry for empty tool call args (#282).
+            # When ALL tool calls have missing/blank args, re-request the LLM
+            # (up to EMPTY_CALL_MAX_RETRIES) before counting as an empty iteration.
+            tool_results: list[dict] = []
+            any_tool_executed = False
+            assistant_message: dict = {}
 
-            self.session_store.emit_event(
-                session_id,
-                EventType.AGENT_MESSAGE,
-                assistant_message,
-            )
+            for llm_attempt in range(EMPTY_CALL_MAX_RETRIES + 1):
+                assistant_message = self.llm.call(messages, tools)
 
-            if "tool_calls" not in assistant_message or not assistant_message["tool_calls"]:
-                yield AgentMessage(role="assistant", content=assistant_message.get("content", ""))
-                break
+                self.session_store.emit_event(
+                    session_id,
+                    EventType.AGENT_MESSAGE,
+                    assistant_message,
+                )
 
+                if "tool_calls" not in assistant_message or not assistant_message["tool_calls"]:
+                    yield AgentMessage(role="assistant", content=assistant_message.get("content", ""))
+                    return  # No tool calls → done
+
+                tool_results, any_tool_executed = self._execute_tool_calls(
+                    assistant_message, session_id, tool_executor,
+                )
+
+                if any_tool_executed:
+                    break  # At least one valid tool call → proceed normally
+
+                # All tool calls were invalid — retry LLM if attempts remain (#282)
+                if llm_attempt < EMPTY_CALL_MAX_RETRIES:
+                    logger.warning(
+                        "All tool calls invalid (LLM retry %d/%d), re-requesting (#282)",
+                        llm_attempt + 1, EMPTY_CALL_MAX_RETRIES,
+                    )
+                    # Feed back error results so LLM can correct itself
+                    messages.append(assistant_message)
+                    messages.extend(tool_results)
+                    tool_results = []
+                # else: exhausted retries → fall through to circuit breaker
+
+            # Yield the final assistant message (after any retries)
             yield AgentMessage(
                 role="assistant",
                 content=assistant_message.get("content", ""),
                 tool_calls=[ToolCall(**tc) for tc in assistant_message["tool_calls"]],
             )
-
-            # Execute tool calls
-            tool_results = []
-            any_tool_executed = False  # Track if any tool passed validation (#290)
-            for tc in assistant_message["tool_calls"]:
-                # Defensive: ensure tool_call_id is present (#169)
-                tool_call_id = tc.get("id") or ""
-                if not tool_call_id.strip():
-                    import uuid
-                    tool_call_id = f"tool_{uuid.uuid4().hex[:8]}"
-                    tc["id"] = tool_call_id
-
-                self.session_store.emit_event(
-                    session_id,
-                    EventType.AGENT_TOOL_USE,
-                    tc,
-                )
-
-                # Validate required arguments before execution (#215)
-                tool_name = tc["name"]
-                args = tc.get("arguments", {})
-                required = TOOL_REQUIRED_ARGS.get(tool_name, [])
-                missing = [k for k in required if k not in args or args[k] is None]
-
-                if missing:
-                    error_content = (
-                        f"Error: '{tool_name}' tool is missing required argument(s): "
-                        f"{', '.join(missing)}. "
-                        f"Your call had arguments: {json.dumps(args)}. "
-                        f"Please retry with all required arguments."
-                    )
-                    self._append_invalid_tool_result(
-                        session_id, tool_call_id, tool_name, error_content, tool_results,
-                    )
-                    logger.warning("Tool %s called with missing args: %s", tool_name, missing)
-                    continue
-
-                # Tool-specific empty-string validation (#215).
-                # Some fields (bash.command, read.file_path, grep.pattern) must
-                # not be blank — unlike write.content or edit.new_string which
-                # are legitimately empty strings.
-                non_empty = TOOL_NON_EMPTY_ARGS.get(tool_name, [])
-                blank = [k for k in non_empty if isinstance(args.get(k), str) and args[k].strip() == ""]
-                if blank:
-                    error_content = (
-                        f"Error: '{tool_name}' tool argument(s) "
-                        f"{', '.join(blank)} must not be empty/blank. "
-                        f"Please retry with non-empty values."
-                    )
-                    self._append_invalid_tool_result(
-                        session_id, tool_call_id, tool_name, error_content, tool_results,
-                    )
-                    logger.warning("Tool %s called with blank args: %s", tool_name, blank)
-                    continue
-
-                result = tool_executor.execute(tool_name, args)
-                any_tool_executed = True
-                tool_results.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": result.output if result.success else f"Error: {result.error}",
-                })
-
-                # Track artifacts from successful write/edit calls
-                if result.success:
-                    self._track_artifact(tc["name"], tc.get("arguments", {}))
-
-                self.session_store.emit_event(
-                    session_id,
-                    EventType.AGENT_TOOL_RESULT,
-                    {
-                        "tool_call_id": tool_call_id,
-                        "success": result.success,
-                        "output": result.output,
-                        "error": result.error,
-                        "duration_ms": result.duration_ms,
-                    },
-                )
 
             messages.append(assistant_message)
             messages.extend(tool_results)
@@ -231,6 +189,92 @@ class AgentWorker:
                     },
                 )
                 break
+
+    def _execute_tool_calls(
+        self,
+        assistant_message: dict,
+        session_id: str,
+        tool_executor,
+    ) -> tuple[list[dict], bool]:
+        """Validate and execute tool calls from an LLM response.
+
+        Returns (tool_results, any_tool_executed).
+        """
+        tool_results: list[dict] = []
+        any_tool_executed = False
+
+        for tc in assistant_message["tool_calls"]:
+            # Defensive: ensure tool_call_id is present (#169)
+            tool_call_id = tc.get("id") or ""
+            if not tool_call_id.strip():
+                tool_call_id = f"tool_{uuid.uuid4().hex[:8]}"
+                tc["id"] = tool_call_id
+
+            self.session_store.emit_event(
+                session_id,
+                EventType.AGENT_TOOL_USE,
+                tc,
+            )
+
+            # Validate required arguments before execution (#215)
+            tool_name = tc["name"]
+            args = tc.get("arguments", {})
+            required = TOOL_REQUIRED_ARGS.get(tool_name, [])
+            missing = [k for k in required if k not in args or args[k] is None]
+
+            if missing:
+                error_content = (
+                    f"Error: '{tool_name}' tool is missing required argument(s): "
+                    f"{', '.join(missing)}. "
+                    f"Your call had arguments: {json.dumps(args)}. "
+                    f"Please retry with all required arguments."
+                )
+                self._append_invalid_tool_result(
+                    session_id, tool_call_id, tool_name, error_content, tool_results,
+                )
+                logger.warning("Tool %s called with missing args: %s", tool_name, missing)
+                continue
+
+            # Tool-specific empty-string validation (#215).
+            non_empty = TOOL_NON_EMPTY_ARGS.get(tool_name, [])
+            blank = [k for k in non_empty if isinstance(args.get(k), str) and args[k].strip() == ""]
+            if blank:
+                error_content = (
+                    f"Error: '{tool_name}' tool argument(s) "
+                    f"{', '.join(blank)} must not be empty/blank. "
+                    f"Please retry with non-empty values."
+                )
+                self._append_invalid_tool_result(
+                    session_id, tool_call_id, tool_name, error_content, tool_results,
+                )
+                logger.warning("Tool %s called with blank args: %s", tool_name, blank)
+                continue
+
+            result = tool_executor.execute(tool_name, args)
+            any_tool_executed = True
+            tool_results.append({
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result.output if result.success else f"Error: {result.error}",
+            })
+
+            # Track artifacts from successful write/edit calls
+            if result.success:
+                self._track_artifact(tc["name"], tc.get("arguments", {}))
+
+            self.session_store.emit_event(
+                session_id,
+                EventType.AGENT_TOOL_RESULT,
+                {
+                    "tool_call_id": tool_call_id,
+                    "success": result.success,
+                    "output": result.output,
+                    "error": result.error,
+                    "duration_ms": result.duration_ms,
+                },
+            )
+
+        return tool_results, any_tool_executed
 
     def _append_invalid_tool_result(
         self,

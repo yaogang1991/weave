@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 from core.models import ToolResult, EventType
 from core.config import LLMConfig
-from agent.worker import AgentWorker, EMPTY_TOOL_CALL_LIMIT
+from agent.worker import AgentWorker, EMPTY_TOOL_CALL_LIMIT, EMPTY_CALL_MAX_RETRIES
 
 
 @pytest.fixture
@@ -73,34 +73,39 @@ class TestEmptyToolCallBreaker:
     def test_resets_on_successful_tool_call(self, worker, mock_tool_executor):
         """Counter resets when at least one tool call is valid.
 
-        Pattern: 9 invalid → 1 valid → 9 invalid → text response
-        Total: 19 iterations, well under max_iterations=100.
-        Without reset, the second batch of 9 would trigger the breaker at
-        iteration 10.
+        With auto-retry (#282), each empty iteration consumes
+        (EMPTY_CALL_MAX_RETRIES + 1) = 4 LLM calls internally
+        before advancing to the next outer iteration.
+
+        Pattern (outer iterations): 2 empty → 1 valid → 2 empty → text
+        Empty iterations consume 4 LLM calls each internally.
         """
-        # Build sequence: 9 empty, 1 valid, 9 empty, 1 text-only
         responses = []
-        for _ in range(9):
+        # 2 empty outer iterations (4 LLM calls each = 8)
+        for _ in range(2 * (EMPTY_CALL_MAX_RETRIES + 1)):
             responses.append({
                 "role": "assistant", "content": "",
                 "tool_calls": [_empty_bash_call()],
             })
+        # 1 valid outer iteration (1 LLM call)
         responses.append({
             "role": "assistant", "content": "",
             "tool_calls": [_valid_bash_call()],
         })
-        for _ in range(9):
+        # 2 empty outer iterations (4 LLM calls each = 8)
+        for _ in range(2 * (EMPTY_CALL_MAX_RETRIES + 1)):
             responses.append({
                 "role": "assistant", "content": "",
                 "tool_calls": [_empty_bash_call()],
             })
+        # Text-only response
         responses.append({"role": "assistant", "content": "done"})
 
         worker.llm.call = MagicMock(side_effect=responses)
         msgs = list(worker.run("s1", "sys", "do it", [], mock_tool_executor, max_iterations=100))
 
-        # Should get all 19 tool-call iterations + final text = 20 messages
-        assert len(msgs) == 20
+        # Should get 5 outer iterations (2 empty + 1 valid + 2 empty + 1 text)
+        assert len(msgs) == 6
 
     def test_emits_error_event_on_breaker(self, worker, tmp_store):
         """Breaker emits an AGENT_ERROR event with circuit breaker details."""
@@ -143,7 +148,9 @@ class TestEmptyToolCallBreaker:
             tool_call_id="tc1", success=True, output="ok",
         ))
 
-        # First iteration: valid write, then breaker-triggering empty calls
+        # First iteration: valid write
+        # Then EMPTY_TOOL_CALL_LIMIT empty outer iterations to trigger breaker.
+        # Each empty iteration consumes (EMPTY_CALL_MAX_RETRIES + 1) = 4 LLM calls.
         responses = [
             {
                 "role": "assistant", "content": "",
@@ -152,7 +159,7 @@ class TestEmptyToolCallBreaker:
                 }}],
             },
         ]
-        for _ in range(EMPTY_TOOL_CALL_LIMIT):
+        for _ in range(EMPTY_TOOL_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1)):
             responses.append({
                 "role": "assistant", "content": "",
                 "tool_calls": [_empty_bash_call()],
