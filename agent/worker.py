@@ -137,9 +137,16 @@ class AgentWorker:
 
                 # All tool calls were invalid — retry LLM if attempts remain (#282)
                 if llm_attempt < EMPTY_CALL_MAX_RETRIES:
+                    # Log raw tool calls for debugging model-specific issues (#334)
+                    raw_calls = [
+                        {"name": tc.get("name"), "args": tc.get("arguments", {})}
+                        for tc in assistant_message.get("tool_calls", [])
+                    ]
                     logger.warning(
-                        "All tool calls invalid (LLM retry %d/%d), re-requesting (#282)",
+                        "All tool calls invalid (LLM retry %d/%d), re-requesting (#282). "
+                        "Raw calls: %s",
                         llm_attempt + 1, EMPTY_CALL_MAX_RETRIES,
+                        json.dumps(raw_calls)[:500],
                     )
                     # Feed back error results so LLM can correct itself
                     messages.append(assistant_message)
@@ -232,7 +239,10 @@ class AgentWorker:
                 self._append_invalid_tool_result(
                     session_id, tool_call_id, tool_name, error_content, tool_results,
                 )
-                logger.warning("Tool %s called with missing args: %s", tool_name, missing)
+                logger.warning(
+                    "Tool %s called with missing args: %s (raw args: %s, call_id: %s)",
+                    tool_name, missing, json.dumps(args)[:200], tool_call_id,
+                )
                 continue
 
             # Tool-specific empty-string validation (#215).
@@ -247,7 +257,10 @@ class AgentWorker:
                 self._append_invalid_tool_result(
                     session_id, tool_call_id, tool_name, error_content, tool_results,
                 )
-                logger.warning("Tool %s called with blank args: %s", tool_name, blank)
+                logger.warning(
+                    "Tool %s called with blank args: %s (raw args: %s, call_id: %s)",
+                    tool_name, blank, json.dumps(args)[:200], tool_call_id,
+                )
                 continue
 
             result = tool_executor.execute(tool_name, args)
