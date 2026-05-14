@@ -517,6 +517,35 @@ class DAGExecutionEngine:
 
         return None
 
+    # -- File snapshot for regression rollback (#212) ----------------------
+
+    @staticmethod
+    def _capture_file_snapshot(
+        work_dir: str, artifacts: list[str],
+    ) -> dict[str, str]:
+        """Capture file contents of artifacts for later rollback."""
+        snapshot: dict[str, str] = {}
+        for artifact in (artifacts or []):
+            path = os.path.join(work_dir, artifact)
+            try:
+                if os.path.isfile(path):
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        snapshot[artifact] = f.read()
+            except OSError:
+                pass
+        return snapshot
+
+    @staticmethod
+    def _restore_file_snapshot(
+        work_dir: str, snapshot: dict[str, str],
+    ) -> None:
+        """Restore files from a previously captured snapshot."""
+        for artifact, content in snapshot.items():
+            path = os.path.join(work_dir, artifact)
+            os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(content)
+
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""
         return min(self.backoff_base ** retry_count, self.backoff_cap)
@@ -738,6 +767,10 @@ class DAGExecutionEngine:
                             "artifacts": node.output_artifacts.copy(),
                             "feedback": eval_result.feedback,
                             "lint_issues": current_issues,
+                            "artifact_set": set(node.output_artifacts or []),
+                            "file_snapshot": self._capture_file_snapshot(
+                                eval_work_dir, node.output_artifacts,
+                            ),
                         }
                     elif eval_result.score > prev_best["score"]:
                         self._best_attempts[node_id] = {
@@ -745,6 +778,10 @@ class DAGExecutionEngine:
                             "artifacts": node.output_artifacts.copy(),
                             "feedback": eval_result.feedback,
                             "lint_issues": current_issues,
+                            "artifact_set": set(node.output_artifacts or []),
+                            "file_snapshot": self._capture_file_snapshot(
+                                eval_work_dir, node.output_artifacts,
+                            ),
                         }
                     else:
                         # Score not improved — check issue-level regression (#151)
@@ -774,6 +811,10 @@ class DAGExecutionEngine:
                                     "artifacts": node.output_artifacts.copy(),
                                     "feedback": eval_result.feedback,
                                     "lint_issues": current_issues,
+                                    "artifact_set": set(node.output_artifacts or []),
+                                    "file_snapshot": self._capture_file_snapshot(
+                                        eval_work_dir, node.output_artifacts,
+                                    ),
                                 }
                             else:
                                 is_regression = True
@@ -791,6 +832,10 @@ class DAGExecutionEngine:
                                 "artifacts": node.output_artifacts.copy(),
                                 "feedback": eval_result.feedback,
                                 "lint_issues": current_issues,
+                                "artifact_set": set(node.output_artifacts or []),
+                                "file_snapshot": self._capture_file_snapshot(
+                                    eval_work_dir, node.output_artifacts,
+                                ),
                             }
                         logger.warning(
                             "Node %s retry score %.1f <= best %.1f "
@@ -799,6 +844,35 @@ class DAGExecutionEngine:
                             len(new_in_current), len(fixed_from_prev),
                             is_regression,
                         )
+                        # Regression detected: restore best attempt files (#212).
+                        if is_regression and "file_snapshot" in prev_best:
+                            logger.info(
+                                "Node %s: restoring best attempt artifacts "
+                                "(score %.1f > current %.1f)",
+                                node_id, prev_best["score"], eval_result.score,
+                            )
+                            self._restore_file_snapshot(
+                                eval_work_dir, prev_best["file_snapshot"],
+                            )
+                            # Delete extra files added by the regression attempt
+                            # that were not present in the best artifact set.
+                            best_artifact_set = prev_best.get(
+                                "artifact_set", set(prev_best["file_snapshot"].keys()),
+                            )
+                            for artifact in (node.output_artifacts or []):
+                                if artifact not in best_artifact_set:
+                                    path = os.path.join(eval_work_dir, artifact)
+                                    try:
+                                        if os.path.isfile(path):
+                                            os.remove(path)
+                                            logger.info(
+                                                "Node %s: removed extra file %s "
+                                                "not in best attempt",
+                                                node_id, artifact,
+                                            )
+                                    except OSError:
+                                        pass
+                            node.output_artifacts = prev_best["artifacts"]
                     node.retry_count += 1
                     # Build retry feedback with regression awareness.
                     best = self._best_attempts[node_id]
