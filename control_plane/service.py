@@ -829,6 +829,7 @@ class RunService:
         _cfg = HarnessConfig.from_env()
         evaluator = EvaluatorEngine(
             session_store=store,
+            pass_threshold=_cfg.pass_threshold,
             auto_format_before_eval=_cfg.auto_format_before_eval,
         )
 

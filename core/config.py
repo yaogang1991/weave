@@ -341,6 +341,17 @@ class HarnessConfig(BaseModel):
         ).lower() in ("true", "1", "yes")
     )
 
+    # Evaluation: default pass threshold (#316).
+    # When set, score >= threshold means overall pass even if some soft
+    # criteria fail (e.g. lint), as long as all hard criteria pass
+    # (file_exists, tests_pass).  Prevents trivial lint issues from
+    # blocking the entire DAG.  CLI --pass-threshold overrides this.
+    pass_threshold: float = Field(
+        default_factory=lambda: float(os.getenv(
+            "HARNESS_PASS_THRESHOLD", "7.0"
+        ))
+    )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r", encoding="utf-8") as f:
