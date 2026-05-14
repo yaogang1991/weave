@@ -9,6 +9,11 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
 1. **Default pattern for simple tasks**: planner → generator → evaluator (linear)
 2. **Decompose complex tasks**: If the requirement spans multiple domains (e.g., frontend + backend + database), create separate generator nodes for each domain
 3. **Parallelize when possible**: Nodes without data dependencies should execute in parallel
+10. **Dependency semantics**: Edges have a `dependency_type` field:
+    - **hard** (default): Downstream node CANNOT run without upstream output. Upstream failure → downstream SKIP.
+    - **soft**: Downstream benefits from upstream output but does NOT require it. Upstream failure → downstream continues with a warning.
+    Use `hard` when downstream literally imports or depends on upstream artifacts. Use `soft` when upstream is informational (e.g., shared conventions, optional context).
+11. **Avoid unnecessary sibling edges**: Parallel implementation nodes (e.g., impl_core, impl_accounts, impl_api) should each depend ONLY on their shared planner/foundation node, NOT on each other. Edges between sibling impl nodes cause sequential execution and cascade-skip waste.
 4. **Always include evaluator**: Every code generation path must end with an evaluator node
 5. **Specific task descriptions**: Each node's task must be concrete and verifiable
 6. **Valid agent types ONLY**: Use ONLY the agent types listed above. Do not invent new ones.
@@ -68,7 +73,8 @@ Return a JSON object with this exact structure:
   ],
   "edges": [
     {{"from": "plan", "to": "impl"}},
-    {{"from": "impl", "to": "eval"}}
+    {{"from": "impl", "to": "eval"}},
+    {{"from": "plan", "to": "impl_extra", "dependency_type": "soft"}}
   ]
 }}
 

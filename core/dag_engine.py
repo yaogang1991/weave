@@ -562,25 +562,36 @@ class DAGExecutionEngine:
         if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
             return
 
-        # Dependency-aware skip: only skip if a direct dependency failed (#259).
-        # Unlike _skip_remaining (which skips entire levels), this allows nodes
-        # whose dependencies all succeeded to continue executing.
-        deps = dag.get_dependencies(node_id)
-        failed_deps = [
-            d for d in deps
+        # Dependency-aware skip with hard/soft semantics (#271).
+        # HARD deps: upstream FAILED/SKIPPED → downstream SKIP.
+        # SOFT deps: upstream FAILED/SKIPPED → downstream continues with warning.
+        hard_deps = dag.get_hard_dependencies(node_id)
+        failed_hard = [
+            d for d in hard_deps
             if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
         ]
-        if failed_deps:
+        if failed_hard:
             node.status = NodeStatus.SKIPPED
             node.error = (
-                f"Skipped: upstream dependencies {failed_deps} "
+                f"Skipped: hard dependencies {failed_hard} "
                 f"failed/were skipped"
             )
             logger.info(
-                "Node %s skipped due to failed dependencies: %s",
-                node_id, failed_deps,
+                "Node %s skipped due to failed hard dependencies: %s",
+                node_id, failed_hard,
             )
             return
+
+        soft_deps = dag.get_soft_dependencies(node_id)
+        failed_soft = [
+            d for d in soft_deps
+            if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
+        ]
+        if failed_soft:
+            logger.info(
+                "Node %s: soft dependencies %s failed, continuing anyway",
+                node_id, failed_soft,
+            )
 
         input_artifacts = self._collect_input_artifacts(dag, node_id)
 

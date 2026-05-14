@@ -111,6 +111,7 @@ class PlanValidator:
             node_ids.add(nid)
 
         # Check for dangling edges
+        valid_dep_types = {"hard", "soft"}
         for edge in edges:
             from_id = edge.get("from")
             to_id = edge.get("to")
@@ -121,6 +122,12 @@ class PlanValidator:
             if to_id not in node_ids:
                 raise PlanValidationError(
                     f"Dangling edge: target node '{to_id}' does not exist"
+                )
+            dep_type = edge.get("dependency_type", "hard")
+            if dep_type not in valid_dep_types:
+                raise PlanValidationError(
+                    f"Invalid dependency_type '{dep_type}' on edge "
+                    f"{from_id} → {to_id}: must be 'hard' or 'soft'"
                 )
 
         # Cycle detection via DFS

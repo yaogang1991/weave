@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from core.models import DAG, DAGEdge, DAGNode, DAGTemplate, SuccessCriterion
+from core.models import DAG, DAGEdge, DAGNode, DAGTemplate, DependencyType, SuccessCriterion
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,12 @@ class TemplateRegistry:
                 raise ValueError(
                     f"Edge references unknown node '{to_node}' in template '{template_name}'"
                 )
-            edges.append(DAGEdge(from_node=from_node, to_node=to_node))
+            dep_type_str = edge_def.get("dependency_type", "hard")
+            dep_type = DependencyType.SOFT if dep_type_str == "soft" else DependencyType.HARD
+            edges.append(DAGEdge(
+                from_node=from_node, to_node=to_node,
+                dependency_type=dep_type,
+            ))
 
         dag = DAG(
             nodes=nodes_dict,

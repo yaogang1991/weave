@@ -22,6 +22,7 @@ from core.models import (
     DAG,
     DAGNode,
     DAGEdge,
+    DependencyType,
     FailureDecision,
     AgentCapability,
     OrchestratorPlan,
@@ -192,7 +193,7 @@ class IntelligentOrchestrator:
     async def adapt_to_failure(self, dag: DAG, failed_node_id: str, error: str = "") -> FailureDecision:
         """
         Handle a failed node by asking the orchestrator LLM to decide.
-        
+
         This is the adaptive part - the orchestrator reasons about the failure
         and decides the best course of action, rather than using hardcoded rules.
         """
@@ -205,6 +206,22 @@ class IntelligentOrchestrator:
                 f"- {nid}: {node.agent_type} = {node.status.value}"
                 f"{' (FAILED: ' + node.error[:300] + ')' if node.status.value == 'failed' else ''}"
             )
+
+        # Topology awareness: describe downstream dependency types (#271)
+        dependents = dag.get_dependents(failed_node_id)
+        downstream_info: list[str] = []
+        has_only_soft_dependents = True
+        for dep_id in dependents:
+            dep_edges = [e for e in dag.edges
+                         if e.from_node == failed_node_id and e.to_node == dep_id]
+            for edge in dep_edges:
+                dtype = edge.dependency_type.value
+                downstream_info.append(f"  → {dep_id} ({dtype} dependency)")
+                if edge.dependency_type == DependencyType.HARD:
+                    has_only_soft_dependents = False
+        if downstream_info:
+            dag_status.append(f"Downstream from {failed_node_id}:")
+            dag_status.extend(downstream_info)
 
         # Build adaptation prompt
         system_prompt = self._prompt_registry.load("adaptation").format(
@@ -227,9 +244,14 @@ class IntelligentOrchestrator:
             decision_data = self._extract_json(response.get("content", ""))
             return FailureDecision(**decision_data)
         except Exception:
-            # Default to retry, then abort
+            # Topology-aware fallback: soft-only dependents → skip, not abort (#271)
             if failed_node.retry_count < failed_node.max_retries:
                 return FailureDecision(action="retry", reasoning="Parse error, defaulting to retry")
+            if has_only_soft_dependents and dependents:
+                return FailureDecision(
+                    action="skip",
+                    reasoning="Parse error; all downstream deps are soft, skipping failed node",
+                )
             return FailureDecision(action="abort", reasoning="Parse error, max retries reached")
 
     def _plan_to_dag(self, plan: OrchestratorPlan) -> DAG:
@@ -246,7 +268,12 @@ class IntelligentOrchestrator:
             dag.add_node(node)
 
         for edge_def in plan.edges:
-            dag.add_edge(edge_def["from"], edge_def["to"])
+            dep_type_str = edge_def.get("dependency_type", "hard")
+            dep_type = (
+                DependencyType.SOFT if dep_type_str == "soft"
+                else DependencyType.HARD
+            )
+            dag.add_edge(edge_def["from"], edge_def["to"], dependency_type=dep_type)
 
         return dag
 
