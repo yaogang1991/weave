@@ -352,6 +352,16 @@ class HarnessConfig(BaseModel):
         ))
     )
 
+    # Per-run wall-clock timeout in seconds (#324).
+    # Controls how long a single run attempt may take before being killed.
+    # CLI --timeout overrides this.  Previous default was 600 (10 min) which
+    # was too short for complex tasks on slower LLM backends.
+    run_timeout_sec: int = Field(
+        default_factory=lambda: int(os.getenv(
+            "HARNESS_RUN_TIMEOUT_SEC", "1800"
+        ))
+    )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r", encoding="utf-8") as f:
