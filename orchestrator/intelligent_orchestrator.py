@@ -404,6 +404,7 @@ class IntelligentOrchestrator:
                 agent_type=node_def["agent_type"],
                 task_description=node_def["task"],
                 success_criteria=node_def.get("success_criteria", []),
+                owned_files=node_def.get("owned_files", []),
             )
             dag.add_node(node)
 
