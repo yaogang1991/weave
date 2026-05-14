@@ -12,7 +12,6 @@ runs a fixed ``python -m pytest`` via subprocess with shell=False.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import subprocess
@@ -27,6 +26,7 @@ from core.models import (
     EventType,
     SuccessCriterion,
 )
+from evaluator.compat import normalize_criteria, parse_string_criterion
 from evaluator.lint.parser import LintIssue, parse_flake8_output, get_changed_lines
 from evaluator.models import CheckResult, CheckSeverity, EvaluationContext
 from session.store import SessionStore
@@ -146,7 +146,7 @@ class EvaluatorEngine:
             {"stage": stage_name, "criteria": [str(c) for c in criteria], "artifact": artifact_path},
         )
 
-        structured = self._normalize_criteria(criteria)
+        structured = normalize_criteria(criteria)
 
         results: dict[str, bool] = {}
         hard_labels: set[str] = set()  # labels for hard (non-overrideable) criteria
@@ -290,62 +290,6 @@ class EvaluatorEngine:
             )
 
         return result
-
-    # ------------------------------------------------------------------
-    # Criteria normalization
-    # ------------------------------------------------------------------
-
-    def _normalize_criteria(self, criteria: list[str | SuccessCriterion]) -> list[SuccessCriterion]:
-        """Parse list[str | SuccessCriterion] into list[SuccessCriterion].
-
-        SuccessCriterion instances are preserved as-is.
-        Strings that are valid JSON with a 'type' key are deserialized as
-        structured criteria (backward compatibility with serialized data).
-        Plain strings go through legacy keyword matching.
-        """
-        result: list[SuccessCriterion] = []
-        for c in criteria:
-            if isinstance(c, SuccessCriterion):
-                result.append(c)
-                continue
-            if isinstance(c, str) and c.startswith("{"):
-                try:
-                    data = json.loads(c)
-                    if isinstance(data, dict) and "type" in data:
-                        result.append(SuccessCriterion(**data))
-                        continue
-                except (json.JSONDecodeError, Exception):
-                    pass
-            result.append(self._parse_string_criterion(c))
-        return result
-
-    # Chinese → English keyword mapping for criteria parsing
-    _CN_KEYWORD_MAP = {
-        "测试": "test", "覆盖率": "coverage", "代码": "code",
-        "文件": "file", "存在": "exist", "无严重": "no_critical",
-        "无 bug": "no bug", "检查": "check", "通过": "pass",
-        "清理": "clean",
-    }
-
-    def _parse_string_criterion(self, criterion: str) -> SuccessCriterion:
-        lower = criterion.lower()
-        # Normalize Chinese keywords to English equivalents
-        for cn, en in self._CN_KEYWORD_MAP.items():
-            lower = lower.replace(cn, en)
-        if "test" in lower and "pass" in lower:
-            return SuccessCriterion(type=CriterionType.TESTS_PASS, description=criterion)
-        if "test_file_exist" in lower or "test file exist" in lower:
-            return SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS, description=criterion)
-        if "coverage" in lower:
-            return SuccessCriterion(type=CriterionType.COVERAGE, target=float(self._extract_percentage(lower) or 80), description=criterion)
-        if "lint" in lower or "clean" in lower:
-            return SuccessCriterion(type=CriterionType.LINT, description=criterion)
-        if "file" in lower and "exist" in lower:
-            match = re.search(r"[:\s]+(.+)", lower)
-            return SuccessCriterion(type=CriterionType.FILE_EXISTS, path=match.group(1) if match else "", description=criterion)
-        if "no_critical" in lower or "no bug" in lower:
-            return SuccessCriterion(type=CriterionType.NO_CRITICAL, description=criterion)
-        return SuccessCriterion(type=CriterionType.CUSTOM, description=criterion)
 
     # ------------------------------------------------------------------
     # Dispatch — returns 3-tuple (passed, msg, was_auto)
