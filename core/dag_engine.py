@@ -587,6 +587,10 @@ class DAGExecutionEngine:
         Pure analysis/text generators with CUSTOM-only criteria are excluded —
         they may legitimately produce zero file artifacts.
         """
+        # Only generator-type nodes (or any non-standard type with file criteria)
+        # are expected to produce file artifacts. Planner/evaluator are excluded.
+        is_producer = node.agent_type in ("generator", "worker") or node.agent_type not in ("planner", "evaluator")
+
         file_criteria = {
             CriterionType.FILE_EXISTS,
             CriterionType.FILE_CHANGED,
@@ -594,9 +598,18 @@ class DAGExecutionEngine:
             CriterionType.TEST_FILE_EXISTS,
             CriterionType.TESTS_PASS,
         }
+        # Keywords in legacy string criteria that imply file/test output
+        file_keywords = {"file", "coverage", "lint"}
+        test_keywords = {"tests pass", "test pass", "test file"}
         for crit in node.success_criteria:
             if isinstance(crit, SuccessCriterion) and crit.type in file_criteria:
                 return True
+            if isinstance(crit, str) and is_producer:
+                lower = crit.lower()
+                if any(kw in lower for kw in file_keywords):
+                    return True
+                if any(kw in lower for kw in test_keywords):
+                    return True
         return False
 
     # Codes that are purely formatting/whitespace and safe to tolerate on retry.
