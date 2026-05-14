@@ -344,14 +344,45 @@ class DAG(BaseModel):
 
         return levels
 
+    # Terminal states: the node has finished (success or failure).
+    _TERMINAL_STATES = frozenset({
+        NodeStatus.SUCCESS,
+        NodeStatus.PARTIAL_PASS,
+        NodeStatus.WARNED,
+        NodeStatus.FAILED,
+        NodeStatus.SKIPPED,
+    })
+
+    _TERMINAL_SUCCESS_STATES = frozenset({
+        NodeStatus.SUCCESS,
+        NodeStatus.PARTIAL_PASS,
+        NodeStatus.WARNED,
+    })
+
     def get_ready_nodes(self) -> list[str]:
-        """Get nodes whose hard dependencies are all satisfied."""
+        """Get nodes ready to execute.
+
+        Hard deps must be terminal success (SUCCESS/PARTIAL_PASS/WARNED).
+        Soft deps must be terminal (any finished state) so upstream isn't
+        still running when downstream starts (#271).
+        """
         ready = []
         for nid, node in self.nodes.items():
             if node.status != NodeStatus.PENDING:
                 continue
             hard_deps = self.get_hard_dependencies(nid)
-            if all(self.nodes[d].status == NodeStatus.SUCCESS for d in hard_deps):
+            hard_ok = all(
+                self.nodes[d].status in self._TERMINAL_SUCCESS_STATES
+                for d in hard_deps
+            )
+            if not hard_ok:
+                continue
+            soft_deps = self.get_soft_dependencies(nid)
+            soft_done = all(
+                self.nodes[d].status in self._TERMINAL_STATES
+                for d in soft_deps
+            )
+            if soft_done:
                 ready.append(nid)
         return ready
 

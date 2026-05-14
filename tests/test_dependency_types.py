@@ -297,7 +297,157 @@ class TestMixedDependencies:
         assert result.nodes["c"].status == NodeStatus.SUCCESS
 
 
-class TestSiblingIndependence:
+class TestSoftDepWarningArtifact:
+    """Soft dependency failure produces a warning artifact for downstream."""
+
+    @pytest.mark.asyncio
+    async def test_warning_artifact_injected_on_soft_failure(self):
+        """A→B(soft), A fails → B receives dependency_warning HandoffArtifact."""
+        dag = DAG()
+        dag.add_node(_make_node("a"))
+        dag.add_node(_make_node("b"))
+        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+
+        received_artifacts: list[list] = []
+
+        async def fail_a_capture_b(node, artifacts):
+            if node.id == "a":
+                raise RuntimeError("A failed")
+            received_artifacts.append(artifacts)
+            return {"artifacts": [], "output": "ok"}
+
+        engine = _make_engine(agent_executor=fail_a_capture_b)
+        result = await engine.execute(dag)
+
+        assert result.nodes["b"].status == NodeStatus.SUCCESS
+        assert len(received_artifacts) == 1
+        artifacts = received_artifacts[0]
+
+        # Should contain a dependency_warning artifact
+        warning_arts = [
+            a for a in artifacts
+            if hasattr(a, "metadata") and a.metadata.get("type") == "dependency_warning"
+        ]
+        assert len(warning_arts) == 1
+        w = warning_arts[0]
+        assert w.from_agent == "dag_engine"
+        assert "a" in w.metadata["failed_soft_deps"]
+        assert "DEPENDENCY WARNING" in w.content
+
+    @pytest.mark.asyncio
+    async def test_no_warning_when_all_deps_succeed(self):
+        """A→B(hard), A succeeds → B receives normal artifact, no warning."""
+        dag = DAG()
+        dag.add_node(_make_node("a"))
+        dag.add_node(_make_node("b"))
+        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+
+        received_artifacts: list[list] = []
+
+        async def capture(node, artifacts):
+            received_artifacts.append(artifacts)
+            return {"artifacts": [], "output": "ok"}
+
+        engine = _make_engine(agent_executor=capture)
+        await engine.execute(dag)
+
+        # B's artifacts (index 1, since A is index 0)
+        assert len(received_artifacts) == 2
+        b_artifacts = received_artifacts[1]
+        warning_arts = [
+            a for a in b_artifacts
+            if hasattr(a, "metadata") and a.metadata.get("type") == "dependency_warning"
+        ]
+        assert len(warning_arts) == 0
+
+
+class TestGetReadyNodesSoftDep:
+    """get_ready_nodes waits for soft deps to reach terminal state (#271)."""
+
+    def _make_dag_with_soft(self) -> DAG:
+        dag = DAG()
+        dag.add_node(_make_node("a"))
+        dag.add_node(_make_node("b"))
+        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        return dag
+
+    def test_soft_pending_not_ready(self):
+        dag = self._make_dag_with_soft()
+        # A is PENDING → B not ready (must wait for terminal state)
+        assert "b" not in dag.get_ready_nodes()
+
+    def test_soft_running_not_ready(self):
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.RUNNING
+        assert "b" not in dag.get_ready_nodes()
+
+    def test_soft_success_ready(self):
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.SUCCESS
+        assert dag.get_ready_nodes() == ["b"]
+
+    def test_soft_failed_ready(self):
+        """Soft dep FAILED → B is ready (can proceed without upstream)."""
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.FAILED
+        assert dag.get_ready_nodes() == ["b"]
+
+    def test_soft_skipped_ready(self):
+        """Soft dep SKIPPED → B is ready."""
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.SKIPPED
+        assert dag.get_ready_nodes() == ["b"]
+
+    def test_soft_partial_pass_ready(self):
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.PARTIAL_PASS
+        assert dag.get_ready_nodes() == ["b"]
+
+    def test_soft_warned_ready(self):
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.WARNED
+        assert dag.get_ready_nodes() == ["b"]
+
+    def test_soft_retrying_not_ready(self):
+        """Soft dep RETRYING → B not ready (upstream still active)."""
+        dag = self._make_dag_with_soft()
+        dag.nodes["a"].status = NodeStatus.RETRYING
+        assert "b" not in dag.get_ready_nodes()
+
+    def test_mixed_hard_soft_deps(self):
+        """A→C(hard), B→C(soft). C ready only when A=SUCCESS AND B=terminal."""
+        dag = DAG()
+        dag.add_node(_make_node("a"))
+        dag.add_node(_make_node("b"))
+        dag.add_node(_make_node("c"))
+        dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
+        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+
+        # Both PENDING → not ready
+        assert "c" not in dag.get_ready_nodes()
+
+        # A=SUCCESS, B=PENDING → not ready (soft not terminal)
+        dag.nodes["a"].status = NodeStatus.SUCCESS
+        assert "c" not in dag.get_ready_nodes()
+
+        # A=SUCCESS, B=FAILED → ready (hard success + soft terminal)
+        dag.nodes["b"].status = NodeStatus.FAILED
+        assert dag.get_ready_nodes() == ["c"]
+
+    def test_hard_dep_not_success_not_ready(self):
+        """get_ready_nodes uses terminal success for hard deps (not just SUCCESS)."""
+        dag = DAG()
+        dag.add_node(_make_node("a"))
+        dag.add_node(_make_node("b"))
+        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+
+        # PARTIAL_PASS should also count as ready for hard deps
+        dag.nodes["a"].status = NodeStatus.PARTIAL_PASS
+        assert dag.get_ready_nodes() == ["b"]
+
+        # FAILED should NOT count as ready for hard deps
+        dag.nodes["a"].status = NodeStatus.FAILED
+        assert "b" not in dag.get_ready_nodes()
     """Sibling nodes with different dependency types."""
 
     @pytest.mark.asyncio

@@ -593,7 +593,9 @@ class DAGExecutionEngine:
                 node_id, failed_soft,
             )
 
-        input_artifacts = self._collect_input_artifacts(dag, node_id)
+        input_artifacts = self._collect_input_artifacts(
+            dag, node_id, failed_soft=failed_soft,
+        )
 
         node.status = NodeStatus.RUNNING
         node.started_at = datetime.now(timezone.utc)
@@ -955,10 +957,15 @@ class DAGExecutionEngine:
             except asyncio.CancelledError:
                 pass
 
-    def _collect_input_artifacts(self, dag: DAG, node_id: str) -> list[HandoffArtifact]:
+    def _collect_input_artifacts(
+        self,
+        dag: DAG,
+        node_id: str,
+        failed_soft: list[str] | None = None,
+    ) -> list[HandoffArtifact]:
         """Collect output artifacts from all dependency nodes."""
         dependencies = dag.get_dependencies(node_id)
-        artifacts = []
+        artifacts: list[HandoffArtifact] = []
 
         for dep_id in dependencies:
             dep_node = dag.nodes[dep_id]
@@ -1050,6 +1057,38 @@ class DAGExecutionEngine:
                 to_agent=node.agent_type,
                 content=retry_hint,
                 metadata={"type": "eval_feedback", "attempt": node.retry_count},
+            ))
+
+        # Soft dependency warning: downstream gets structured info about
+        # failed/skipped soft deps so it can adapt its behavior (#271).
+        if failed_soft:
+            dep_summaries = []
+            for dep_id in failed_soft:
+                dep_node = dag.nodes[dep_id]
+                dep_summaries.append(
+                    f"- {dep_id} ({dep_node.agent_type}): "
+                    f"{dep_node.status.value}"
+                    f"{'; ' + dep_node.error[:200] if dep_node.error else ''}"
+                )
+            warning_content = (
+                "DEPENDENCY WARNING: The following soft (optional) "
+                "dependencies failed or were skipped:\n"
+                + "\n".join(dep_summaries)
+                + "\n\nYou may proceed, but outputs from these nodes "
+                "are NOT available."
+            )
+            artifacts.append(HandoffArtifact(
+                from_agent="dag_engine",
+                to_agent=dag.nodes[node_id].agent_type,
+                content=warning_content,
+                metadata={
+                    "type": "dependency_warning",
+                    "failed_soft_deps": failed_soft,
+                    "dep_statuses": {
+                        dep_id: dag.nodes[dep_id].status.value
+                        for dep_id in failed_soft
+                    },
+                },
             ))
 
         return artifacts
