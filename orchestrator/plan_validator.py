@@ -87,6 +87,10 @@ def _get_stdlib_names() -> set[str]:
 class PlanValidator:
     """Validates orchestrator plan structure. No mutations."""
 
+    # Maximum allowed nodes in a plan (#292).
+    # Prevents JSON truncation when the LLM generates oversized DAGs.
+    MAX_NODES = 10
+
     def __init__(self, auto_fix: bool = False) -> None:
         # auto_fix is accepted for API compat but validation-only is always used
         self.auto_fix = auto_fix
@@ -111,6 +115,13 @@ class PlanValidator:
             if nid in node_ids:
                 raise PlanValidationError(f"Duplicate node ID: {nid}")
             node_ids.add(nid)
+
+        # Node count limit (#292): prevents JSON truncation on oversized DAGs.
+        if len(node_ids) > self.MAX_NODES:
+            raise PlanValidationError(
+                f"Plan has {len(node_ids)} nodes (maximum {self.MAX_NODES}). "
+                f"Combine related sub-tasks into fewer nodes."
+            )
 
         # Check for dangling edges
         valid_dep_types = {"hard", "soft"}

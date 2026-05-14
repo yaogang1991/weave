@@ -105,3 +105,7 @@ For simple cases you MAY use plain strings like "tests pass" or "lint clean" —
 - Every edge references valid node IDs
 - The DAG must be acyclic
 - Keep it minimal: don't add unnecessary nodes
+- **Maximum 10 nodes**: Plans with more than 10 nodes will be rejected. For
+  complex requirements, combine related sub-tasks into fewer, larger nodes
+  rather than creating one node per micro-feature. Prefer 4-8 nodes for
+  most tasks.

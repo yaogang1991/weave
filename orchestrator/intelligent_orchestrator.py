@@ -193,7 +193,7 @@ class IntelligentOrchestrator:
                 f"Last response preview: {preview}"
             )
 
-        # Step 4: Parse and validate the plan
+        # Step 4: Parse the plan
         plan = OrchestratorPlan(**plan_data)
 
         # Step 5: Validate all agent types exist in registry
@@ -205,9 +205,50 @@ class IntelligentOrchestrator:
                     f"Available: {[a.id for a in self.agent_registry.list_agents()]}"
                 )
 
-        # Step 6: Structural validation & auto-fix (NEW)
+        # Step 6: Structural validation with retry on node-count error (#292)
         validator = PlanValidator(auto_fix=True)
-        fixed_plan_data = validator.validate(plan.model_dump())
+        try:
+            fixed_plan_data = validator.validate(plan.model_dump())
+        except PlanValidationError as e:
+            err_msg = str(e)
+            if "nodes" in err_msg.lower() and "maximum" in err_msg.lower():
+                # Retry once with explicit node-limit feedback
+                logger.warning(
+                    "Plan has too many nodes, retrying with constraint: %s",
+                    err_msg,
+                )
+                messages.append({
+                    "role": "assistant",
+                    "content": response.get("content", ""),
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Validation error: {err_msg}. "
+                        "Reduce the plan to at most 10 nodes by combining "
+                        "related sub-tasks, and return a valid JSON plan."
+                    ),
+                })
+                response = self.llm.call(messages, tools=[])
+                plan_data = self._extract_json(response.get("content", ""))
+                if plan_data is None:
+                    raise ValueError(
+                        "Failed to parse replan response after node-limit error. "
+                        f"Original error: {err_msg}"
+                    )
+                plan = OrchestratorPlan(**plan_data)
+                # Re-validate agent types
+                for node_def in plan.nodes:
+                    agent_type = node_def.get("agent_type", "")
+                    if not self.agent_registry.has_agent(agent_type):
+                        raise ValueError(
+                            f"Plan references unregistered agent: {agent_type}. "
+                            f"Available: {[a.id for a in self.agent_registry.list_agents()]}"
+                        )
+                fixed_plan_data = validator.validate(plan.model_dump())
+            else:
+                raise
+
         if validator.warnings:
             for w in validator.warnings:
                 print(f"[PlanValidator] {w}")
