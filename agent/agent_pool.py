@@ -137,6 +137,15 @@ Rules:
     FIRST read the source files (use glob to find them, then read) to discover
     the exact class names, function signatures, and module paths. NEVER guess
     class names — always verify by reading the actual source code first.
+18. IMPORT VERIFICATION: After writing test files, run a quick import check
+    for each symbol you reference. Example:
+    `python -c "from mylib.module import ClassName; print('OK')"`
+    If the import fails, either the symbol name is wrong or it doesn't exist
+    in the source. Fix the test to match the actual source API — do NOT
+    modify the source to match your tests unless explicitly told to.
+19. ASYNC AWARENESS: When testing async functions, use `asyncio.run()` or
+    `pytest-asyncio`. NEVER call an async function synchronously — it returns
+    a coroutine object, not the actual result.
 
 Work systematically: gather context → implement → verify.
 """,

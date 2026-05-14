@@ -1170,17 +1170,60 @@ class DAGExecutionEngine:
         # Include evaluation feedback from previous attempt (retry scenario)
         node = dag.nodes[node_id]
         if node.eval_feedback:
+            feedback = node.eval_feedback
+            # Detect naming mismatch patterns and add targeted guidance
+            # (#311) — helps the generator understand what specifically
+            # went wrong with imports or type signatures.
+            has_import_error = (
+                "ImportError" in feedback
+                or "cannot import" in feedback
+                or "ModuleNotFoundError" in feedback
+            )
+            has_type_error = (
+                "TypeError" in feedback
+                or "unexpected keyword" in feedback
+            )
+            naming_guidance = ""
+            if has_import_error:
+                naming_guidance += (
+                    "\nNAMING MISMATCH DETECTED: Your tests import "
+                    "symbols that don't exist in the source modules. "
+                    "To fix:\n"
+                    "1. READ the source files first to discover the "
+                    "actual class/function names\n"
+                    "2. Run: `python -c 'from module import Symbol'` "
+                    "to verify each import\n"
+                    "3. Fix your TEST code to match the actual source "
+                    "API — do NOT modify the source\n"
+                )
+            if has_type_error:
+                naming_guidance += (
+                    "\nTYPE ERROR DETECTED: Your code calls functions "
+                    "with wrong arguments or mismatched async/sync "
+                    "patterns.\n"
+                    "1. Check if async functions are called without "
+                    "`await` or `asyncio.run()`\n"
+                    "2. Verify function signatures match actual "
+                    "parameter names\n"
+                )
+
             retry_hint = (
-                f"RETRY ATTEMPT #{node.retry_count}: Your previous attempt FAILED evaluation.\n\n"
-                f"Evaluation feedback:\n{node.eval_feedback}\n\n"
-                f"IMPORTANT: Do NOT repeat the same approach. Analyze what went wrong "
-                f"and try a DIFFERENT strategy."
+                f"RETRY ATTEMPT #{node.retry_count}: Your previous "
+                f"attempt FAILED evaluation.\n\n"
+                f"Evaluation feedback:\n{feedback}\n\n"
+                f"{naming_guidance}"
+                f"IMPORTANT: Do NOT repeat the same approach. "
+                f"Analyze what went wrong and try a DIFFERENT "
+                f"strategy."
             )
             artifacts.append(HandoffArtifact(
                 from_agent="evaluator",
                 to_agent=node.agent_type,
                 content=retry_hint,
-                metadata={"type": "eval_feedback", "attempt": node.retry_count},
+                metadata={
+                    "type": "eval_feedback",
+                    "attempt": node.retry_count,
+                },
             ))
 
         # Soft dependency warning: downstream gets structured info about
