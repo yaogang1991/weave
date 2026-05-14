@@ -129,8 +129,10 @@ class EvaluatorEngine:
         self,
         session_store: SessionStore,
         pass_threshold: float | None = None,
+        auto_format_before_eval: bool = False,
     ):
         self.session_store = session_store
+        self.auto_format_before_eval = auto_format_before_eval
         # When set, score >= threshold means overall pass even if some
         # criteria fail (reported as WARNING instead of FAIL).  None = strict
         # mode (all criteria must pass, same as before #194).
@@ -146,6 +148,7 @@ class EvaluatorEngine:
                 )
         self.pass_threshold = pass_threshold
         self._last_autofixed: list[str] = []
+        self._last_auto_formatted: list[str] = []
         self._last_lint_new_issues: list[str] = []
         self._last_lint_all_issues: list[str] = []
 
@@ -296,6 +299,17 @@ class EvaluatorEngine:
                 {
                     "tool": "autoflake",
                     "files": self._last_autofixed,
+                    "stage": stage_name,
+                },
+            )
+
+        if self._last_auto_formatted:
+            self.session_store.emit_event(
+                session_id,
+                EventType.EVAL_AUTOFIX_APPLIED,
+                {
+                    "tool": "autopep8",
+                    "files": self._last_auto_formatted,
                     "stage": stage_name,
                 },
             )
@@ -619,6 +633,7 @@ class EvaluatorEngine:
         (same as pre-#150 behavior).
         """
         self._last_autofixed = []
+        self._last_auto_formatted = []
         self._last_lint_new_issues = []
         self._last_lint_all_issues = []
 
@@ -638,6 +653,13 @@ class EvaluatorEngine:
         # Detect auto-fixable issues via dry-run (no in-place modification).
         # This prevents parallel DAG nodes from corrupting each other's files.
         autofix_suggestions: list[str] = []
+        # Snapshot content before autoflake to detect changes (for tracking).
+        _pre_autoflake: dict[str, str] = {}
+        for fpath in resolved:
+            try:
+                _pre_autoflake[fpath] = Path(fpath).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
         try:
             result = subprocess.run(
                 [
@@ -657,6 +679,27 @@ class EvaluatorEngine:
             pass
         except Exception:
             pass
+
+        # Detect files changed by autoflake (populated when tests simulate
+        # in-place modification, or if --check is removed in the future).
+        for fpath, content_before in _pre_autoflake.items():
+            try:
+                content_after = Path(fpath).read_text(encoding="utf-8", errors="replace")
+                if content_after != content_before:
+                    self._last_autofixed.append(Path(fpath).name)
+            except OSError:
+                pass
+
+        # Apply autopep8 in-place formatting to fix whitespace issues
+        # (E203, E303, W291, W293, W605, E302, E501) before flake8 runs.
+        # This eliminates ~80% of retry-causing formatting issues (#206).
+        formatted_files = self._auto_format_apply(resolved)
+        self._last_auto_formatted = formatted_files
+        if formatted_files:
+            logger.info(
+                "autopep8 formatted %d file(s): %s",
+                len(formatted_files), formatted_files,
+            )
 
         # Run flake8 (or ruff fallback)
         lint_stdout = ""
@@ -683,6 +726,11 @@ class EvaluatorEngine:
 
         if result.returncode == 0:
             msg = "Lint clean"
+            if self._last_autofixed:
+                msg = (
+                    f"Autoflake auto-fixed: {', '.join(self._last_autofixed)}"
+                    f"\n{msg}"
+                )
             if autofix_suggestions:
                 msg = (
                     f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
@@ -695,6 +743,11 @@ class EvaluatorEngine:
         if not all_issues:
             # Could not parse (unexpected format) — treat as before
             msg = f"Lint issues:\n{lint_stdout[:500]}"
+            if self._last_autofixed:
+                msg = (
+                    f"Autoflake auto-fixed: {', '.join(self._last_autofixed)}"
+                    f"\n{msg}"
+                )
             if autofix_suggestions:
                 msg = (
                     f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
@@ -786,7 +839,75 @@ class EvaluatorEngine:
                 f"\n{msg}"
             )
 
+        if self._last_autofixed:
+            msg = (
+                f"Autoflake auto-fixed: {', '.join(self._last_autofixed)}"
+                f"\n{msg}"
+            )
+
         return len(new_issues) == 0, msg
+
+    def _auto_format_apply(self, resolved: list[str]) -> list[str]:
+        """Apply autopep8 in-place formatting to fix whitespace issues (#206).
+
+        Runs before flake8 so that auto-fixable formatting errors (E203, E303,
+        W291, W293, W605, E302) are eliminated, preventing unnecessary
+        retries.  Only targets files in the resolved list (current node's
+        files), making it safe for parallel DAG execution.
+
+        Returns list of relative paths of files that were actually modified.
+        Silently skips if autopep8 is not installed or times out.
+        Disabled by default; requires auto_format_before_eval=True.
+        """
+        if not self.auto_format_before_eval or not resolved:
+            return []
+
+        before: dict[str, str] = {}
+        for fpath in resolved:
+            try:
+                before[fpath] = Path(fpath).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, "-m", "autopep8",
+                    "--in-place",
+                    "--select=E203,E303,W291,W293,W605,E302",
+                ] + resolved,
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                logger.debug(
+                    "autopep8 skipped (rc=%d): %s",
+                    result.returncode, result.stderr[-500:],
+                )
+                return []
+        except FileNotFoundError:
+            logger.debug("autopep8 not installed, skipping auto-format")
+            return []
+        except subprocess.TimeoutExpired:
+            logger.warning("autopep8 timed out, skipping auto-format")
+            return []
+        except Exception as exc:
+            logger.warning("autopep8 error: %s", exc)
+            return []
+
+        changed: list[str] = []
+        for fpath, content_before in before.items():
+            try:
+                content_after = Path(fpath).read_text(encoding="utf-8", errors="replace")
+                if content_after != content_before:
+                    rel = Path(fpath).name
+                    try:
+                        rel = str(Path(fpath).relative_to(Path.cwd()))
+                    except ValueError:
+                        pass
+                    changed.append(rel)
+            except OSError:
+                pass
+        return changed
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
         missing = [f for f in files if not (base / f).exists()]

@@ -33,6 +33,8 @@ class TestAutoflakeTracking:
                 r.stdout = ""
                 r.stderr = ""
                 return r
+            if "autopep8" in cmd:
+                return MagicMock(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
                 r = MagicMock()
                 r.returncode = 0
@@ -80,6 +82,8 @@ class TestAutoflakeTracking:
             call_count[0] += 1
             if "autoflake" in cmd:
                 raise FileNotFoundError("autoflake not found")
+            if "autopep8" in cmd:
+                raise FileNotFoundError("autopep8 not found")
             if "flake8" in cmd:
                 r = MagicMock()
                 r.returncode = 0
@@ -112,6 +116,8 @@ class TestAutoflakeTracking:
                 r.stdout = ""
                 r.stderr = ""
                 return r
+            if "autopep8" in cmd:
+                return MagicMock(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
                 r = MagicMock()
                 r.returncode = 1
@@ -141,6 +147,8 @@ class TestAutoflakeTracking:
                     p = Path(arg)
                     if p.suffix == ".py" and p.exists():
                         p.write_text(p.read_text().replace("import os\n", ""))
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "autopep8" in cmd:
                 return MagicMock(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
                 return MagicMock(returncode=0, stdout="", stderr="")
@@ -176,6 +184,8 @@ class TestAutofixEventEmission:
                     p = Path(arg)
                     if p.suffix == ".py" and p.exists():
                         p.write_text(p.read_text().replace("import os\n", ""))
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "autopep8" in cmd:
                 return MagicMock(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
                 return MagicMock(returncode=0, stdout="", stderr="")

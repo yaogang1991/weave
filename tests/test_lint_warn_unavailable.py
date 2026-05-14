@@ -19,7 +19,7 @@ def tmp_store(tmp_path):
 
 @pytest.fixture
 def evaluator(tmp_store):
-    return EvaluatorEngine(tmp_store)
+    return EvaluatorEngine(tmp_store, auto_format_before_eval=True)
 
 
 class TestLintWarnWhenUnavailable:
@@ -29,9 +29,10 @@ class TestLintWarnWhenUnavailable:
     def test_no_linter_returns_warn(self, mock_run, evaluator, tmp_path):
         """Both flake8 and ruff missing → WARN, not FAIL."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
-        # autoflake → not found, flake8 → not found, ruff → not found
+        # autoflake → not found, autopep8 → not found, flake8 → not found, ruff → not found
         mock_run.side_effect = [
             FileNotFoundError("autoflake not found"),
+            FileNotFoundError("autopep8 not found"),
             FileNotFoundError("flake8 not found"),
             FileNotFoundError("ruff not found"),
         ]
@@ -51,6 +52,7 @@ class TestLintWarnWhenUnavailable:
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),  # autoflake ok
+            MagicMock(returncode=0, stdout=""),  # autopep8 ok
             MagicMock(returncode=1, stdout="code.py:1: E501 line too long"),  # flake8 issues
         ]
         passed, msg, auto = evaluator._check_criterion(
@@ -67,6 +69,7 @@ class TestLintWarnWhenUnavailable:
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),  # autoflake ok
+            MagicMock(returncode=0, stdout=""),  # autopep8 ok
             MagicMock(returncode=0, stdout=""),  # flake8 clean
         ]
         passed, msg, auto = evaluator._check_criterion(
@@ -83,6 +86,7 @@ class TestLintWarnWhenUnavailable:
         (tmp_path / "hello.py").write_text("ok", encoding="utf-8")
         mock_run.side_effect = [
             FileNotFoundError("autoflake"),
+            FileNotFoundError("autopep8"),
             FileNotFoundError("flake8"),
             FileNotFoundError("ruff"),
         ]

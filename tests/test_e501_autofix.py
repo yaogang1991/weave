@@ -14,7 +14,7 @@ class TestE501AutofixInLint:
         f = tmp_path / "target.py"
         f.write_text(f"{long_line}\n")
 
-        engine = EvaluatorEngine(MagicMock())
+        engine = EvaluatorEngine(MagicMock(), auto_format_before_eval=True)
 
         def fake_run(cmd, **kwargs):
             if "autopep8" in cmd:
@@ -43,7 +43,7 @@ class TestE501AutofixInLint:
         f = tmp_path / "target.py"
         f.write_text("print('ok')\n")
 
-        engine = EvaluatorEngine(MagicMock())
+        engine = EvaluatorEngine(MagicMock(), auto_format_before_eval=True)
         call_count = [0]
 
         def fake_run(cmd, **kwargs):
@@ -66,7 +66,7 @@ class TestE501AutofixInLint:
         f = tmp_path / "target.py"
         f.write_text("print('ok')\n")
 
-        engine = EvaluatorEngine(MagicMock())
+        engine = EvaluatorEngine(MagicMock(), auto_format_before_eval=True)
 
         def fake_run(cmd, **kwargs):
             if "autopep8" in cmd:
@@ -87,7 +87,7 @@ class TestE501AutofixInLint:
         f = tmp_path / "target.py"
         f.write_text("import os\nprint('ok')\n")
 
-        engine = EvaluatorEngine(MagicMock())
+        engine = EvaluatorEngine(MagicMock(), auto_format_before_eval=True)
         order = []
 
         def fake_run(cmd, **kwargs):
@@ -106,6 +106,33 @@ class TestE501AutofixInLint:
             engine._run_lint(["target.py"], tmp_path)
 
         assert order == ["autoflake", "autopep8", "flake8"]
+
+    def test_autopep8_disabled_by_default(self, tmp_path):
+        """When auto_format_before_eval=False (default), autopep8 is never called."""
+        f = tmp_path / "target.py"
+        f.write_text("print('ok')\n")
+
+        engine = EvaluatorEngine(MagicMock())  # default: auto_format_before_eval=False
+        order = []
+
+        def fake_run(cmd, **kwargs):
+            if "autoflake" in cmd:
+                order.append("autoflake")
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "autopep8" in cmd:
+                order.append("autopep8")
+                return MagicMock(returncode=0, stdout="", stderr="")
+            if "flake8" in cmd:
+                order.append("flake8")
+                return MagicMock(returncode=0, stdout="", stderr="")
+            raise RuntimeError(f"unexpected cmd: {cmd}")
+
+        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+            passed, msg = engine._run_lint(["target.py"], tmp_path)
+
+        assert passed
+        assert "autopep8" not in order
+        assert order == ["autoflake", "flake8"]
 
 
 class TestWriteToolLineWarning:

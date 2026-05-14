@@ -22,7 +22,7 @@ def tmp_store(tmp_path):
 
 @pytest.fixture
 def evaluator(tmp_store):
-    return EvaluatorEngine(tmp_store)
+    return EvaluatorEngine(tmp_store, auto_format_before_eval=True)
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +106,7 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),  # autoflake dry-run
+            MagicMock(returncode=0, stdout=""),  # autopep8
             MagicMock(  # flake8: E501 on line 10
                 returncode=1,
                 stdout="code.py:10:80: E501 line too long",
@@ -132,6 +133,7 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # autopep8
             MagicMock(
                 returncode=1,
                 stdout="code.py:33:1: E402 module level import not at top",
@@ -157,6 +159,7 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # autopep8
             MagicMock(
                 returncode=1,
                 stdout=(
@@ -186,6 +189,7 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # autopep8
             MagicMock(
                 returncode=1,
                 stdout="code.py:33:1: E402 module level import not at top",
@@ -211,6 +215,7 @@ class TestDeltaLint:
 
         mock_run.side_effect = [
             MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0, stdout=""),  # autopep8
             MagicMock(returncode=0, stdout=""),
         ]
 
