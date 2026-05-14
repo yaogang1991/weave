@@ -197,3 +197,82 @@ class TestExistingBehaviorPreserved:
         )
         assert passed
         assert was_auto
+
+
+class TestBugfixPatternCheckerEnumComparison:
+    """#306: BugfixPatternChecker must use enum comparison, not string."""
+
+    def test_file_changed_uses_enum_not_string(self):
+        from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+
+        checker = BugfixPatternChecker()
+        ctx = EvaluationContext(work_dir=Path("/tmp"), artifacts=["main.py"])
+        crit = SuccessCriterion(
+            type=CriterionType.FILE_CHANGED,
+            description="file changed",
+            path="main.py",
+        )
+        result = checker.check(crit, ctx)
+        assert result.passed
+
+    def test_pattern_absent_uses_enum(self, tmp_path):
+        from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+
+        checker = BugfixPatternChecker()
+        (tmp_path / "code.py").write_text("no bug here", encoding="utf-8")
+        ctx = EvaluationContext(work_dir=tmp_path)
+        crit = SuccessCriterion(
+            type=CriterionType.PATTERN_ABSENT,
+            description="bug gone",
+            path="code.py",
+            pattern="old_bug",
+        )
+        result = checker.check(crit, ctx)
+        assert result.passed
+
+    def test_pattern_present_uses_enum(self, tmp_path):
+        from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+
+        checker = BugfixPatternChecker()
+        (tmp_path / "code.py").write_text("feature = True", encoding="utf-8")
+        ctx = EvaluationContext(work_dir=tmp_path)
+        crit = SuccessCriterion(
+            type=CriterionType.PATTERN_PRESENT,
+            description="feature present",
+            path="code.py",
+            pattern="feature",
+        )
+        result = checker.check(crit, ctx)
+        assert result.passed
+
+    def test_unhandled_type_returns_failed(self):
+        """#306: unhandled criterion type must return passed=False, not silently pass."""
+        from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+
+        checker = BugfixPatternChecker()
+        ctx = EvaluationContext(work_dir=Path("/tmp"))
+        # Pass a type that BugfixPatternChecker doesn't handle
+        crit = SuccessCriterion(
+            type=CriterionType.FILE_EXISTS,
+            description="should not be handled",
+        )
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "Unhandled" in result.message
+
+
+class TestFileExistsCheckerEnumComparison:
+    """#306: FileExistsChecker must use enum comparison, fallback must fail."""
+
+    def test_unhandled_type_returns_failed(self):
+        from evaluator.checkers.file_exists import FileExistsChecker
+
+        checker = FileExistsChecker()
+        ctx = EvaluationContext(work_dir=Path("/tmp"))
+        crit = SuccessCriterion(
+            type=CriterionType.FILE_CHANGED,
+            description="should not be handled by FileExistsChecker",
+        )
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "Unhandled" in result.message

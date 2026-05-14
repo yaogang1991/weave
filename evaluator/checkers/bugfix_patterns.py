@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from core.models import SuccessCriterion
+from core.models import CriterionType, SuccessCriterion
 from evaluator.models import CheckResult, EvaluationContext
 
 
@@ -21,13 +21,13 @@ class BugfixPatternChecker:
         context: EvaluationContext,
     ) -> CheckResult:
         ct = criterion.type
-        if ct.value == "file_changed":
+        if ct == CriterionType.FILE_CHANGED:
             return self._check_file_changed(criterion, context)
-        if ct.value == "pattern_absent":
+        if ct == CriterionType.PATTERN_ABSENT:
             return self._check_pattern_absent(criterion, context)
-        if ct.value == "pattern_present":
+        if ct == CriterionType.PATTERN_PRESENT:
             return self._check_pattern_present(criterion, context)
-        return CheckResult(passed=True, message="Unhandled criterion type")
+        return CheckResult(passed=False, message=f"Unhandled criterion type: {ct}")
 
     def _check_file_changed(
         self,
