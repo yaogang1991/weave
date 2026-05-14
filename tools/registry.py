@@ -17,6 +17,14 @@ from tools.command_runner import ToolCommandRunner
 _MAX_FILE_SIZE = 10 * 1024 * 1024
 _MAX_GLOB_RESULTS = 1000
 _MAX_GREP_MATCH_LINES = 200
+
+# For Python files larger than this (bytes), the read tool returns only
+# class/function signatures and docstrings instead of the full content (#349).
+# 50 KB ≈ 1200-1500 lines, well within the API 2 MB limit for a single file
+# but would consume most of the context budget when combined with conversation
+# history.
+_PYTHON_TRUNCATE_THRESHOLD = 50 * 1024
+
 _DEFAULT_IGNORE_DIRS = {".git", ".venv", "venv", "node_modules", "dist", "build", "__pycache__"}
 
 # File extensions that are typically binary
@@ -251,7 +259,12 @@ class ToolRegistry:
 
     # --- Built-in tool implementations ---
 
-    def _tool_read(self, file_path: str, offset: int = 0, limit: int = 2000) -> ToolResult:
+    def _tool_read(
+        self,
+        file_path: str,
+        offset: int = 0,
+        limit: int = 2000,
+    ) -> ToolResult:
         try:
             if not file_path or not file_path.strip():
                 return ToolResult(
@@ -260,13 +273,36 @@ class ToolRegistry:
                 )
             path = self._resolve_path(file_path)
             if not path.exists():
-                return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")
+                return ToolResult(
+                    tool_call_id="", success=False,
+                    error=f"File not found: {file_path}",
+                )
 
-            if path.stat().st_size > _MAX_FILE_SIZE:
+            file_size = path.stat().st_size
+            if file_size > _MAX_FILE_SIZE:
                 return ToolResult(
                     tool_call_id="",
                     success=False,
-                    error=f"File too large ({path.stat().st_size} bytes, max {_MAX_FILE_SIZE})",
+                    error=(
+                        f"File too large ({file_size} bytes, "
+                        f"max {_MAX_FILE_SIZE})"
+                    ),
+                )
+
+            # For large Python files, extract signatures instead of
+            # returning full content (#349).  Prevents API 2 MB context
+            # overflow when a test-generator reads a big source file.
+            is_py = file_path.endswith(".py")
+            if (
+                is_py
+                and file_size > _PYTHON_TRUNCATE_THRESHOLD
+                and offset == 0
+                and limit >= 2000
+            ):
+                return ToolResult(
+                    tool_call_id="",
+                    success=True,
+                    output=self._extract_python_signatures(path),
                 )
 
             with open(path, "r", encoding="utf-8") as f:
@@ -277,13 +313,129 @@ class ToolRegistry:
             content = "".join(selected)
 
             if offset + limit < total_lines:
-                content += f"\n... ({total_lines - offset - limit} more lines, use offset/limit to read further)"
+                content += (
+                    f"\n... ({total_lines - offset - limit} more lines, "
+                    f"use offset/limit to read further)"
+                )
 
-            return ToolResult(tool_call_id="", success=True, output=content)
+            return ToolResult(
+                tool_call_id="", success=True, output=content,
+            )
         except UnicodeDecodeError:
-            return ToolResult(tool_call_id="", success=False, error=f"Cannot read file as text (binary?): {file_path}")
+            return ToolResult(
+                tool_call_id="", success=False,
+                error=f"Cannot read file as text (binary?): {file_path}",
+            )
         except Exception as e:
-            return ToolResult(tool_call_id="", success=False, error=str(e))
+            return ToolResult(
+                tool_call_id="", success=False, error=str(e),
+            )
+
+    @staticmethod
+    def _extract_python_signatures(path: Path) -> str:
+        """Extract class/function signatures and docstrings from a Python file.
+
+        Returns a condensed version suitable for understanding the API without
+        reading every implementation detail.  For large files this prevents
+        API context overflow (#349).
+        """
+        import ast
+
+        try:
+            source = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return f"(could not read {path.name})"
+
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            # Fall back to first 100 lines if AST parsing fails
+            lines = source.splitlines()[:100]
+            return (
+                f"# {path.name} (first 100 lines — "
+                f"file has syntax errors)\n"
+                + "\n".join(lines)
+            )
+
+        src_lines = source.splitlines()
+        total_lines = len(src_lines)
+        parts = [
+            f"# {path.name} — signatures only "
+            f"(file is {total_lines} lines, "
+            f"{path.stat().st_size} bytes; "
+            f"use offset/limit to read specific sections)\n",
+        ]
+
+        def _get_def_lines(node):
+            """Extract just the def/class signature lines (up to colon)."""
+            start = node.lineno - 1
+            # end_lineno points to last line of the entire block;
+            # we want just the signature (lines up to and including ':')
+            end = min(
+                getattr(node, "end_lineno", start + 10) - 1,
+                start + 10,  # cap at 10 lines for signature
+            )
+            raw = src_lines[start:end]
+            # Find the line with the closing ')' + ':'
+            sig = []
+            for line in raw:
+                sig.append(line)
+                stripped = line.rstrip()
+                if stripped.endswith(":") and "(" in "".join(sig):
+                    break
+            return "\n".join(sig)
+
+        def _get_docstring(node):
+            """Extract first-line docstring if present."""
+            if (
+                node.body
+                and isinstance(node.body[0], ast.Expr)
+                and isinstance(node.body[0].value, ast.Constant)
+                and isinstance(node.body[0].value.value, str)
+            ):
+                return node.body[0].value.value[:200]
+            return None
+
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(
+                node,
+                (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+            ):
+                sig = _get_def_lines(node)
+
+                if isinstance(node, ast.ClassDef):
+                    parts.append(f"\n{sig}")
+                    doc = _get_docstring(node)
+                    if doc:
+                        parts.append(f'    """{doc}"""')
+                    for item in node.body:
+                        if isinstance(
+                            item,
+                            (ast.FunctionDef, ast.AsyncFunctionDef),
+                        ):
+                            method_sig = _get_def_lines(item)
+                            parts.append(f"    {method_sig}")
+                            mdoc = _get_docstring(item)
+                            if mdoc:
+                                parts.append(
+                                    f'        """{mdoc}"""'
+                                )
+                else:
+                    parts.append(f"\n{sig}")
+                    doc = _get_docstring(node)
+                    if doc:
+                        parts.append(f'    """{doc}"""')
+
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                line = src_lines[node.lineno - 1]
+                parts.append(line)
+
+        result = "\n".join(parts)
+        # Safety cap: if signature extraction is still huge, truncate
+        max_sig = 4096
+        if len(result) > max_sig:
+            result = result[:max_sig] + "\n... (truncated signatures)"
+        return result
 
     def _tool_write(self, file_path: str, content: str) -> ToolResult:
         try:
