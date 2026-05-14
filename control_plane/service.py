@@ -887,7 +887,12 @@ class RunService:
         orchestrator = self._create_orchestrator(store)
 
         # Evaluator for quality gates
-        evaluator = EvaluatorEngine(session_store=store)
+        from core.config import HarnessConfig
+        _cfg = HarnessConfig.from_env()
+        evaluator = EvaluatorEngine(
+            session_store=store,
+            auto_format_before_eval=_cfg.auto_format_before_eval,
+        )
 
         engine = DAGExecutionEngine(
             agent_executor=pool.get_executor(session_id),

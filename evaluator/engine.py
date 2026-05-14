@@ -691,9 +691,9 @@ class EvaluatorEngine:
                 pass
 
         # Apply autopep8 in-place formatting to fix whitespace issues
-        # (E203, E303, W291, W293, W605, E302, E501) before flake8 runs.
+        # (E203, E303, W291, W293, W605, E302) before flake8 runs.
         # This eliminates ~80% of retry-causing formatting issues (#206).
-        formatted_files = self._auto_format_apply(resolved)
+        formatted_files = self._auto_format_apply(resolved, work_dir)
         self._last_auto_formatted = formatted_files
         if formatted_files:
             logger.info(
@@ -847,7 +847,7 @@ class EvaluatorEngine:
 
         return len(new_issues) == 0, msg
 
-    def _auto_format_apply(self, resolved: list[str]) -> list[str]:
+    def _auto_format_apply(self, resolved: list[str], work_dir: Path) -> list[str]:
         """Apply autopep8 in-place formatting to fix whitespace issues (#206).
 
         Runs before flake8 so that auto-fixable formatting errors (E203, E303,
@@ -899,11 +899,10 @@ class EvaluatorEngine:
             try:
                 content_after = Path(fpath).read_text(encoding="utf-8", errors="replace")
                 if content_after != content_before:
-                    rel = Path(fpath).name
                     try:
-                        rel = str(Path(fpath).relative_to(Path.cwd()))
+                        rel = str(Path(fpath).relative_to(work_dir))
                     except ValueError:
-                        pass
+                        rel = Path(fpath).name
                     changed.append(rel)
             except OSError:
                 pass
