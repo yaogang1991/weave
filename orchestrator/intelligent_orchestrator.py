@@ -142,7 +142,23 @@ class IntelligentOrchestrator:
 
         user_prompt = f"User requirement: {requirement}"
         if project_context:
-            user_prompt += f"\n\nProject context: {json.dumps(project_context, indent=2, default=str)}"
+            # Format existing_files as a prominent section so the planner
+            # sees it clearly and reconciles rather than duplicating (#335).
+            existing = project_context.pop("existing_files", None)
+            user_prompt += (
+                f"\n\nProject context: "
+                f"{json.dumps(project_context, indent=2, default=str)}"
+            )
+            if existing:
+                user_prompt += (
+                    "\n\n## Existing Workspace Files\n"
+                    "The following files already exist in the workspace. "
+                    "You MUST reconcile with them (reuse, edit, or replace) "
+                    "instead of creating duplicates:\n"
+                )
+                for f in existing:
+                    user_prompt += f"- [{f['type']}] {f['path']}\n"
+                project_context["existing_files"] = existing
 
         # M3.3: Inject learning hints if available
         if self.learning_optimizer:

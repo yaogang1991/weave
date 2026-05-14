@@ -9,12 +9,6 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
 1. **Default pattern for simple tasks**: planner → generator → evaluator (linear)
 2. **Decompose complex tasks**: If the requirement spans multiple domains (e.g., frontend + backend + database), create separate generator nodes for each domain
 3. **Parallelize when possible**: Nodes without data dependencies should execute in parallel
-12. **Separate source and test generation**: NEVER task a single generator node with both source module creation AND test file creation. Source modules and their tests must be in SEPARATE generator nodes (e.g., `impl_core` creates `mylib/core.py`, then `impl_tests_core` creates `tests/test_core.py`). A single node doing both runs out of token/iteration budget before reaching test creation (#340).
-10. **Dependency semantics**: Edges have a `dependency_type` field:
-    - **hard** (default): Downstream node CANNOT run without upstream output. Upstream failure → downstream SKIP.
-    - **soft**: Downstream benefits from upstream output but does NOT require it. Upstream failure → downstream continues with a warning.
-    Use `hard` when downstream literally imports or depends on upstream artifacts. Use `soft` when upstream is informational (e.g., shared conventions, optional context).
-11. **Avoid unnecessary sibling edges**: Parallel implementation nodes (e.g., impl_core, impl_accounts, impl_api) should each depend ONLY on their shared planner/foundation node, NOT on each other. Edges between sibling impl nodes cause sequential execution and cascade-skip waste.
 4. **Always include evaluator**: Every code generation path must end with an evaluator node
 5. **Specific task descriptions**: Each node's task must be concrete and verifiable
 6. **Valid agent types ONLY**: Use ONLY the agent types listed above. Do not invent new ones.
@@ -40,6 +34,19 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
       listing all class names, function names, and module paths that both nodes must
       use. Example: "NAMING CONTRACT: class TokenBucket (not TokenBucketLimiter),
       module path ratelib.token_bucket".
+10. **Dependency semantics**: Edges have a `dependency_type` field:
+    - **hard** (default): Downstream node CANNOT run without upstream output. Upstream failure → downstream SKIP.
+    - **soft**: Downstream benefits from upstream output but does NOT require it. Upstream failure → downstream continues with a warning.
+    Use `hard` when downstream literally imports or depends on upstream artifacts. Use `soft` when upstream is informational (e.g., shared conventions, optional context).
+11. **Avoid unnecessary sibling edges**: Parallel implementation nodes (e.g., impl_core, impl_accounts, impl_api) should each depend ONLY on their shared planner/foundation node, NOT on each other. Edges between sibling impl nodes cause sequential execution and cascade-skip waste.
+12. **Separate source and test generation**: NEVER task a single generator node with both source module creation AND test file creation. Source modules and their tests must be in SEPARATE generator nodes (e.g., `impl_core` creates `mylib/core.py`, then `impl_tests_core` creates `tests/test_core.py`). A single node doing both runs out of token/iteration budget before reaching test creation (#340).
+13. **Reconcile with existing files**: If the project context includes
+    `existing_files`, you MUST review them before planning. Decide for each
+    existing file whether to REUSE it (reference in generator task descriptions
+    so generators edit rather than recreate) or REPLACE it (explicitly state
+    the old file should be deleted/replaced). NEVER create duplicate files
+    that serve the same purpose as existing ones. Include the file inventory
+    in your planning reasoning.
 
 ## Output Format
 
