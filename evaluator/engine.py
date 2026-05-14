@@ -148,7 +148,15 @@ class EvaluatorEngine:
 
         structured = normalize_criteria(criteria)
 
-        results: dict[str, bool] = {}
+        # Scope artifacts to node-owned files (#320).
+        # When success_criteria specify exact files (file_exists) or patterns
+        # (file_pattern), only lint/check those files — not files created by
+        # sibling generator nodes running in parallel.
+        output_artifacts = self._scope_artifacts_to_criteria(
+            output_artifacts, structured, Path(eval_dir) if eval_dir else None,
+        )
+
+        results: dict[str] = {}
         hard_labels: set[str] = set()  # labels for hard (non-overrideable) criteria
         score = 0.0
         feedback_parts: list[str] = []
@@ -294,6 +302,82 @@ class EvaluatorEngine:
     # ------------------------------------------------------------------
     # Dispatch — returns 3-tuple (passed, msg, was_auto)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _scope_artifacts_to_criteria(
+        output_artifacts: list[str] | None,
+        criteria: list[SuccessCriterion],
+        work_dir: Path | None,
+    ) -> list[str] | None:
+        """Filter output_artifacts to only files the node is supposed to own.
+
+        When success_criteria include file_exists or file_pattern entries,
+        only return artifacts matching those specifications. This prevents
+        cross-node lint contamination when parallel generator nodes share
+        the same workspace (#320).
+
+        If no file-based criteria exist, return artifacts unchanged.
+        """
+        if not output_artifacts:
+            return output_artifacts
+
+        # Collect expected file paths/patterns from criteria
+        expected_paths: list[str] = []
+        expected_patterns: list[str] = []
+        for crit in criteria:
+            if crit.type == CriterionType.FILE_EXISTS and crit.path:
+                expected_paths.append(crit.path)
+            elif crit.type == CriterionType.FILE_PATTERN and crit.pattern:
+                expected_patterns.append(crit.pattern)
+
+        # No file-based criteria → no scoping possible, return as-is
+        if not expected_paths and not expected_patterns:
+            return output_artifacts
+
+        # Expand patterns to concrete file matches
+        expected_files: set[str] = set(expected_paths)
+        if expected_patterns and work_dir:
+            for pattern in expected_patterns:
+                for match in work_dir.glob(pattern):
+                    if match.is_file():
+                        try:
+                            expected_files.add(str(match.relative_to(work_dir)))
+                        except ValueError:
+                            expected_files.add(str(match))
+
+        # Filter artifacts to only expected files
+        scoped = []
+        for art in output_artifacts:
+            # Normalize: try relative path
+            art_rel = art
+            if work_dir:
+                try:
+                    p = Path(art)
+                    if p.is_absolute():
+                        art_rel = str(p.relative_to(work_dir))
+                except ValueError:
+                    pass
+            # Match against expected files (prefix match for directories)
+            for expected in expected_files:
+                if art_rel == expected or art_rel.endswith("/" + expected) or expected.endswith("/" + art_rel):
+                    scoped.append(art)
+                    break
+            else:
+                # Also check if artifact is directly in expected_paths
+                if art in expected_paths or any(art.endswith("/" + e) for e in expected_paths):
+                    scoped.append(art)
+
+        if scoped:
+            if len(scoped) < len(output_artifacts):
+                logger.info(
+                    "Scoped artifacts from %d to %d based on criteria (#320)",
+                    len(output_artifacts), len(scoped),
+                )
+            return scoped
+
+        # If scoping removed everything (e.g. patterns don't match yet),
+        # fall back to original artifacts to avoid false negatives
+        return output_artifacts
 
     def _check_criterion(
         self,
