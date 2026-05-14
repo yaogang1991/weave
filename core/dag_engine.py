@@ -582,17 +582,17 @@ class DAGExecutionEngine:
     def _requires_output_artifacts(node: DAGNode) -> bool:
         """Check whether a node is expected to produce output file artifacts.
 
-        Returns True if the node is a generator with success_criteria, or if
-        any criterion references file-based checks (FILE_EXISTS, FILE_CHANGED,
-        FILE_PATTERN).  Such nodes should be fast-failed when they produce
-        zero artifacts, regardless of evaluator presence.
+        Returns True only when criteria explicitly depend on disk files
+        (FILE_EXISTS, FILE_CHANGED, FILE_PATTERN, TEST_FILE_EXISTS, TESTS_PASS).
+        Pure analysis/text generators with CUSTOM-only criteria are excluded —
+        they may legitimately produce zero file artifacts.
         """
-        if node.agent_type == "generator" and node.success_criteria:
-            return True
         file_criteria = {
             CriterionType.FILE_EXISTS,
             CriterionType.FILE_CHANGED,
             CriterionType.FILE_PATTERN,
+            CriterionType.TEST_FILE_EXISTS,
+            CriterionType.TESTS_PASS,
         }
         for crit in node.success_criteria:
             if isinstance(crit, SuccessCriterion) and crit.type in file_criteria:
