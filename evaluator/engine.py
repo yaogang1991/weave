@@ -153,6 +153,22 @@ class EvaluatorEngine:
         self._last_lint_new_issues: list[str] = []
         self._last_lint_all_issues: list[str] = []
         self._checkers: dict[CriterionType, Any] = {}
+        self._register_builtin_checkers()
+
+    def _register_builtin_checkers(self) -> None:
+        """Register extracted criterion checkers (#178 PR 2)."""
+        from evaluator.checkers.file_exists import FileExistsChecker
+        from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+
+        file_checker = FileExistsChecker()
+        self._checkers[CriterionType.FILE_EXISTS] = file_checker
+        self._checkers[CriterionType.FILE_PATTERN] = file_checker
+        self._checkers[CriterionType.TEST_FILE_EXISTS] = file_checker
+
+        bugfix_checker = BugfixPatternChecker()
+        self._checkers[CriterionType.FILE_CHANGED] = bugfix_checker
+        self._checkers[CriterionType.PATTERN_ABSENT] = bugfix_checker
+        self._checkers[CriterionType.PATTERN_PRESENT] = bugfix_checker
 
     def register_checker(
         self,
