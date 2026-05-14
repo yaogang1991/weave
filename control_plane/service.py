@@ -74,6 +74,48 @@ def _default_watchdog_config() -> WatchdogConfig:
     return WatchdogConfig()
 
 
+def _scan_existing_files(
+    root: Path,
+    max_files: int = 100,
+) -> list[dict[str, str]]:
+    """Scan the workspace for existing source/test files (#335).
+
+    Returns a list of ``{"path": ..., "type": ...}`` dicts where *type*
+    is "source" for ``*.py`` outside ``tests/``, "test" for files under
+    ``tests/``, or "config" for setup/config files.  Skips hidden dirs,
+    ``__pycache__``, ``data/``, ``.git``, and common non-source dirs.
+    """
+    _SKIP_DIRS = frozenset((
+        "__pycache__", ".git", ".harness", "data", "node_modules",
+        ".venv", "venv", ".mypy_cache", ".pytest_cache", ".tox",
+    ))
+    _CONFIG_NAMES = frozenset((
+        "setup.py", "setup.cfg", "pyproject.toml", "requirements.txt",
+        "Makefile", "tox.ini", ".flake8", "conftest.py",
+    ))
+
+    results: list[dict[str, str]] = []
+    try:
+        for path in sorted(root.rglob("*.py")):
+            # Skip hidden and junk directories
+            parts = path.relative_to(root).parts
+            if any(p.startswith(".") or p in _SKIP_DIRS for p in parts):
+                continue
+            rel = str(path.relative_to(root))
+            if path.name in _CONFIG_NAMES:
+                ftype = "config"
+            elif any(p == "tests" or p == "test" for p in parts):
+                ftype = "test"
+            else:
+                ftype = "source"
+            results.append({"path": rel, "type": ftype})
+            if len(results) >= max_files:
+                break
+    except OSError:
+        pass
+    return results
+
+
 # ============================================================================
 # UTC helper
 # ============================================================================
@@ -673,6 +715,19 @@ class RunService:
         orchestrator = self._create_orchestrator(store)
         project_path = job.project_path or (str(work_dir) if work_dir else None)
         project_context = {"project_path": project_path} if project_path else None
+
+        # Scan existing workspace files so the planner can reconcile with
+        # files created by previous runs (#335).
+        scan_root = work_dir if work_dir else (
+            Path(project_path) if project_path else None
+        )
+        if scan_root:
+            existing = _scan_existing_files(scan_root)
+            if existing:
+                if project_context is None:
+                    project_context = {}
+                project_context["existing_files"] = existing
+
         dag = await orchestrator.plan(
             requirement=job.requirement,
             project_context=project_context,
