@@ -570,7 +570,10 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     # Create evaluator for quality gates
     from evaluator.engine import EvaluatorEngine
-    pass_threshold = getattr(args, "pass_threshold", None)
+    # CLI --pass-threshold overrides config default (#316).
+    # When neither is set, pass_threshold is None (strict mode).
+    cli_threshold = getattr(args, "pass_threshold", None)
+    pass_threshold = cli_threshold if cli_threshold is not None else config.pass_threshold
     evaluator = EvaluatorEngine(
         session_store=store,
         pass_threshold=pass_threshold,
@@ -1474,7 +1477,7 @@ Examples:
     )
     exec_parser.add_argument(
         "--pass-threshold", type=float, default=None,
-        help="Evaluation pass threshold >0-10 (default: strict, all criteria must pass)",
+        help="Evaluation pass threshold >0-10 (default: 7.0 from config; lint-only failures downgrade to WARN)",
     )
     exec_parser.set_defaults(func=cmd_execute)
 
@@ -1517,7 +1520,7 @@ Examples:
     )
     run_parser.add_argument(
         "--pass-threshold", type=float, default=None,
-        help="Evaluation pass threshold >0-10 (default: strict, all criteria must pass)",
+        help="Evaluation pass threshold >0-10 (default: 7.0 from config; lint-only failures downgrade to WARN)",
     )
     run_parser.add_argument(
         "--non-interactive", action="store_true",
