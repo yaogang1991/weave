@@ -465,6 +465,41 @@ Execute using your available tools. Produce clear, verifiable output.
         return "\n".join(parts)
 
 
+def _inject_file_path_constraints(node: DAGNode) -> str:
+    """Inject explicit file path constraints into the task description (#291).
+
+    When a generator node has file_exists or file_pattern success_criteria,
+    prepend a strong constraint that the LLM must create files at exactly
+    those paths. This prevents the generator from using alternative filenames
+    that don't match the evaluator's expectations.
+    """
+    if node.agent_type != "generator":
+        return node.task_description
+
+    from core.models import CriterionType
+    from evaluator.compat import normalize_criteria
+
+    criteria = normalize_criteria(node.success_criteria)
+    paths: list[str] = []
+    for crit in criteria:
+        if crit.type == CriterionType.FILE_EXISTS and crit.path:
+            paths.extend(p.strip() for p in crit.path.split(","))
+        elif crit.type == CriterionType.FILE_PATTERN and crit.pattern:
+            paths.append(crit.pattern)
+
+    if not paths:
+        return node.task_description
+
+    constraint = (
+        "CRITICAL FILE PATH CONSTRAINT — you MUST create files at EXACTLY "
+        f"these paths: {', '.join(paths)}\n"
+        "Do NOT use alternative filenames, different directories, or split "
+        "files into separate modules. The evaluator will check for these "
+        "exact paths.\n\n"
+    )
+    return constraint + node.task_description
+
+
 class AgentPool:
     """
     Pool of Worker Agent instances.
@@ -561,8 +596,9 @@ class AgentPool:
         async def _executor(node: DAGNode, artifacts: list[HandoffArtifact]) -> dict:
             worker = self.create_worker(node.agent_type)
             try:
+                task = _inject_file_path_constraints(node)
                 return await worker.execute(
-                    node.task_description, artifacts, session_id,
+                    task, artifacts, session_id,
                     node_id=node.id,
                     run_id=self.run_id,
                 )
@@ -599,7 +635,7 @@ class AgentPool:
                     )
                     try:
                         return await fallback_worker.execute(
-                            node.task_description, artifacts, session_id,
+                            task, artifacts, session_id,
                             node_id=node.id,
                             run_id=self.run_id,
                         )
