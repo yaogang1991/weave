@@ -399,6 +399,7 @@ async def cmd_execute(args, dag: DAG | None = None):
     evaluator = EvaluatorEngine(
         session_store=store,
         pass_threshold=pass_threshold,
+        auto_format_before_eval=config.auto_format_before_eval,
     )
 
     # Create DAG engine + M3 memory integration

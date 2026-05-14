@@ -334,6 +334,13 @@ class HarnessConfig(BaseModel):
     # M2.0: Watchdog
     watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
 
+    # Evaluation: auto-format before lint (opt-in, #206)
+    auto_format_before_eval: bool = Field(
+        default_factory=lambda: os.getenv(
+            "HARNESS_AUTO_FORMAT_BEFORE_EVAL", ""
+        ).lower() in ("true", "1", "yes")
+    )
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> HarnessConfig:
         with open(path, "r", encoding="utf-8") as f:
