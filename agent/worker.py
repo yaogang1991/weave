@@ -44,6 +44,10 @@ TOOL_NON_EMPTY_ARGS: dict[str, list[str]] = {
     "glob": ["pattern"],
 }
 
+# Circuit breaker: consecutive iterations where ALL tool calls have missing/blank
+# args trigger a forced exit to prevent infinite loops (#290).
+EMPTY_TOOL_CALL_LIMIT = 10
+
 
 class AgentWorker:
     """
@@ -89,6 +93,7 @@ class AgentWorker:
         ]
 
         self.artifacts = []
+        consecutive_empty_iterations = 0
 
         for iteration in range(max_iterations):
             # Truncate context if exceeding token budget
@@ -115,6 +120,7 @@ class AgentWorker:
 
             # Execute tool calls
             tool_results = []
+            any_tool_executed = False  # Track if any tool passed validation (#290)
             for tc in assistant_message["tool_calls"]:
                 # Defensive: ensure tool_call_id is present (#169)
                 tool_call_id = tc.get("id") or ""
@@ -167,6 +173,7 @@ class AgentWorker:
                     continue
 
                 result = tool_executor.execute(tool_name, args)
+                any_tool_executed = True
                 tool_results.append({
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -191,6 +198,39 @@ class AgentWorker:
 
             messages.append(assistant_message)
             messages.extend(tool_results)
+
+            # Circuit breaker: track consecutive iterations where ALL tool calls
+            # were invalid (missing/blank args). Prevents infinite empty-call
+            # loops observed with some models (184 calls in R20, #290).
+            all_invalid = bool(assistant_message.get("tool_calls")) and not any_tool_executed
+            if all_invalid:
+                consecutive_empty_iterations += 1
+                logger.warning(
+                    "Consecutive empty tool call iteration %d/%d (node threshold=%d)",
+                    consecutive_empty_iterations, EMPTY_TOOL_CALL_LIMIT, EMPTY_TOOL_CALL_LIMIT,
+                )
+            else:
+                consecutive_empty_iterations = 0
+
+            if consecutive_empty_iterations >= EMPTY_TOOL_CALL_LIMIT:
+                logger.error(
+                    "Circuit breaker triggered: %d consecutive empty tool call iterations. "
+                    "Breaking agent loop to prevent infinite cycling (#290).",
+                    consecutive_empty_iterations,
+                )
+                self.session_store.emit_event(
+                    session_id,
+                    EventType.AGENT_ERROR,
+                    {
+                        "error": "empty_tool_call_circuit_breaker",
+                        "consecutive_empty_iterations": consecutive_empty_iterations,
+                        "message": (
+                            f"Agent loop terminated after {consecutive_empty_iterations} "
+                            f"consecutive iterations with only invalid tool calls."
+                        ),
+                    },
+                )
+                break
 
     def _append_invalid_tool_result(
         self,
