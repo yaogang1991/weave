@@ -48,6 +48,17 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     c. Create separate `impl_tests_<module>` nodes for each subsystem's tests
     Example for a system with 6 modules: foundation → (impl_core, impl_api, impl_services) parallel → (impl_tests_core, impl_tests_api, impl_tests_services) parallel → eval.
     This prevents LLM context exhaustion where a node creates 27/50 files then stops.
+15. **Foundation node completeness**: When using a foundation/impl_foundation
+    node that downstream feature nodes depend on, the foundation node MUST
+    include ALL shared definitions that ANY feature node will need:
+    - ALL database model/schema definitions (not just "core" ones)
+    - ALL base classes, mixins, and shared utilities
+    - Database initialization code that calls `create_all()` or equivalent
+    - Complete import/export registrations
+    Example: If impl_accounts needs an Account model and impl_transactions needs
+    a Transaction model, the foundation node must define BOTH models in its
+    models.py/database.py. Otherwise, `create_all()` won't create the missing
+    tables and downstream tests fail with "no such table" errors (#297).
 13. **Reconcile with existing files**: If the project context includes
     `existing_files`, you MUST review them before planning. Decide for each
     existing file whether to REUSE it (reference in generator task descriptions
