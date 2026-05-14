@@ -152,7 +152,7 @@ class RunService:
         self,
         requirement: str,
         project_path: str | None = None,
-        timeout: int = 600,
+        timeout: int = 1800,
         max_attempts: int = 3,
     ) -> Job:
         """
@@ -216,7 +216,7 @@ class RunService:
         work_dir: Path | None = None
 
         # Resolve timeout
-        timeout: int = job.metadata.get("run_timeout_sec", 600)
+        timeout: int = job.metadata.get("run_timeout_sec", 1800)
 
         try:
             # M2.2: Build BackendManager per-job so repo_root matches project_path

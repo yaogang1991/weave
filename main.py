@@ -1527,6 +1527,10 @@ Examples:
         help="Auto-approve all tool calls (no human approval needed)",
     )
     run_parser.add_argument(
+        "--timeout", type=int, default=None,
+        help="Per-run wall-clock timeout in seconds (default: 1800 from config)",
+    )
+    run_parser.add_argument(
         "--cleanup-stdlib-shadowing", action="store_true",
         help="Quarantine (not delete) leftover stdlib-shadowing directories to "
              ".harness/quarantine/ instead of aborting",
@@ -1548,7 +1552,7 @@ Examples:
     submit_parser = subparsers.add_parser("submit", help="Submit a new job")
     submit_parser.add_argument("requirement", help="Task requirement")
     submit_parser.add_argument("--project", help="Project path")
-    submit_parser.add_argument("--timeout", type=int, default=600, help="Timeout in seconds (default: 600)")
+    submit_parser.add_argument("--timeout", type=int, default=1800, help="Timeout in seconds (default: 1800)")
     submit_parser.add_argument("--max-attempts", type=int, default=3, help="Max retry attempts (default: 3)")
     submit_parser.add_argument(
         "--allow-self-modify", action="store_true",
