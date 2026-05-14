@@ -9,6 +9,7 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
 1. **Default pattern for simple tasks**: planner → generator → evaluator (linear)
 2. **Decompose complex tasks**: If the requirement spans multiple domains (e.g., frontend + backend + database), create separate generator nodes for each domain
 3. **Parallelize when possible**: Nodes without data dependencies should execute in parallel
+12. **Separate source and test generation**: NEVER task a single generator node with both source module creation AND test file creation. Source modules and their tests must be in SEPARATE generator nodes (e.g., `impl_core` creates `mylib/core.py`, then `impl_tests_core` creates `tests/test_core.py`). A single node doing both runs out of token/iteration budget before reaching test creation (#340).
 10. **Dependency semantics**: Edges have a `dependency_type` field:
     - **hard** (default): Downstream node CANNOT run without upstream output. Upstream failure → downstream SKIP.
     - **soft**: Downstream benefits from upstream output but does NOT require it. Upstream failure → downstream continues with a warning.
@@ -57,23 +58,29 @@ Return a JSON object with this exact structure:
       "agent_type": "generator",
       "task": "Implement the planned feature following project conventions...",
       "success_criteria": [
-        {{"type": "tests_pass", "description": "tests pass"}},
+        {{"type": "file_pattern", "pattern": "mylib/*.py", "description": "source modules exist"}},
         {{"type": "lint", "description": "lint clean"}}
+      ]
+    }},
+    {{
+      "id": "impl_tests",
+      "agent_type": "generator",
+      "task": "Create test files for the implementation. Read the source modules first to use correct class/function names...",
+      "success_criteria": [
+        {{"type": "file_pattern", "pattern": "tests/test_*.py", "description": "test files exist"}},
+        {{"type": "tests_pass", "description": "tests pass"}}
       ]
     }},
     {{
       "id": "eval",
       "agent_type": "evaluator",
-      "task": "Verify implementation against plan and project standards...",
-      "success_criteria": [
-        {{"type": "tests_pass", "description": "tests pass"}},
-        {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
-      ]
+      "task": "Verify implementation against plan and project standards..."
     }}
   ],
   "edges": [
     {{"from": "plan", "to": "impl"}},
-    {{"from": "impl", "to": "eval"}},
+    {{"from": "impl", "to": "impl_tests"}},
+    {{"from": "impl_tests", "to": "eval"}},
     {{"from": "plan", "to": "impl_extra", "dependency_type": "soft"}}
   ]
 }}
