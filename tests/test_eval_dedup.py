@@ -515,6 +515,7 @@ class TestRegressionRestoreEvalResult:
             counting_executor,
             retry_failure_handler,
             evaluator=mock_evaluator,
+            work_dir="/tmp/test_workdir",
         )
 
         result_dag = asyncio.run(engine.execute(dag))
@@ -603,6 +604,7 @@ class TestRegressionRestoreEvalResult:
             counting_executor,
             retry_failure_handler,
             evaluator=mock_evaluator,
+            work_dir="/tmp/test_workdir",
         )
 
         result_dag = asyncio.run(engine.execute(dag))

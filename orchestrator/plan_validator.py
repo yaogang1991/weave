@@ -91,6 +91,7 @@ class PlanValidator:
         # auto_fix is accepted for API compat but validation-only is always used
         self.auto_fix = auto_fix
         self.warnings: list[str] = []
+        self.rename_map: dict[str, str] = {}  # stdlib name → prefixed alternative
 
     def validate(self, plan_data: dict) -> dict:
         """Validate plan structure. Returns plan_data unchanged on success.
@@ -98,6 +99,7 @@ class PlanValidator:
         Raises PlanValidationError on any structural error.
         """
         self.warnings.clear()
+        self.rename_map.clear()
         nodes = plan_data.get("nodes", [])
         edges = plan_data.get("edges", [])
 
@@ -159,11 +161,15 @@ class PlanValidator:
 
         return plan_data
 
+    # Prefixes used for stdlib conflict renaming suggestions.
+    _RENAMING_PREFIXES = ("app_", "my_", "")
+
     def _check_stdlib_shadowing(self, nodes: list[dict]) -> None:
         """Warn if task descriptions reference stdlib module names as packages.
 
         Detects patterns like "create a urllib library" or quoted module names
-        where the name matches a Python stdlib module.
+        where the name matches a Python stdlib module.  Builds ``rename_map``
+        so callers (e.g. the orchestrator) can update criterion paths.
         """
         for node in nodes:
             task = node.get("task", "")
@@ -181,9 +187,15 @@ class PlanValidator:
             for candidate in candidates:
                 conflict = check_stdlib_conflict(candidate)
                 if conflict:
+                    # Choose the first non-conflicting prefix.
+                    for pfx in self._RENAMING_PREFIXES:
+                        replacement = f"{pfx}{conflict}"
+                        if not check_stdlib_conflict(replacement):
+                            self.rename_map[conflict] = replacement
+                            break
                     self.warnings.append(
                         f"Node '{node.get('id')}' task may create a package "
                         f"named '{conflict}' which shadows Python stdlib. "
-                        f"Use a prefixed alternative (e.g., 'my_{conflict}', "
-                        f"'{conflict}_lib')."
+                        f"Use a prefixed alternative "
+                        f"(e.g., '{self.rename_map.get(conflict, 'my_' + conflict)}')."
                     )

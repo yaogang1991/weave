@@ -456,6 +456,19 @@ class EvaluatorEngine:
                             "FILE_EXISTS fallback: %s → %s", m, alt,
                         )
                     else:
+                        # Fallback: try stdlib-prefixed rename (#285)
+                        renamed = self._try_stdlib_rename(m, eval_root)
+                        if renamed:
+                            renamed_files = [
+                                f for f in eval_root.glob(renamed) if f.is_file()
+                            ]
+                            if renamed_files:
+                                verified.append(str(renamed_files[0]))
+                                logger.info(
+                                    "FILE_EXISTS stdlib rename fallback: "
+                                    "%s → %s", m, renamed,
+                                )
+                                continue
                         still_missing.append(m)
                 missing = still_missing
 
@@ -1204,6 +1217,17 @@ class EvaluatorEngine:
         ]
 
         if not files:
+            # Fallback: try stdlib-prefixed alternatives (#285)
+            alt = self._try_stdlib_rename(pattern, work_dir)
+            if alt:
+                alt_files = [m for m in work_dir.glob(alt) if m.is_file()]
+                if alt_files:
+                    rel = [str(f.relative_to(work_dir)) for f in alt_files[:10]
+                           if f.is_file()]
+                    return True, (
+                        f"Matched {len(alt_files)} file(s) for renamed "
+                        f"pattern '{alt}' (original: '{pattern}'): {rel}"
+                    ), True
             return False, (
                 f"No files matched pattern: {pattern} "
                 f"(searched in {work_dir})"
@@ -1220,6 +1244,23 @@ class EvaluatorEngine:
             f"Matched {len(files)} file(s) for pattern '{pattern}': "
             f"{rel_names}"
         ), True
+
+    @staticmethod
+    def _try_stdlib_rename(path: str, base: Path) -> str | None:
+        """Fallback for #285: try common stdlib-prefix alternatives.
+
+        When a path like ``exam_app/models/*.py`` doesn't match, try
+        ``exam_app/app_models/*.py`` and similar prefixes so that evaluator
+        criteria written before PlanValidator renaming still resolve.
+        """
+        for pfx in ("app_", "my_"):
+            # Try replacing each path segment with the prefixed variant.
+            parts = Path(path).parts
+            for i, part in enumerate(parts):
+                candidate = str(Path(*parts[:i], pfx + part, *parts[i + 1:]))
+                if list(base.glob(candidate)):
+                    return candidate
+        return None
 
     def _check_pattern_absent(
         self,

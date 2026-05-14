@@ -26,6 +26,7 @@ from core.models import (
     FailureDecision,
     AgentCapability,
     OrchestratorPlan,
+    SuccessCriterion,
 )
 from core.agent_registry import AgentRegistry
 from core.config import LLMConfig
@@ -166,6 +167,10 @@ class IntelligentOrchestrator:
         # Step 7: Convert to DAG
         dag = self._plan_to_dag(plan)
 
+        # Step 8: Apply stdlib rename map to criterion paths (#285)
+        if validator.rename_map:
+            self._apply_rename_map(dag, validator.rename_map)
+
         return dag
 
     async def plan_from_template(
@@ -276,6 +281,42 @@ class IntelligentOrchestrator:
             dag.add_edge(edge_def["from"], edge_def["to"], dependency_type=dep_type)
 
         return dag
+
+    @staticmethod
+    def _apply_rename_map(dag: DAG, rename_map: dict[str, str]) -> None:
+        """Update criterion paths in-place when stdlib shadowing triggered a rename.
+
+        For each node, scan success_criteria for file_exists / file_pattern
+        paths that contain a stdlib-conflicting name and replace it with the
+        prefixed alternative.  Also rewrites plain-string criteria that
+        contain the conflicting name as a path segment.
+        """
+        for node in dag.nodes.values():
+            updated: list[str | SuccessCriterion] = []
+            for crit in node.success_criteria:
+                if isinstance(crit, SuccessCriterion):
+                    new_path = crit.path
+                    new_pattern = crit.pattern
+                    for old, new in rename_map.items():
+                        new_path = new_path.replace(f"/{old}/", f"/{new}/")
+                        new_path = new_path.replace(f"/{old}.", f"/{new}.")
+                        new_pattern = new_pattern.replace(f"/{old}/", f"/{new}/")
+                        new_pattern = new_pattern.replace(f"/{old}.", f"/{new}.")
+                    if new_path != crit.path or new_pattern != crit.pattern:
+                        crit = crit.model_copy(update={
+                            "path": new_path,
+                            "pattern": new_pattern,
+                        })
+                    updated.append(crit)
+                elif isinstance(crit, str):
+                    s = crit
+                    for old, new in rename_map.items():
+                        s = s.replace(f"/{old}/", f"/{new}/")
+                        s = s.replace(f"/{old}.", f"/{new}.")
+                    updated.append(s)
+                else:
+                    updated.append(crit)
+            node.success_criteria = updated
 
     def _extract_json(self, text: str) -> dict | None:
         """
