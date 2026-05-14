@@ -95,11 +95,12 @@ class AgentWatchdogOverride(BaseModel):
 
 
 # Sensible defaults: generator tasks (editing existing files) naturally take
-# much longer than planner/evaluator tasks.
+# much longer than planner/evaluator tasks, especially when writing 6+ test
+# files (#275).
 _DEFAULT_AGENT_WATCHDOG_OVERRIDES: dict[str, AgentWatchdogOverride] = {
     "generator": AgentWatchdogOverride(
-        heartbeat_interval_sec=60.0,
-        heartbeat_miss_threshold=10,
+        heartbeat_interval_sec=90.0,
+        heartbeat_miss_threshold=20,
     ),
 }
 
@@ -109,7 +110,7 @@ class WatchdogConfig(BaseModel):
 
     enabled: bool = True
     heartbeat_interval_sec: float = 30.0
-    heartbeat_miss_threshold: int = 8  # was 5; raised to reduce false kills
+    heartbeat_miss_threshold: int = 12  # was 5→8; raised to reduce false kills (#275)
     # Fraction of miss_threshold at which heartbeat_missed events are
     # emitted.  With threshold=8 and fraction=0.5, alerts fire at
     # missed_count >= 4 instead of the old hardcoded 2 — reducing noise
