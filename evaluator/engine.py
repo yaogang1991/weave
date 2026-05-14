@@ -234,6 +234,21 @@ class EvaluatorEngine:
                     f"artifact(s) not found on disk: {phantom}"
                 )
 
+        # Import smoke test (#344): try importing each generated .py source
+        # file to catch ImportError, NameError, and SyntaxError that flake8
+        # misses (e.g., hallucinated stdlib function arguments that only fail
+        # at runtime).  Only checks source files, not test files.
+        if output_artifacts and eval_dir:
+            import_errors = self._import_smoke_test(
+                output_artifacts, Path(eval_dir),
+            )
+            if import_errors:
+                overall_passed = False
+                for err_file, err_msg in import_errors:
+                    feedback_parts.append(
+                        f"FAIL import_check: {err_file} — {err_msg}"
+                    )
+
         feedback = "\n".join(feedback_parts)
         if has_uncheckable:
             feedback += (
@@ -298,6 +313,59 @@ class EvaluatorEngine:
             )
 
         return result
+
+    # ------------------------------------------------------------------
+    # Import smoke test (#344)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _import_smoke_test(
+        artifacts: list[str],
+        eval_dir: Path,
+    ) -> list[tuple[str, str]]:
+        """Try importing each generated .py source file.
+
+        Returns a list of (file_path, error_message) for files that fail
+        to import.  Only checks source files (skips test files and
+        non-Python files).  Catches ImportError, NameError, SyntaxError,
+        and other module-load-time failures that flake8 cannot detect.
+        """
+        errors: list[tuple[str, str]] = []
+        for art in artifacts:
+            p = Path(art)
+            if p.suffix != ".py":
+                continue
+            # Skip test files — they may have test-specific imports
+            parts = p.parts
+            if any(
+                part in ("tests", "test") or part.startswith("test_")
+                for part in parts
+            ):
+                continue
+            full = p if p.is_absolute() else eval_dir / p
+            if not full.is_file():
+                continue
+            # Convert file path to module path: a/b/c.py → a.b.c
+            rel = p if not p.is_absolute() else p.relative_to(eval_dir)
+            module = str(rel.with_suffix("")).replace("/", ".").replace(
+                "\\", ".",
+            )
+            try:
+                result = subprocess.run(
+                    [sys.executable, "-c", f"import {module}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    cwd=str(eval_dir),
+                )
+                if result.returncode != 0:
+                    err = result.stderr.strip().split("\n")[-1]
+                    errors.append((art, err))
+            except subprocess.TimeoutExpired:
+                errors.append((art, "import timed out (10s)"))
+            except Exception as exc:
+                errors.append((art, str(exc)))
+        return errors
 
     # ------------------------------------------------------------------
     # Dispatch — returns 3-tuple (passed, msg, was_auto)
