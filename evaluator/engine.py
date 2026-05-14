@@ -427,6 +427,9 @@ class EvaluatorEngine:
 
     def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None, eval_id: str = "") -> tuple[bool, str]:
         """Run pytest with a fixed command. Never executes arbitrary commands."""
+        # Detect __init__.py in test subdirs that shadow project packages (#221).
+        # Report as diagnostic warning rather than deleting files.
+        shadow_warnings = self._detect_shadowing_test_inits(work_dir)
         try:
             cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
             if test_path:
@@ -444,6 +447,12 @@ class EvaluatorEngine:
             )
             passed = result.returncode == 0
             if passed:
+                if shadow_warnings:
+                    return passed, (
+                        "Tests passed\n\nWARNING: Shadowing test __init__.py files detected "
+                        "(may cause ModuleNotFoundError):\n"
+                        + "\n".join(f"  - {w}" for w in shadow_warnings)
+                    )
                 return passed, "Tests passed"
             # Extract specific failure lines for actionable feedback
             failure_lines = []
@@ -451,7 +460,14 @@ class EvaluatorEngine:
                 if any(kw in line for kw in ("FAILED", "AssertionError", "Error:", "error")):
                     failure_lines.append(line)
             detail = "\n".join(failure_lines[-20:]) if failure_lines else result.stdout[-500:]
-            return passed, f"Tests failed:\n{detail}"
+            msg = f"Tests failed:\n{detail}"
+            if shadow_warnings:
+                msg += (
+                    "\n\nWARNING: Shadowing test __init__.py files detected "
+                    "(may cause ModuleNotFoundError):\n"
+                    + "\n".join(f"  - {w}" for w in shadow_warnings)
+                )
+            return passed, msg
         except subprocess.TimeoutExpired:
             return False, (
                 "Tests timed out after 60s — likely a background thread or process leak. "
@@ -462,6 +478,32 @@ class EvaluatorEngine:
             return False, "pytest not installed"
         except Exception as e:
             return False, f"Test execution error: {e}"
+
+    @staticmethod
+    def _detect_shadowing_test_inits(work_dir: Path) -> list[str]:
+        """Detect __init__.py in tests/<pkg>/ that shadows root <pkg>/ (#221).
+
+        Returns a list of diagnostic messages instead of deleting files.
+        Generator agents sometimes create ``tests/configlib/__init__.py``
+        which shadows the root ``configlib/`` package, causing
+        ModuleNotFoundError when pytest tries to import the package.
+        """
+        warnings: list[str] = []
+        tests_dir = work_dir / "tests"
+        if not tests_dir.is_dir():
+            return warnings
+        for init_file in tests_dir.glob("*/__init__.py"):
+            pkg_name = init_file.parent.name
+            root_pkg = work_dir / pkg_name / "__init__.py"
+            if root_pkg.is_file():
+                warnings.append(
+                    f"tests/{pkg_name}/__init__.py shadows root {pkg_name}/ package"
+                )
+                logger.warning(
+                    "Shadowing detected: tests/%s/__init__.py shadows %s/ package",
+                    pkg_name, pkg_name,
+                )
+        return warnings
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
         """Dry-run autofix then delta-lint resolved target files.
