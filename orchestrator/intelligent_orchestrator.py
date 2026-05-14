@@ -40,6 +40,55 @@ logger = logging.getLogger(__name__)
 from templates.library import TemplateRegistry
 
 
+# Infrastructure errors cannot be fixed by retrying with the same environment.
+# Detect early and abort instead of wasting retry budget (#187).
+INFRASTRUCTURE_ERROR_PATTERNS: list[str] = [
+    # Explicit tool/command missing — always infra
+    "no linter available",
+    "pytest not installed",
+    "no python interpreter",
+    # Network / permission — always infra
+    "permission denied",
+    "connection refused",
+    "connection timed out",
+]
+
+# Known infrastructure tool commands — only "command not found" for these
+# counts as an infrastructure error.  Other missing commands (project CLIs,
+# make targets, etc.) may be fixable by the agent via retry.
+_KNOWN_TOOL_COMMANDS: list[str] = [
+    "python",
+    "python3",
+    "pytest",
+    "flake8",
+    "ruff",
+    "autopep8",
+    "pip",
+    "node",
+    "npm",
+    "git",
+]
+
+
+def _is_infrastructure_error(error: str) -> bool:
+    """Check whether an error is an infrastructure/environment issue
+    that cannot be resolved by retrying."""
+    if not error:
+        return False
+    lower = error.lower()
+    if any(pattern in lower for pattern in INFRASTRUCTURE_ERROR_PATTERNS):
+        return True
+    # Check for "command not found" only when it refers to a known tool.
+    if "command not found" in lower:
+        # Match both "bash: python: command not found" and "command not found: python"
+        return any(
+            f"{tool}: command not found" in lower
+            or f"command not found: {tool}" in lower
+            for tool in _KNOWN_TOOL_COMMANDS
+        )
+    return False
+
+
 class IntelligentOrchestrator:
     """
     Orchestrator Agent: Plans DAG, monitors execution, adapts to failures.
@@ -203,6 +252,19 @@ class IntelligentOrchestrator:
         and decides the best course of action, rather than using hardcoded rules.
         """
         failed_node = dag.nodes[failed_node_id]
+
+        # Infrastructure errors (missing tools, broken env) are never fixable
+        # by retrying — abort immediately instead of wasting retry budget (#187).
+        node_error = failed_node.error or error
+        if _is_infrastructure_error(node_error):
+            logger.warning(
+                "Node %s failed with infrastructure error, aborting: %s",
+                failed_node_id, node_error[:200],
+            )
+            return FailureDecision(
+                action="abort",
+                reasoning=f"Infrastructure error (not retryable): {node_error[:200]}",
+            )
 
         # Build DAG status summary
         dag_status = []
