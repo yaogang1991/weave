@@ -71,7 +71,8 @@ class FileExistsChecker:
             missing.append(cand)
 
         if missing:
-            still_missing = self._resolve_missing(missing, eval_root)
+            still_missing, newly_verified = self._resolve_missing(missing, eval_root)
+            verified.extend(newly_verified)
             missing = still_missing
 
         if missing:
@@ -92,13 +93,19 @@ class FileExistsChecker:
 
     def _resolve_missing(
         self, missing: list[str], eval_root: Path,
-    ) -> list[str]:
-        """Try fallbacks for missing files: test path alternatives, stdlib rename."""
+    ) -> tuple[list[str], list[str]]:
+        """Try fallbacks for missing files: test path alternatives, stdlib rename.
+
+        Returns (still_missing, newly_verified) — caller must merge newly_verified
+        into its own verified list to get an accurate count (#305).
+        """
         still_missing: list[str] = []
+        newly_verified: list[str] = []
         for m in missing:
             alt = self._find_test_file_alternative(m, eval_root)
             if alt:
                 logger.info("FILE_EXISTS fallback: %s → %s", m, alt)
+                newly_verified.append(alt)
                 continue
             renamed = self._try_stdlib_rename(m, eval_root)
             if renamed:
@@ -110,9 +117,10 @@ class FileExistsChecker:
                         "FILE_EXISTS stdlib rename fallback: %s → %s",
                         m, renamed,
                     )
+                    newly_verified.append(str(renamed_files[0]))
                     continue
             still_missing.append(m)
-        return still_missing
+        return still_missing, newly_verified
 
     @staticmethod
     def _find_test_file_alternative(expected: str, base: Path) -> str | None:

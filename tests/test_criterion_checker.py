@@ -197,3 +197,58 @@ class TestExistingBehaviorPreserved:
         )
         assert passed
         assert was_auto
+
+
+class TestFileExistsResolveMissingTracking:
+    """#305: _resolve_missing must track fallback-matched files in verified."""
+
+    def test_resolve_missing_returns_tuple(self, tmp_path):
+        """_resolve_missing returns (still_missing, newly_verified) tuple."""
+        from evaluator.checkers.file_exists import FileExistsChecker
+
+        checker = FileExistsChecker()
+        still_missing, newly_verified = checker._resolve_missing(
+            ["nonexistent.py"], tmp_path,
+        )
+        assert isinstance(still_missing, list)
+        assert isinstance(newly_verified, list)
+        assert still_missing == ["nonexistent.py"]
+        assert newly_verified == []
+
+    def test_resolve_missing_tracks_stdlib_rename(self, tmp_path):
+        """When _try_stdlib_rename finds a file, it appears in newly_verified."""
+        from evaluator.checkers.file_exists import FileExistsChecker
+
+        # Create app_x.py — _try_stdlib_rename("x.py") will find it
+        (tmp_path / "app_x.py").write_text("pass", encoding="utf-8")
+
+        checker = FileExistsChecker()
+        # "x.py" → stem "x" (< 3 chars, skipped in initial glob pass)
+        # _try_stdlib_rename tries "app_x.py" → found
+        still_missing, newly_verified = checker._resolve_missing(
+            ["x.py"], tmp_path,
+        )
+        assert still_missing == []
+        assert len(newly_verified) == 1
+        assert "app_x" in newly_verified[0]
+
+    def test_verified_count_includes_fallback(self, tmp_path):
+        """Full integration: verified count includes fallback-matched files."""
+        from evaluator.checkers.file_exists import FileExistsChecker
+
+        # Create a file that exists directly
+        (tmp_path / "real.py").write_text("pass", encoding="utf-8")
+        # Create a file that _try_stdlib_rename can find
+        (tmp_path / "app_cfg.py").write_text("pass", encoding="utf-8")
+
+        checker = FileExistsChecker()
+        ctx = EvaluationContext(work_dir=tmp_path)
+        crit = SuccessCriterion(
+            type=CriterionType.FILE_EXISTS,
+            description="verify",
+            path="real.py,cfg.py",
+        )
+        result = checker.check(crit, ctx)
+        assert result.passed
+        # Both files should be verified: real.py directly + cfg.py via fallback
+        assert "2 file(s)" in result.message
