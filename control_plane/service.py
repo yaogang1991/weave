@@ -58,6 +58,8 @@ logger = logging.getLogger(__name__)
 def _classify_error(error: str) -> str:
     """Classify an error string into a canonical category."""
     lowered = error.lower()
+    if "429" in lowered or "ratelimit" in lowered or "rate limit" in lowered:
+        return "rate_limit"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
     if "evaluation failed" in lowered or "eval_" in lowered:
@@ -511,24 +513,47 @@ class RunService:
         - If ``attempt < max_attempts``: transition to QUEUED, increment attempt,
           clear previous error state.
         - Otherwise: transition to DEAD_LETTER.
+        - For ``rate_limit`` errors: re-queue WITHOUT consuming a retry attempt.
+          429 errors are quota exhaustion, not implementation failures (#351).
 
         Args:
             job: The failed Job instance.
             error: Error message to record.
             error_category: Canonical error category
-                            (timeout / eval_failed / tool_blocked / unknown).
+                            (timeout / eval_failed / tool_blocked /
+                             rate_limit / watchdog / unknown).
         """
         max_attempts = job.retry_policy.max_attempts
+
+        # Rate limit: re-queue WITHOUT consuming retry budget (#351).
+        # 429 errors are transient quota exhaustion, not failures.
+        if error_category == "rate_limit":
+            logger.warning(
+                "Rate limit hit for job %s — re-queuing without "
+                "consuming retry (attempt %d/%d remains): %s",
+                job.id, job.attempt, max_attempts,
+                error[:200],
+            )
+            return self.repository.transition_job_status(
+                job.id, JobStatus.QUEUED,
+                error=error,
+                error_category=error_category,
+                skip_attempt_bump=True,
+            )
 
         if job.attempt < max_attempts:
             # Retry: FAILED -> QUEUED (bump_attempt happens in repository)
             return self.repository.transition_job_status(
-                job.id, JobStatus.QUEUED, error=error, error_category=error_category
+                job.id, JobStatus.QUEUED,
+                error=error,
+                error_category=error_category,
             )
         else:
             # Exhausted retries: FAILED -> DEAD_LETTER
             return self.repository.transition_job_status(
-                job.id, JobStatus.DEAD_LETTER, error=error, error_category=error_category
+                job.id, JobStatus.DEAD_LETTER,
+                error=error,
+                error_category=error_category,
             )
 
     # ------------------------------------------------------------------

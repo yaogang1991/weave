@@ -267,12 +267,20 @@ class JobRepository:
         to_status: JobStatus,
         error: str = "",
         error_category: str = "",
+        skip_attempt_bump: bool = False,
     ) -> Job:
         """
         Move *job_id* to *to_status*.
 
+        Args:
+            skip_attempt_bump: When True, do NOT increment the attempt
+                counter on FAILED→QUEUED transition. Used for transient
+                errors like 429 rate limits that should not consume the
+                retry budget (#351).
+
         Raises:
-            ValueError: If the transition is not allowed or the job does not exist.
+            ValueError: If the transition is not allowed or the job does
+                not exist.
         """
         job = self.get_job(job_id)
         if job is None:
@@ -296,9 +304,12 @@ class JobRepository:
 
         # Special handling for retry transitions
         if from_status == JobStatus.FAILED and to_status == JobStatus.QUEUED:
-            job.bump_attempt()
-            job.last_error = ""
-            job.error_category = ""
+            if not skip_attempt_bump:
+                job.bump_attempt()
+            # Keep error info for rate_limit so downstream can see it
+            if error_category != "rate_limit":
+                job.last_error = ""
+                job.error_category = ""
             job.lease_owner = None
             job.lease_expires_at = None
 

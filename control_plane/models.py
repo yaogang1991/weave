@@ -141,7 +141,10 @@ class Job(BaseModel):
     @field_validator("error_category")
     @classmethod
     def _valid_error_category(cls, v: str) -> str:
-        allowed = {"", "timeout", "eval_failed", "tool_blocked", "unknown", "watchdog", "approval_timeout"}
+        allowed = {
+            "", "timeout", "eval_failed", "tool_blocked",
+            "unknown", "watchdog", "approval_timeout", "rate_limit",
+        }
         if v not in allowed:
             raise ValueError(f"Invalid error_category: {v!r}")
         return v
