@@ -203,7 +203,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         tool_registry: ToolRegistry,
         guardrails: Guardrails | None = None,
         max_iterations: int = 50,
-        timeout: int = 300,
+        timeout: int = 300,  # Deprecated: timeout managed by dag_engine (#360)
         max_context_tokens: int = 100_000,
         memory_manager: Any | None = None,
         job_id: str = "",
@@ -215,7 +215,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         self.tool_registry = tool_registry
         self.guardrails = guardrails
         self.max_iterations = max_iterations
-        self.timeout = timeout
+        self.timeout = timeout  # Deprecated: not used for execution (#360)
         self.memory_manager = memory_manager
         self.job_id = job_id
         self.approval_repo = approval_repo
@@ -550,7 +550,7 @@ class AgentPool:
         tool_registry: ToolRegistry | None = None,
         guardrails: Guardrails | None = None,
         max_iterations: int = 50,
-        timeout: int = 300,
+        timeout: int = 300,  # Deprecated: timeout managed by dag_engine (#360)
         max_context_tokens: int = 100_000,
         llm_router: LLMRouter | None = None,
         memory_manager: Any | None = None,
@@ -564,7 +564,7 @@ class AgentPool:
         self.tool_registry = tool_registry or ToolRegistry()
         self.guardrails = guardrails
         self.max_iterations = max_iterations
-        self.timeout = timeout
+        self.timeout = timeout  # Deprecated: not used for execution (#360)
         self.max_context_tokens = max_context_tokens
         self.llm_router = llm_router
         self.memory_manager = memory_manager

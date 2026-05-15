@@ -62,7 +62,7 @@ def _classify_error(error: str) -> str:
     as well as legacy string patterns.
     """
     lowered = error.lower()
-    # Rate limit: structured exception name or legacy patterns
+    # Rate limit: structured exception names and legacy patterns
     if any(s in lowered for s in ("ratelimiterror", "429", "rate_limit", "rate limit")):
         return "rate_limit"
     if "nodetimeouterror" in lowered:
@@ -363,7 +363,8 @@ class RunService:
                 # NodeTimeoutError should mark run as TIMED_OUT rather than
                 # merely FAILED (#360).  Note: `timeout` here is the run-level
                 # timeout (default 1800s); the actual node timeout (e.g. 300s)
-                # is recorded in the node error message.
+                # is recorded in the node error message.  Called after
+                # transition to avoid state inconsistency if transition throws.
                 if error_cat == "timeout" and failed_nodes:
                     run = self._lifecycle.mark_timed_out(run, timeout)
                 if work_dir is not None:
@@ -972,7 +973,9 @@ class RunService:
             node_timeout_config=_cfg.node_timeout,
         )
 
-        # Register event handler: forward DAG node events to session store
+        # Inject node timeout config so _get_node_timeout uses NodeTimeoutConfig
+        # instead of fallback (interval * threshold) (#360).
+        engine._node_timeout_config = _cfg.node_timeout
         async def _session_event_handler(event):
             event_type_map = {
                 "started": EventType.WORKFLOW_STAGE_START,

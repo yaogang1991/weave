@@ -433,6 +433,9 @@ class HarnessConfig(BaseModel):
         node_max = self.node_timeout.max_timeout
         run_timeout = self.run_timeout_sec
 
+        # Use >= (not >) so that equal values also trigger a warning:
+        # if HTTP timeout == node timeout, a slow LLM call will consume
+        # the entire node budget without making progress.
         if llm_timeout >= node_min:
             issues.append(
                 f"HTTP timeout ({llm_timeout}s) >= min node timeout "

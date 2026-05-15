@@ -1,5 +1,5 @@
 """
-Tests for PR 1/2/3 of fault tolerance refactoring (#360).
+Tests for PR 1/2/3/4 of fault tolerance refactoring (#360).
 
 Covers:
 1. NodeTimeoutError raised (not returned as dict) on agent timeout
@@ -9,6 +9,7 @@ Covers:
 5. _classify_error recognises new exception names
 6. PR2: Node timeout managed by dag_engine + cooperative cancel
 7. PR3: progress_callback replaces _heartbeat_loop
+8. PR4: Timeout inequality validation
 """
 
 import asyncio
