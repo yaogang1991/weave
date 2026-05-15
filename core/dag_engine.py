@@ -78,6 +78,8 @@ class DAGExecutionEngine:
         watchdog_overrides: dict[str, tuple[float, int]] | None = None,
         # Per-agent-type alert thresholds: {agent_type: min_missed_for_alert}
         alert_thresholds: dict[str, int] | None = None,
+        # M3.4: Node timeout configuration (#360)
+        node_timeout_config: Any | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -103,6 +105,8 @@ class DAGExecutionEngine:
         # M3.2: Memory integration
         self.memory_manager = memory_manager
         self._session_id = session_id
+        # M3.4: Node timeout configuration (#360)
+        self._node_timeout_config = node_timeout_config
         # Dedicated thread pool for evaluator calls — avoids global pool
         # join timeout warnings on event loop exit.
         self._executor = concurrent.futures.ThreadPoolExecutor(
@@ -1135,9 +1139,7 @@ class DAGExecutionEngine:
         Uses NodeTimeoutConfig from config if available, otherwise falls
         back to watchdog-based calculation for backward compatibility.
         """
-        # Check if node_timeout config is available via config attribute
-        # (injected by service.py during engine creation)
-        if hasattr(self, '_node_timeout_config') and self._node_timeout_config:
+        if self._node_timeout_config is not None:
             return self._node_timeout_config.timeout_for(agent_type)
         # Fallback: derive from watchdog settings (backward compat)
         interval, threshold = self._get_heartbeat_settings(agent_type)

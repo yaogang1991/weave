@@ -62,14 +62,11 @@ def _classify_error(error: str) -> str:
     as well as legacy string patterns.
     """
     lowered = error.lower()
-    # Structured exception names (take priority over string patterns)
-    if "ratelimiterror" in lowered or "ratelimit" in lowered:
+    # Rate limit: structured exception name or legacy patterns
+    if any(s in lowered for s in ("ratelimiterror", "429", "rate_limit", "rate limit")):
         return "rate_limit"
     if "nodetimeouterror" in lowered:
         return "timeout"
-    # Legacy string patterns
-    if "429" in lowered or "rate_limit" in lowered or "rate limit" in lowered:
-        return "rate_limit"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
     if "evaluation failed" in lowered or "eval_" in lowered:
@@ -353,8 +350,10 @@ class RunService:
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
 
-                # NodeTimeoutError from agent_pool should mark run as TIMED_OUT
-                # rather than merely FAILED (#360).
+                # NodeTimeoutError should mark run as TIMED_OUT rather than
+                # merely FAILED (#360).  Note: `timeout` here is the run-level
+                # timeout (default 1800s); the actual node timeout (e.g. 300s)
+                # is recorded in the node error message.
                 if error_cat == "timeout" and failed_nodes:
                     run = self._lifecycle.mark_timed_out(run, timeout)
 
@@ -951,11 +950,8 @@ class RunService:
                 agent_type: self.watchdog_config.alert_threshold_for(agent_type)
                 for agent_type in self.watchdog_config.agent_overrides
             },
+            node_timeout_config=_cfg.node_timeout,
         )
-
-        # Inject node timeout config so _get_node_timeout uses NodeTimeoutConfig
-        # instead of fallback (interval * threshold) (#360).
-        engine._node_timeout_config = _cfg.node_timeout
 
         # Register event handler: forward DAG node events to session store
         async def _session_event_handler(event):
