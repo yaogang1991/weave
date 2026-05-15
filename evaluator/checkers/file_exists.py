@@ -51,7 +51,8 @@ class FileExistsChecker:
 
         if not candidates:
             # Generator with FILE_EXISTS criteria but zero output (#372).
-            if not output_artifacts:
+            # Distinguish None (untracked → vacuous pass) from [] (confirmed empty → fail).
+            if output_artifacts is not None and len(output_artifacts) == 0:
                 return CheckResult(
                     passed=False,
                     message=(

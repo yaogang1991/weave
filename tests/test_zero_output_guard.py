@@ -42,8 +42,13 @@ class TestFileExistsZeroOutput:
         assert not result.passed
         assert "no output files" in result.message.lower() or "did not create" in result.message.lower()
 
-    def test_fails_with_none_artifacts(self, tmp_path):
-        """FILE_EXISTS with None artifacts and no crit.path → FAIL (#372)."""
+    def test_passes_with_none_artifacts_vacuous(self, tmp_path):
+        """FILE_EXISTS with None artifacts and no crit.path → vacuous PASS (#372).
+
+        None means "untracked" (not "confirmed empty"). This preserves the
+        existing semantics where FILE_EXISTS passes vacuously when there are
+        no specific files to check and artifacts are not tracked.
+        """
         crit = SuccessCriterion(
             type=CriterionType.FILE_EXISTS,
             description="regex.py exists",
@@ -51,7 +56,7 @@ class TestFileExistsZeroOutput:
         ctx = EvaluationContext(work_dir=tmp_path, artifacts=None)
         checker = FileExistsChecker()
         result = checker.check(crit, ctx)
-        assert not result.passed
+        assert result.passed
 
     def test_passes_with_artifacts_present(self, tmp_path):
         """FILE_EXISTS with actual artifacts → PASS."""
