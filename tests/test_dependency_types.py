@@ -39,7 +39,7 @@ def _make_node(nid: str, agent_type: str = "generator", **kw) -> DAGNode:
     return DAGNode(**defaults)
 
 
-async def _noop_executor(node, artifacts):
+async def _noop_executor(node, artifacts, **kwargs):
     return {"status": "completed", "summary": "done", "artifacts": [], "output": "ok"}
 
 
@@ -154,7 +154,7 @@ class TestHardDependencySkip:
         dag.add_node(_make_node("b"))
         dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}
@@ -192,7 +192,7 @@ class TestSoftDependencyContinue:
         dag.add_node(_make_node("b"))
         dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}
@@ -214,7 +214,7 @@ class TestSoftDependencyContinue:
         dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
         dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}
@@ -240,7 +240,7 @@ class TestMixedDependencies:
         dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
         dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}
@@ -262,7 +262,7 @@ class TestMixedDependencies:
         dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
         dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
-        async def fail_b(node, artifacts):
+        async def fail_b(node, artifacts, **kwargs):
             if node.id == "b":
                 raise RuntimeError("B failed")
             return {"artifacts": [], "output": "ok"}
@@ -284,7 +284,7 @@ class TestMixedDependencies:
         dag.add_edge("a", "c", dependency_type=DependencyType.SOFT)
         dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
-        async def fail_ab(node, artifacts):
+        async def fail_ab(node, artifacts, **kwargs):
             if node.id in ("a", "b"):
                 raise RuntimeError(f"{node.id} failed")
             return {"artifacts": [], "output": "ok"}
@@ -310,7 +310,7 @@ class TestSoftDepWarningArtifact:
 
         received_artifacts: list[list] = []
 
-        async def fail_a_capture_b(node, artifacts):
+        async def fail_a_capture_b(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             received_artifacts.append(artifacts)
@@ -344,7 +344,7 @@ class TestSoftDepWarningArtifact:
 
         received_artifacts: list[list] = []
 
-        async def capture(node, artifacts):
+        async def capture(node, artifacts, **kwargs):
             received_artifacts.append(artifacts)
             return {"artifacts": [], "output": "ok"}
 
@@ -463,7 +463,7 @@ class TestGetReadyNodesSoftDep:
         dag.add_edge("foundation", "b", dependency_type=DependencyType.HARD)
         dag.add_edge("foundation", "c", dependency_type=DependencyType.HARD)
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}
@@ -491,7 +491,7 @@ class TestGetReadyNodesSoftDep:
         for name in ["impl_core", "impl_accounts", "impl_trans", "impl_budgets", "impl_reports"]:
             dag.add_edge(name, "integration", dependency_type=DependencyType.HARD)
 
-        async def selective_fail(node, artifacts):
+        async def selective_fail(node, artifacts, **kwargs):
             if node.id == "impl_accounts":
                 raise RuntimeError("accounts failed")
             return {"artifacts": [], "output": "ok"}
@@ -522,7 +522,7 @@ class TestGetReadyNodesSoftDep:
         for name in ["impl_core", "impl_accounts", "impl_trans"]:
             dag.add_edge(name, "integration", dependency_type=DependencyType.SOFT)
 
-        async def selective_fail(node, artifacts):
+        async def selective_fail(node, artifacts, **kwargs):
             if node.id == "impl_accounts":
                 raise RuntimeError("accounts failed")
             return {"artifacts": [], "output": "ok"}
@@ -547,7 +547,7 @@ class TestBackwardCompatibility:
         dag.add_node(_make_node("b"))
         dag.add_edge("a", "b")
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}
@@ -568,7 +568,7 @@ class TestBackwardCompatibility:
         dag.add_edge("a", "b")
         dag.add_edge("b", "c")
 
-        async def fail_a(node, artifacts):
+        async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "output": "ok"}

@@ -6,6 +6,7 @@ Validates:
 - Dangling edges → raise PlanValidationError
 - Cycle detection → raise PlanValidationError
 - Stdlib module name shadowing → warning (#238)
+- Parallel write conflicts → raise PlanValidationError or warning (#272)
 
 Design: validation-only, never silently mutates the plan. This avoids
 introducing subtle semantic changes when duplicate IDs make edge
@@ -177,6 +178,8 @@ class PlanValidator:
 
         # Per-node file count estimation (#284)
         self._check_node_file_count(nodes)
+        # Parallel write conflict detection (#272)
+        self._check_parallel_write_conflicts(nodes, edges)
 
         return plan_data
 
@@ -287,3 +290,149 @@ class PlanValidator:
                     f"Decompose into multiple parallel generator nodes with a "
                     f"shared foundation node to prevent context exhaustion."
                 )
+
+    def _check_parallel_write_conflicts(
+        self,
+        nodes: list[dict],
+        edges: list[dict],
+    ) -> None:
+        """Detect file ownership conflicts between parallel generator nodes (#272).
+
+        Identifies nodes at the same topological level (no dependency between
+        them) and checks for overlapping ``owned_files`` declarations.
+
+        Conflict patterns detected:
+        1. __init__.py collision: two parallel generators in the same package.
+        2. Same-file ownership overlap: two nodes both claim the same file.
+        3. No ownership contracts on parallel generators: emits serialization warning.
+
+        Does NOT raise for shared files that have a downstream merge node.
+        """
+        node_map = {n.get("id"): n for n in nodes if n.get("id")}
+        node_ids = list(node_map.keys())
+
+        # Compute topological levels
+        in_degree = {nid: 0 for nid in node_ids}
+        adj: dict[str, list[str]] = {nid: [] for nid in node_ids}
+        for edge in edges:
+            from_id = edge.get("from")
+            to_id = edge.get("to")
+            if from_id in node_map and to_id in node_map:
+                adj.setdefault(from_id, []).append(to_id)
+                in_degree[to_id] = in_degree.get(to_id, 0) + 1
+
+        levels: list[list[str]] = []
+        remaining = set(node_ids)
+        while remaining:
+            current = [nid for nid in remaining if in_degree.get(nid, 0) == 0]
+            if not current:
+                break  # Cycle — already caught by cycle detection
+            levels.append(current)
+            remaining -= set(current)
+            for nid in current:
+                for dep in adj.get(nid, []):
+                    in_degree[dep] = in_degree.get(dep, 0) - 1
+
+        # Check each level for parallel conflicts
+        for level in levels:
+            # Find generator nodes in this level
+            generators = [
+                nid for nid in level
+                if node_map[nid].get("agent_type", "") == "generator"
+            ]
+
+            if len(generators) < 2:
+                continue
+
+            # Check if all generators have owned_files
+            owned_map: dict[str, set[str]] = {}
+            for nid in generators:
+                owned = node_map[nid].get("owned_files", [])
+                owned_map[nid] = set(owned) if owned else set()
+
+            # Check for missing contracts → serialization warning
+            no_contract = [nid for nid in generators if not owned_map[nid]]
+            if no_contract:
+                self.warnings.append(
+                    f"Parallel generators {no_contract} have no owned_files "
+                    f"declared — automatic serialization recommended to prevent "
+                    f"write conflicts (#272 EC4)."
+                )
+
+            # Check for overlapping owned_files
+            for i in range(len(generators)):
+                for j in range(i + 1, len(generators)):
+                    nid_a = generators[i]
+                    nid_b = generators[j]
+                    overlap = owned_map[nid_a] & owned_map[nid_b]
+                    if not overlap:
+                        continue
+
+                    # Check if any overlapping file is __init__.py
+                    init_py_conflicts = [
+                        f for f in overlap
+                        if f.endswith("/__init__.py") or f == "__init__.py"
+                    ]
+                    if init_py_conflicts:
+                        raise PlanValidationError(
+                            f"Parallel generators '{nid_a}' and '{nid_b}' both "
+                            f"declare ownership of shared __init__.py files: "
+                            f"{init_py_conflicts}. "
+                            f"Assign __init__.py to exactly one node and mark "
+                            f"it as forbidden in the other (#272 EC1)."
+                        )
+
+                    # Check if there's a downstream merge node for the overlap
+                    has_merge = self._has_downstream_merge(
+                        nid_a, nid_b, levels, node_map, adj,
+                    )
+
+                    if has_merge:
+                        self.warnings.append(
+                            f"Parallel generators '{nid_a}' and '{nid_b}' share "
+                            f"files {sorted(overlap)} — downstream merge node "
+                            f"detected, but ensure coordination (#272 EC2)."
+                        )
+                    else:
+                        raise PlanValidationError(
+                            f"Parallel generators '{nid_a}' and '{nid_b}' both "
+                            f"declare ownership of the same files: "
+                            f"{sorted(overlap)}. "
+                            f"Either assign each file to exactly one node, "
+                            f"or add a downstream merge node that depends on "
+                            f"both (#272 EC2)."
+                        )
+
+    @staticmethod
+    def _has_downstream_merge(
+        node_a: str,
+        node_b: str,
+        levels: list[list[str]],
+        node_map: dict[str, dict],
+        adj: dict[str, list[str]],
+    ) -> bool:
+        """Check if there's a downstream node that depends on both node_a and node_b."""
+        # BFS from each node to find all downstream nodes
+        def descendants(start: str) -> set[str]:
+            visited: set[str] = set()
+            queue = [start]
+            while queue:
+                current = queue.pop(0)
+                for child in adj.get(current, []):
+                    if child not in visited:
+                        visited.add(child)
+                        queue.append(child)
+            return visited
+
+        desc_a = descendants(node_a)
+        desc_b = descendants(node_b)
+        common = desc_a & desc_b
+
+        # Check if any common descendant is a merge node (evaluator or has both as deps)
+        for merge_candidate in common:
+            merge_node = node_map.get(merge_candidate, {})
+            if merge_node.get("agent_type") == "evaluator":
+                return True
+            # Check if it explicitly depends on both nodes
+            # (Heuristic: if it's in common descendants, it likely merges)
+        return bool(common)

@@ -35,7 +35,7 @@ def _make_node(nid: str, agent_type: str = "generator", **kw) -> DAGNode:
     return DAGNode(**defaults)
 
 
-async def _noop_executor(node, artifacts):
+async def _noop_executor(node, artifacts, **kwargs):
     return {"artifacts": [], "summary": "done"}
 
 
@@ -67,7 +67,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def selective_executor(node, artifacts):
+        async def selective_executor(node, artifacts, **kwargs):
             if node.id == "A":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "summary": f"{node.id} done"}
@@ -102,7 +102,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def selective_executor(node, artifacts):
+        async def selective_executor(node, artifacts, **kwargs):
             if node.id == "A":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "summary": f"{node.id} done"}
@@ -135,7 +135,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def fail_executor(node, artifacts):
+        async def fail_executor(node, artifacts, **kwargs):
             raise RuntimeError("fail")
 
         engine = DAGExecutionEngine(
@@ -166,7 +166,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def selective_executor(node, artifacts):
+        async def selective_executor(node, artifacts, **kwargs):
             if node.id == "A":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "summary": f"{node.id} done"}
@@ -208,7 +208,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def selective_executor(node, artifacts):
+        async def selective_executor(node, artifacts, **kwargs):
             if node.id == "A":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "summary": f"{node.id} done"}
@@ -244,7 +244,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def fail_a_executor(node, artifacts):
+        async def fail_a_executor(node, artifacts, **kwargs):
             if node.id == "A":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "summary": f"{node.id} done"}
@@ -291,7 +291,7 @@ class TestDependencyAwareSkip:
             ],
         )
 
-        async def selective_executor(node, artifacts):
+        async def selective_executor(node, artifacts, **kwargs):
             if node.id == "A":
                 raise RuntimeError("A failed")
             return {"artifacts": [], "summary": f"{node.id} done"}

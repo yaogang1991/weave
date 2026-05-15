@@ -634,6 +634,17 @@ class AgentPool:
             progress_callback: Any | None = None,
         ) -> dict:
             worker = self.create_worker(node.agent_type)
+
+            # Set ownership context on tool registry before execution (#272)
+            if node.owned_files:
+                self.tool_registry.set_ownership_context({
+                    "owned": node.owned_files,
+                    "forbidden": getattr(node, '_forbidden_files', []),
+                    "shared": getattr(node, '_shared_files', []),
+                })
+            else:
+                self.tool_registry.set_ownership_context(None)
+
             try:
                 task = _inject_file_path_constraints(node)
                 return await worker.execute(
@@ -688,5 +699,7 @@ class AgentPool:
                         last_exc = retry_exc
                         failed_model = fallback.config.model
                         continue
+            finally:
+                self.tool_registry.set_ownership_context(None)
 
         return _executor

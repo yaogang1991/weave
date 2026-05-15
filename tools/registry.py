@@ -51,6 +51,7 @@ class ToolRegistry:
         self._schemas: dict[str, dict] = {}
         self.sandbox_runner: ToolCommandRunner | None = sandbox_runner
         self.base_cwd = Path(base_cwd).resolve() if base_cwd else None
+        self._ownership_context: dict[str, list[str]] | None = None  # {"owned": [...], "forbidden": [...], "shared": [...]}
         self._register_builtin_tools()
 
     def _resolve_path(self, file_path: str) -> Path:
@@ -66,6 +67,36 @@ class ToolRegistry:
         if not (resolved == self.base_cwd or self.base_cwd in resolved.parents):
             raise ValueError(f"Path escapes workspace: {file_path}")
         return resolved
+
+    def set_ownership_context(self, context: dict[str, list[str]] | None) -> None:
+        """Set file ownership context for current node execution (#272).
+
+        When set, write/edit operations check against forbidden files
+        before allowing modifications.
+        """
+        self._ownership_context = context
+
+    def _check_write_allowed(self, file_path: str) -> str | None:
+        """Return error message if write is forbidden, None if allowed (#272)."""
+        if self._ownership_context is None:
+            return None  # No contract → allow (auto-serialization fallback)
+        forbidden = self._ownership_context.get("forbidden", [])
+        if not forbidden:
+            return None
+        # Normalize both paths for comparison
+        try:
+            resolved = self._resolve_path(file_path)
+        except ValueError:
+            return f"Path resolution failed for '{file_path}'"
+        resolved_str = str(resolved)
+        for fb in forbidden:
+            # Check suffix match (handles relative vs absolute differences)
+            if resolved_str.endswith(fb) or resolved_str.endswith("/" + fb):
+                return (
+                    f"File '{file_path}' is owned by another parallel node "
+                    f"and is forbidden for this node (#272)."
+                )
+        return None
 
     def _register_builtin_tools(self):
         self.register("read", self._tool_read, {
@@ -462,6 +493,10 @@ class ToolRegistry:
                         ),
                     )
 
+            # Ownership enforcement (#272)
+            write_error = self._check_write_allowed(file_path)
+            if write_error:
+                return ToolResult(tool_call_id="", success=False, error=write_error)
             path = self._resolve_path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
@@ -494,6 +529,10 @@ class ToolRegistry:
                     tool_call_id="", success=False,
                     error="file_path is required and cannot be empty",
                 )
+            # Ownership enforcement (#272)
+            write_error = self._check_write_allowed(file_path)
+            if write_error:
+                return ToolResult(tool_call_id="", success=False, error=write_error)
             path = self._resolve_path(file_path)
             if not path.exists():
                 return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")

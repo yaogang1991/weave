@@ -95,6 +95,39 @@ class NodeWorkspaceResult(BaseModel):
     conflicts: list[str] = Field(default_factory=list)
 
 
+# ---------------------------------------------------------------------------
+# File ownership contract models (#272)
+# ---------------------------------------------------------------------------
+
+class FileAccessPolicy(str, Enum):
+    """File access classification for ownership contracts."""
+    OWNED = "owned"          # This node exclusively creates/writes this file
+    FORBIDDEN = "forbidden"  # Another node owns this file; read-only for this node
+    SHARED = "shared"        # Multiple nodes may coordinate (requires merge node or serialization)
+
+
+class ConflictResolution(str, Enum):
+    """How to resolve a parallel write conflict."""
+    SERIALIZE = "serialize"     # Add implicit edge to serialize the conflicting nodes
+    MERGE_NODE = "merge_node"   # Insert a merge node that reconciles outputs
+    ERROR = "error"             # Raise PlanValidationError — manual fix required
+    REASSIGN = "reassign"       # Reassign file ownership to a single node
+
+
+class FileOwnershipContract(BaseModel):
+    """Declares which files a DAG node intends to create or modify.
+
+    Populated by the planner in each node's task definition, validated
+    by PlanValidator for conflicts, and enforced at execution time by
+    the DAG engine and tool registry.
+    """
+    node_id: str
+    owned_files: list[str] = Field(default_factory=list)
+    forbidden_files: list[str] = Field(default_factory=list)
+    shared_files: list[str] = Field(default_factory=list)
+    access_policy: dict[str, FileAccessPolicy] = Field(default_factory=dict)
+
+
 class EvalStatus(str, Enum):
     """Evaluation result status — maps to NodeStatus in DAG engine."""
     CLEAN_PASS = "clean_pass"      # All criteria passed
@@ -156,6 +189,7 @@ class DAGNode(BaseModel):
     max_retries: int = 3
     retry_count: int = 0
     workspace_strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
+    owned_files: list[str] = Field(default_factory=list)  # Files this node exclusively creates (#272)
     started_at: datetime | None = None
     completed_at: datetime | None = None
 

@@ -40,6 +40,34 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     Use `hard` when downstream literally imports or depends on upstream artifacts. Use `soft` when upstream is informational (e.g., shared conventions, optional context).
 11. **Avoid unnecessary sibling edges**: Parallel implementation nodes (e.g., impl_core, impl_accounts, impl_api) should each depend ONLY on their shared planner/foundation node, NOT on each other. Edges between sibling impl nodes cause sequential execution and cascade-skip waste.
 12. **Separate source and test generation**: NEVER task a single generator node with both source module creation AND test file creation. Source modules and their tests must be in SEPARATE generator nodes (e.g., `impl_core` creates `mylib/core.py`, then `impl_tests_core` creates `tests/test_core.py`). A single node doing both runs out of token/iteration budget before reaching test creation (#340).
+13. **File ownership contract**: When creating PARALLEL generator nodes,
+    you MUST declare which files each node will create or modify. Add an
+    `owned_files` array to each generator node definition listing all file
+    paths that node will create or write to. This prevents parallel generators
+    from silently overwriting each other's files.
+    Rules:
+    a. Each parallel generator node MUST have an `owned_files` array.
+    b. No two parallel nodes may list the same file path in `owned_files`.
+    c. `__init__.py` files in shared packages are OWNED by exactly one node
+       (typically the first generator in that package). Other nodes must
+       NOT create or modify them.
+    d. If a file must be written by multiple nodes (rare), create a dedicated
+       merge/coordinator node downstream that depends on all writing nodes.
+    e. When generating source files and test files in parallel, the source
+       node owns all `src/**/*.py` paths and the test node owns all
+       `tests/**/*.py` paths. Never overlap.
+    Example node with ownership:
+    {{
+      "id": "impl_core",
+      "agent_type": "generator",
+      "task": "Implement core module...",
+      "owned_files": [
+        "ratelib/__init__.py",
+        "ratelib/token_bucket.py",
+        "ratelib/rate_limiter.py"
+      ],
+      "success_criteria": [...]
+    }}
 14. **Force decomposition for large tasks**: A single generator node MUST NOT be
     expected to create more than ~15 files. If the requirement needs more:
     a. Extract shared models/schemas/config into a `impl_foundation` node (Level 0)
@@ -59,7 +87,14 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     a Transaction model, the foundation node must define BOTH models in its
     models.py/database.py. Otherwise, `create_all()` won't create the missing
     tables and downstream tests fail with "no such table" errors (#297).
-13. **Reconcile with existing files**: If the project context includes
+16. **Database schema analysis**: When the requirement involves database models,
+    schemas, or ORM classes, you MUST analyze the complete database schema first.
+    Include ALL table definitions and model classes needed by EVERY downstream node
+    in the foundation/planner node's task description. Incomplete schema info causes
+    downstream generators to create conflicting or missing tables. If using SQLAlchemy,
+    list all models that should be registered in `Base.metadata` so `create_all()`
+    creates every required table.
+17. **Reconcile with existing files**: If the project context includes
     `existing_files`, you MUST review them before planning. Decide for each
     existing file whether to REUSE it (reference in generator task descriptions
     so generators edit rather than recreate) or REPLACE it (explicitly state
@@ -91,6 +126,7 @@ Return a JSON object with this exact structure:
       "id": "impl",
       "agent_type": "generator",
       "task": "Implement the planned feature following project conventions...",
+      "owned_files": ["src/feature.py", "src/__init__.py"],
       "success_criteria": [
         {{"type": "file_pattern", "pattern": "mylib/*.py", "description": "source modules exist"}},
         {{"type": "lint", "description": "lint clean"}}
