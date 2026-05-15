@@ -610,9 +610,13 @@ class DAGExecutionEngine:
     ) -> list[list[str]]:
         """Auto-serialize parallel generators without ownership contracts (#272 EC4).
 
-        When parallel generators at the same level have no owned_files,
-        insert implicit HARD edges to serialize them, preventing write
-        conflicts. Returns recomputed levels if edges were added.
+        When parallel generators at the same level have no owned_files AND
+        no edges at all (standalone generators), insert implicit HARD edges
+        to serialize them, preventing write conflicts. Generators that are
+        part of an existing dependency structure (have incoming or outgoing
+        edges) are left alone — they were explicitly planned as parallel.
+
+        Returns recomputed levels if edges were added.
         """
         from core.models import DependencyType
 
@@ -625,28 +629,37 @@ class DAGExecutionEngine:
             if len(generators) < 2:
                 continue
 
-            # Check if any generator lacks ownership contracts
+            # Only auto-serialize generators that lack ownership contracts
             no_contract = [nid for nid in generators if not dag.nodes[nid].owned_files]
             if not no_contract:
                 continue  # All have contracts → safe to parallelize
 
-            # Auto-serialize: add implicit edges between generators
-            for i in range(1, len(generators)):
-                from_id = generators[i - 1]
-                to_id = generators[i]
-                # Check if edge already exists
-                existing = any(
-                    e.from_node == from_id and e.to_node == to_id
+            # Only serialize standalone generators (no incoming or outgoing edges).
+            # Generators with existing edges are part of an intentional
+            # dependency structure and should not be modified.
+            standalone = []
+            for nid in no_contract:
+                has_edge = any(
+                    e.from_node == nid or e.to_node == nid
                     for e in dag.edges
                 )
-                if not existing:
-                    dag.add_edge(from_id, to_id, dependency_type=DependencyType.HARD)
-                    edges_added = True
-                    logger.info(
-                        "Auto-serialized parallel generators: %s → %s "
-                        "(no ownership contracts declared)",
-                        from_id, to_id,
-                    )
+                if not has_edge:
+                    standalone.append(nid)
+
+            if len(standalone) < 2:
+                continue  # Not enough standalone generators to serialize
+
+            # Auto-serialize: add implicit edges between standalone generators
+            for i in range(1, len(standalone)):
+                from_id = standalone[i - 1]
+                to_id = standalone[i]
+                dag.add_edge(from_id, to_id, dependency_type=DependencyType.HARD)
+                edges_added = True
+                logger.info(
+                    "Auto-serialized standalone generators: %s → %s "
+                    "(no ownership contracts, no existing edges)",
+                    from_id, to_id,
+                )
 
         if edges_added:
             return dag.topological_levels()

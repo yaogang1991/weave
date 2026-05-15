@@ -107,7 +107,7 @@ class TestAutoSerialization:
 
     @pytest.mark.asyncio
     async def test_mixed_contract_and_no_contract(self):
-        """One generator with contract, one without → serialize the no-contract ones."""
+        """Generators with contracts stay parallel; no-contract standalone ones serialize."""
         dag = _make_dag(
             nodes=[
                 ("g1", "generator", "impl A", ["src/a.py"]),
@@ -124,8 +124,12 @@ class TestAutoSerialization:
         levels = dag.topological_levels()
         result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
-        # Since at least one generator has no contract, all get serialized
-        assert len(result_levels) == 3
+        # g1 has contract → safe to parallelize with g2
+        # g2 and g3 have no contract → serialized: g2→g3
+        # Result: [['g1', 'g2'], ['g3']] = 2 levels
+        assert len(result_levels) == 2
+        assert set(result_levels[0]) == {"g1", "g2"}
+        assert result_levels[1] == ["g3"]
 
     @pytest.mark.asyncio
     async def test_single_generator_no_auto_serialize(self):
