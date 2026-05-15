@@ -218,14 +218,19 @@ class EvaluatorEngine:
         # Mandatory artifact verification (#234): verify output_artifacts
         # actually exist on disk. Prevents false positives when a generator
         # reports creating files that were never actually written.
+        # Uses loose path resolution (#375) to match FileExistsChecker's
+        # stem-based glob fallback — avoids false FAIL when the generator
+        # writes to a slightly different path than reported in artifacts.
         if output_artifacts and eval_dir:
             eval_root = Path(eval_dir)
             phantom = []
+            resolved_artifacts = []
             for art in output_artifacts:
-                p = Path(art)
-                full = p if p.is_absolute() else eval_root / p
-                if not full.is_file():
+                resolved = self._resolve_artifact_path(art, eval_root)
+                if resolved is None:
                     phantom.append(art)
+                else:
+                    resolved_artifacts.append(str(resolved))
             if phantom:
                 overall_passed = False
                 score = 0.0
@@ -233,6 +238,10 @@ class EvaluatorEngine:
                     f"FAIL artifact_verification: {len(phantom)} reported "
                     f"artifact(s) not found on disk: {phantom}"
                 )
+            elif resolved_artifacts != list(output_artifacts):
+                # Update artifacts with resolved paths so downstream checks
+                # (import smoke test, etc.) use the correct filesystem paths.
+                output_artifacts = resolved_artifacts
 
         # Zero-output guard (#372): generator with empty artifacts must fail
         # when FILE_EXISTS criteria are present, regardless of individual
@@ -386,6 +395,41 @@ class EvaluatorEngine:
     # ------------------------------------------------------------------
     # Dispatch — returns 3-tuple (passed, msg, was_auto)
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Artifact path resolution (#375)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_artifact_path(
+        artifact: str,
+        eval_root: Path,
+    ) -> Path | None:
+        """Resolve an artifact path on disk, using loose fallback.
+
+        Mirrors the resolution logic in FileExistsChecker._check_file_exists
+        to avoid false mismatches between FILE_EXISTS criteria (which use
+        stem-based glob fallback) and artifact_verification (which previously
+        only checked exact paths).
+
+        Returns the resolved absolute Path, or None if not found.
+        """
+        p = Path(artifact)
+        full = p if p.is_absolute() else eval_root / p
+
+        # Exact match
+        if full.is_file():
+            return full
+
+        # Fallback: loose glob by stem (mirrors FileExistsChecker)
+        stem = p.stem
+        if stem and len(stem) >= 3:
+            matches = list(eval_root.glob(f"**/*{stem}*"))
+            matches = [m for m in matches if m.is_file()]
+            if matches:
+                return matches[0]
+
+        return None
 
     @staticmethod
     def _scope_artifacts_to_criteria(
