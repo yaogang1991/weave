@@ -56,14 +56,20 @@ logger = logging.getLogger(__name__)
 
 
 def _classify_error(error: str) -> str:
-    """Classify an error string into a canonical category."""
+    """Classify an error string into a canonical category (#274)."""
     lowered = error.lower()
     if "429" in lowered or "ratelimit" in lowered or "rate limit" in lowered:
         return "rate_limit"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
+    if "coverage" in lowered and ("below target" in lowered or "could not be verified" in lowered or "not verified" in lowered):
+        return "coverage_low"
     if "evaluation failed" in lowered or "eval_" in lowered:
         return "eval_failed"
+    if "importerror" in lowered or "modulenotfounderror" in lowered or "cannot import" in lowered:
+        return "naming_mismatch"
+    if "runtimeerror" in lowered or "attributeerror" in lowered or "keyerror" in lowered:
+        return "runtime_error"
     if "guardrail" in lowered or "blocked" in lowered or "permission" in lowered:
         return "tool_blocked"
     if "watchdog" in lowered or "killed by watchdog" in lowered:

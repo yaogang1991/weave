@@ -1199,6 +1199,22 @@ class DAGExecutionEngine:
                 "TypeError" in feedback
                 or "unexpected keyword" in feedback
             )
+            has_timeout = (
+                "timed out" in feedback
+                or "TimeoutExpired" in feedback
+                or "timeout" in feedback.lower()
+            )
+            has_coverage_low = (
+                "coverage" in feedback.lower()
+                and ("below target" in feedback.lower()
+                     or "not verified" in feedback.lower()
+                     or "could not be parsed" in feedback.lower())
+            )
+            has_runtime_error = (
+                "RuntimeError" in feedback
+                or "AttributeError" in feedback
+                or "KeyError" in feedback
+            )
             naming_guidance = ""
             if has_import_error:
                 naming_guidance += (
@@ -1221,6 +1237,39 @@ class DAGExecutionEngine:
                     "`await` or `asyncio.run()`\n"
                     "2. Verify function signatures match actual "
                     "parameter names\n"
+                )
+            if has_timeout:
+                naming_guidance += (
+                    "\nTIMEOUT DETECTED: Your tests or code hung during "
+                    "execution.\n"
+                    "1. Check for infinite loops or missing loop "
+                    "termination conditions\n"
+                    "2. Use daemon threads and proper teardown in tests\n"
+                    "3. Add timeouts to any blocking operations "
+                    "(network, subprocess)\n"
+                    "4. Avoid global state or locks that can deadlock\n"
+                )
+            if has_coverage_low:
+                naming_guidance += (
+                    "\nLOW COVERAGE DETECTED: Coverage is below target.\n"
+                    "1. Do NOT rewrite existing tests or source code\n"
+                    "2. ADD new test functions that cover untested "
+                    "branches and edge cases\n"
+                    "3. Focus on: error paths, boundary conditions, "
+                    "empty inputs\n"
+                    "4. Run coverage to see which lines are missed: "
+                    "`pytest --cov=module --cov-report=term-missing`\n"
+                )
+            if has_runtime_error:
+                naming_guidance += (
+                    "\nRUNTIME ERROR DETECTED: Source code has bugs "
+                    "that cause crashes.\n"
+                    "1. Read the traceback to find the exact crash "
+                    "location\n"
+                    "2. You may EDIT source files to fix the bug "
+                    "(targeted fix, not rewrite)\n"
+                    "3. Common fixes: add missing method calls, "
+                    "fix None checks, add initialization\n"
                 )
 
             retry_hint = (
