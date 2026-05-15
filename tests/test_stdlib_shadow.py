@@ -36,7 +36,7 @@ class TestPlanValidatorStdlibShadow:
         validator = PlanValidator()
         plan = {
             "nodes": [
-                {"id": "impl", "task": 'Create a "urllib" library for URL routing'},
+                {"id": "impl", "task": 'Create a module named "urllib" for URL routing'},
             ],
             "edges": [],
         }
@@ -47,7 +47,7 @@ class TestPlanValidatorStdlibShadow:
         validator = PlanValidator()
         plan = {
             "nodes": [
-                {"id": "impl", "task": "Build a library json for parsing"},
+                {"id": "impl", "task": 'Build a library named "json" for parsing'},
             ],
             "edges": [],
         }
@@ -78,8 +78,8 @@ class TestPlanValidatorStdlibShadow:
         validator = PlanValidator()
         plan = {
             "nodes": [
-                {"id": "a", "task": 'Create "urllib" and "json" modules'},
-                {"id": "b", "task": "Build a library io for streams"},
+                {"id": "a", "task": 'Create a module named "urllib" and a module called "json"'},
+                {"id": "b", "task": "Build a library called io for streams"},
             ],
             "edges": [],
         }

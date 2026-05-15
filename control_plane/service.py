@@ -69,8 +69,14 @@ def _classify_error(error: str) -> str:
         return "timeout"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
+    if "coverage" in lowered and ("below target" in lowered or "could not be verified" in lowered or "not verified" in lowered):
+        return "coverage_low"
     if "evaluation failed" in lowered or "eval_" in lowered:
         return "eval_failed"
+    if "importerror" in lowered or "modulenotfounderror" in lowered or "cannot import" in lowered:
+        return "naming_mismatch"
+    if "runtimeerror" in lowered or "attributeerror" in lowered or "keyerror" in lowered:
+        return "runtime_error"
     if "guardrail" in lowered or "blocked" in lowered or "permission" in lowered:
         return "tool_blocked"
     if "watchdog" in lowered or "killed by watchdog" in lowered:
@@ -765,6 +771,20 @@ class RunService:
                 if project_context is None:
                     project_context = {}
                 project_context["existing_files"] = existing
+
+        # Inject retry context so the planner builds on existing work
+        # instead of starting from scratch (#328).
+        if job.attempt > 0:
+            if project_context is None:
+                project_context = {}
+            project_context["retry_attempt"] = job.attempt
+            project_context["max_attempts"] = job.retry_policy.max_attempts
+            if scan_root:
+                project_context["existing_file_count"] = sum(
+                    1 for p in scan_root.rglob("*.py")
+                    if not any(s in str(p) for s in
+                               ["__pycache__", ".git", "data/"])
+                )
 
         dag = await orchestrator.plan(
             requirement=job.requirement,

@@ -141,8 +141,10 @@ Rules:
     for each symbol you reference. Example:
     `python -c "from mylib.module import ClassName; print('OK')"`
     If the import fails, either the symbol name is wrong or it doesn't exist
-    in the source. Fix the test to match the actual source API — do NOT
-    modify the source to match your tests unless explicitly told to.
+    in the source. Fix the test to match the actual source API. However,
+    during RETRY attempts, if the tests reveal bugs in the source code
+    (crashes, wrong behavior, missing functionality), you MAY edit the
+    source files to fix those bugs — not just the test files (#288).
 19. ASYNC AWARENESS: When testing async functions, use `asyncio.run()` or
     `pytest-asyncio`. NEVER call an async function synchronously — it returns
     a coroutine object, not the actual result.
@@ -343,6 +345,11 @@ If NO automated evaluation results are provided, perform full evaluation:
                     "need changes\n"
                     "6. After editing, run ONLY the failing tests to verify: "
                     "`python -m pytest path/to/test.py -v`\n"
+                    "7. SOURCE CODE FIXES: If the feedback shows tests failing "
+                    "because of bugs in the SOURCE code (RuntimeError, "
+                    "AttributeError, wrong return values, missing method calls), "
+                    "you MAY also EDIT the source files to fix those bugs. "
+                    "Make targeted fixes — do NOT rewrite the entire module (#288).\n"
                 )
                 break
 

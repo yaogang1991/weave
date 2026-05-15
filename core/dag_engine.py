@@ -32,6 +32,7 @@ from core.models import (
     FailureDecision,
     HandoffArtifact,
     CriterionType,
+    SuccessCriterion,
 )
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError, NodeTimeoutError
@@ -560,6 +561,40 @@ class DAGExecutionEngine:
         """Compute exponential backoff delay in seconds."""
         return min(self.backoff_base ** retry_count, self.backoff_cap)
 
+    @staticmethod
+    def _requires_output_artifacts(node: DAGNode) -> bool:
+        """Check whether a node is expected to produce output file artifacts.
+
+        Returns True only when criteria explicitly depend on disk files
+        (FILE_EXISTS, FILE_CHANGED, FILE_PATTERN, TEST_FILE_EXISTS, TESTS_PASS).
+        Pure analysis/text generators with CUSTOM-only criteria are excluded —
+        they may legitimately produce zero file artifacts.
+        """
+        # Only generator-type nodes (or any non-standard type with file criteria)
+        # are expected to produce file artifacts. Planner/evaluator are excluded.
+        is_producer = node.agent_type in ("generator", "worker") or node.agent_type not in ("planner", "evaluator")
+
+        file_criteria = {
+            CriterionType.FILE_EXISTS,
+            CriterionType.FILE_CHANGED,
+            CriterionType.FILE_PATTERN,
+            CriterionType.TEST_FILE_EXISTS,
+            CriterionType.TESTS_PASS,
+        }
+        # Keywords in legacy string criteria that imply file/test output
+        file_keywords = {"file", "coverage", "lint"}
+        test_keywords = {"tests pass", "test pass", "test file"}
+        for crit in node.success_criteria:
+            if isinstance(crit, SuccessCriterion) and crit.type in file_criteria:
+                return True
+            if isinstance(crit, str) and is_producer:
+                lower = crit.lower()
+                if any(kw in lower for kw in file_keywords):
+                    return True
+                if any(kw in lower for kw in test_keywords):
+                    return True
+        return False
+
     # Codes that are purely formatting/whitespace and safe to tolerate on retry.
     # E999 is intentionally excluded — it indicates SyntaxError, not formatting.
     _RETRY_TOLERABLE_CODES: frozenset[str] = frozenset({
@@ -676,6 +711,36 @@ class DAGExecutionEngine:
             node.output_artifacts = reported_artifacts
             logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
 
+            # -- Zero-output fast-fail (#229) --
+            # If a node that should produce files has zero artifacts, fail
+            # immediately with a clear message — regardless of evaluator presence.
+            if (
+                not node.output_artifacts
+                and self._requires_output_artifacts(node)
+            ):
+                node.error = (
+                    f"Node produced zero output artifacts. "
+                    f"Agent type: {node.agent_type}, task: {node.task_description[:200]}. "
+                    f"This typically indicates the agent exhausted its iteration "
+                    f"budget without writing any files."
+                )
+                node.status = NodeStatus.FAILED
+                node.completed_at = datetime.now(timezone.utc)
+                node.retry_count += 1
+                logger.warning(
+                    "Node %s (%s) fast-failed: zero output artifacts",
+                    node_id, node.agent_type,
+                )
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="failed",
+                    details={
+                        "reason": "zero_output_artifacts",
+                        "agent_type": node.agent_type,
+                    },
+                ))
+                return
+
             # Test file enforcement (#247): only enforce when the DAG
             # explicitly includes a TEST_FILE_EXISTS criterion. This is
             # distinct from TESTS_PASS which means "tests must pass", not
@@ -786,6 +851,10 @@ class DAGExecutionEngine:
                             "file_snapshot": self._capture_file_snapshot(
                                 eval_work_dir, node.output_artifacts,
                             ),
+                            "criteria_results": getattr(
+                                eval_result, "criteria_results", {},
+                            ),
+                            "passed": eval_result.passed,
                         }
                     elif eval_result.score > prev_best["score"]:
                         self._best_attempts[node_id] = {
@@ -797,6 +866,10 @@ class DAGExecutionEngine:
                             "file_snapshot": self._capture_file_snapshot(
                                 eval_work_dir, node.output_artifacts,
                             ),
+                            "criteria_results": getattr(
+                                eval_result, "criteria_results", {},
+                            ),
+                            "passed": eval_result.passed,
                         }
                     else:
                         # Score not improved — check issue-level regression (#151)
@@ -830,6 +903,10 @@ class DAGExecutionEngine:
                                     "file_snapshot": self._capture_file_snapshot(
                                         eval_work_dir, node.output_artifacts,
                                     ),
+                                    "criteria_results": getattr(
+                                        eval_result, "criteria_results", {},
+                                    ),
+                                    "passed": eval_result.passed,
                                 }
                             else:
                                 is_regression = True
@@ -851,6 +928,10 @@ class DAGExecutionEngine:
                                 "file_snapshot": self._capture_file_snapshot(
                                     eval_work_dir, node.output_artifacts,
                                 ),
+                                "criteria_results": getattr(
+                                    eval_result, "criteria_results", {},
+                                ),
+                                "passed": eval_result.passed,
                             }
                         logger.warning(
                             "Node %s retry score %.1f <= best %.1f "
@@ -1219,6 +1300,22 @@ class DAGExecutionEngine:
                 "TypeError" in feedback
                 or "unexpected keyword" in feedback
             )
+            has_timeout = (
+                "timed out" in feedback
+                or "TimeoutExpired" in feedback
+                or "timeout" in feedback.lower()
+            )
+            has_coverage_low = (
+                "coverage" in feedback.lower()
+                and ("below target" in feedback.lower()
+                     or "not verified" in feedback.lower()
+                     or "could not be parsed" in feedback.lower())
+            )
+            has_runtime_error = (
+                "RuntimeError" in feedback
+                or "AttributeError" in feedback
+                or "KeyError" in feedback
+            )
             naming_guidance = ""
             if has_import_error:
                 naming_guidance += (
@@ -1241,6 +1338,39 @@ class DAGExecutionEngine:
                     "`await` or `asyncio.run()`\n"
                     "2. Verify function signatures match actual "
                     "parameter names\n"
+                )
+            if has_timeout:
+                naming_guidance += (
+                    "\nTIMEOUT DETECTED: Your tests or code hung during "
+                    "execution.\n"
+                    "1. Check for infinite loops or missing loop "
+                    "termination conditions\n"
+                    "2. Use daemon threads and proper teardown in tests\n"
+                    "3. Add timeouts to any blocking operations "
+                    "(network, subprocess)\n"
+                    "4. Avoid global state or locks that can deadlock\n"
+                )
+            if has_coverage_low:
+                naming_guidance += (
+                    "\nLOW COVERAGE DETECTED: Coverage is below target.\n"
+                    "1. Do NOT rewrite existing tests or source code\n"
+                    "2. ADD new test functions that cover untested "
+                    "branches and edge cases\n"
+                    "3. Focus on: error paths, boundary conditions, "
+                    "empty inputs\n"
+                    "4. Run coverage to see which lines are missed: "
+                    "`pytest --cov=module --cov-report=term-missing`\n"
+                )
+            if has_runtime_error:
+                naming_guidance += (
+                    "\nRUNTIME ERROR DETECTED: Source code has bugs "
+                    "that cause crashes.\n"
+                    "1. Read the traceback to find the exact crash "
+                    "location\n"
+                    "2. You may EDIT source files to fix the bug "
+                    "(targeted fix, not rewrite)\n"
+                    "3. Common fixes: add missing method calls, "
+                    "fix None checks, add initialization\n"
                 )
 
             retry_hint = (

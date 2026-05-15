@@ -160,6 +160,22 @@ class IntelligentOrchestrator:
                     user_prompt += f"- [{f['type']}] {f['path']}\n"
                 project_context["existing_files"] = existing
 
+            # Inject retry context so the planner knows this is a
+            # continuation, not a fresh start (#328).
+            retry_attempt = project_context.get("retry_attempt", 0)
+            if retry_attempt > 0:
+                user_prompt += (
+                    f"\n\n## Retry Context\n"
+                    f"This is **attempt {retry_attempt + 1}** of "
+                    f"{project_context.get('max_attempts', '?')}.\n"
+                    f"A previous attempt failed/timed out. "
+                    f"{project_context.get('existing_file_count', 0)} "
+                    f"files already exist in the workspace from prior work.\n"
+                    f"**DO NOT start from scratch.** Build upon existing files. "
+                    f"Only create files that don't exist yet. "
+                    f"Only plan work that hasn't been completed.\n"
+                )
+
         # M3.3: Inject learning hints if available
         if self.learning_optimizer:
             try:

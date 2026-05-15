@@ -234,6 +234,22 @@ class EvaluatorEngine:
                     f"artifact(s) not found on disk: {phantom}"
                 )
 
+        # Zero-output guard (#372): generator with empty artifacts must fail
+        # when FILE_EXISTS criteria are present, regardless of individual
+        # criterion results (which may pass vacuously with no files to check).
+        # Only triggers on explicit empty list (not None which means untracked).
+        if (output_artifacts is not None
+                and len(output_artifacts) == 0
+                and any(
+                    c.type == CriterionType.FILE_EXISTS for c in structured
+                )):
+            overall_passed = False
+            score = 0.0
+            feedback_parts.append(
+                "FAIL zero_output: generator produced no output files "
+                "but FILE_EXISTS criteria present"
+            )
+
         # Import smoke test (#344): try importing each generated .py source
         # file to catch ImportError, NameError, and SyntaxError that flake8
         # misses (e.g., hallucinated stdlib function arguments that only fail

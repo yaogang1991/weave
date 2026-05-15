@@ -250,8 +250,9 @@ class TestLLMRouter:
         client = router.get_client("planner")
         assert client.config.temperature == 0.1
 
-    def test_provider_inference_openai(self):
+    def test_provider_inference_openai(self, monkeypatch):
         """gpt-* models are inferred as openai provider."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
         config = ModelRoutingConfig(
             routing={
                 "generator": ModelRoute(model="gpt-4o"),
@@ -262,8 +263,9 @@ class TestLLMRouter:
         assert client.config.provider == "openai"
         assert client.config.model == "gpt-4o"
 
-    def test_provider_inference_o_series(self):
+    def test_provider_inference_o_series(self, monkeypatch):
         """o-series models (o1, o3, o4) are inferred as openai provider."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
         config = ModelRoutingConfig(
             routing={
                 "planner": ModelRoute(model="o3-mini"),
@@ -301,8 +303,9 @@ class TestLLMRouter:
         assert default.config.provider == "anthropic"
         assert default.config.api_key == "sk-ant-key"
 
-    def test_fallback_chain(self):
+    def test_fallback_chain(self, monkeypatch):
         """Fallback returns next model in chain."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
         config = ModelRoutingConfig(
             fallback_chain=["claude-opus-4-6", "claude-sonnet-4-6", "gpt-4o"]
         )

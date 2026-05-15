@@ -15,6 +15,7 @@ import pytest
 
 from core.models import DAGNode, SuccessCriterion, CriterionType
 from evaluator.engine import EvaluatorEngine
+from evaluator.compat import normalize_criteria
 from session.store import SessionStore
 
 
@@ -103,30 +104,30 @@ class TestDAGNodeCriteriaNormalization:
 
 class TestEvaluatorNormalizeCriteria:
     def test_legacy_string_tests_pass(self, evaluator):
-        criteria = evaluator._normalize_criteria(["tests pass"])
+        criteria = normalize_criteria(["tests pass"])
         assert len(criteria) == 1
         assert criteria[0].type == CriterionType.TESTS_PASS
 
     def test_legacy_string_lint(self, evaluator):
-        criteria = evaluator._normalize_criteria(["lint clean"])
+        criteria = normalize_criteria(["lint clean"])
         assert len(criteria) == 1
         assert criteria[0].type == CriterionType.LINT
 
     def test_legacy_string_coverage(self, evaluator):
-        criteria = evaluator._normalize_criteria(["coverage 90%"])
+        criteria = normalize_criteria(["coverage 90%"])
         assert len(criteria) == 1
         assert criteria[0].type == CriterionType.COVERAGE
         assert criteria[0].target == 90.0
 
     def test_structured_json_tests_pass(self, evaluator):
         json_str = json.dumps({"type": "tests_pass", "description": "test"})
-        criteria = evaluator._normalize_criteria([json_str])
+        criteria = normalize_criteria([json_str])
         assert len(criteria) == 1
         assert criteria[0].type == CriterionType.TESTS_PASS
 
     def test_structured_json_file_exists(self, evaluator):
         json_str = json.dumps({"type": "file_exists", "path": "hello.py", "description": "file"})
-        criteria = evaluator._normalize_criteria([json_str])
+        criteria = normalize_criteria([json_str])
         assert len(criteria) == 1
         assert criteria[0].type == CriterionType.FILE_EXISTS
 

@@ -13,128 +13,151 @@ from unittest.mock import MagicMock
 
 from core.models import SuccessCriterion, CriterionType
 from evaluator.engine import EvaluatorEngine
+from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+from evaluator.models import EvaluationContext
 
 
 @pytest.fixture
-def engine():
-    return EvaluatorEngine(MagicMock())
+def checker():
+    return BugfixPatternChecker()
+
+
+def _make_context(work_dir=None, artifacts=None):
+    return EvaluationContext(
+        work_dir=work_dir or Path("."),
+        artifacts=artifacts,
+        session_store=MagicMock(),
+    )
 
 
 class TestFileChanged:
-    def test_passes_when_file_in_output_artifacts(self, engine):
+    def test_passes_when_file_in_output_artifacts(self, checker):
         crit = SuccessCriterion(type=CriterionType.FILE_CHANGED, path="service.py")
-        passed, msg = engine._check_file_changed(crit, output_artifacts=["service.py", "utils.py"])
-        assert passed
-        assert "changed" in msg.lower()
+        ctx = _make_context(artifacts=["service.py", "utils.py"])
+        result = checker.check(crit, ctx)
+        assert result.passed
+        assert "changed" in result.message.lower()
 
-    def test_fails_when_file_not_in_artifacts(self, engine):
+    def test_fails_when_file_not_in_artifacts(self, checker):
         crit = SuccessCriterion(type=CriterionType.FILE_CHANGED, path="service.py")
-        passed, msg = engine._check_file_changed(crit, output_artifacts=["utils.py"])
-        assert not passed
-        assert "not changed" in msg.lower()
+        ctx = _make_context(artifacts=["utils.py"])
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "not changed" in result.message.lower()
 
-    def test_fails_when_no_artifacts(self, engine):
+    def test_fails_when_no_artifacts(self, checker):
         crit = SuccessCriterion(type=CriterionType.FILE_CHANGED, path="service.py")
-        passed, msg = engine._check_file_changed(crit, output_artifacts=None)
-        assert not passed
-        assert "no files changed" in msg.lower()
+        ctx = _make_context(artifacts=None)
+        result = checker.check(crit, ctx)
+        assert not result.passed
 
-    def test_multiple_files(self, engine):
+    def test_multiple_files(self, checker):
         crit = SuccessCriterion(type=CriterionType.FILE_CHANGED, path="a.py, b.py")
-        passed, msg = engine._check_file_changed(crit, output_artifacts=["a.py", "b.py"])
-        assert passed
+        ctx = _make_context(artifacts=["a.py", "b.py"])
+        result = checker.check(crit, ctx)
+        assert result.passed
 
-    def test_no_path_passes_with_any_artifacts(self, engine):
+    def test_no_path_passes_with_any_artifacts(self, checker):
         crit = SuccessCriterion(type=CriterionType.FILE_CHANGED)
-        passed, msg = engine._check_file_changed(crit, output_artifacts=["anything.py"])
-        assert passed
+        ctx = _make_context(artifacts=["anything.py"])
+        result = checker.check(crit, ctx)
+        assert result.passed
 
-    def test_no_path_no_artifacts_fails(self, engine):
+    def test_no_path_no_artifacts_fails(self, checker):
         crit = SuccessCriterion(type=CriterionType.FILE_CHANGED)
-        passed, msg = engine._check_file_changed(crit, output_artifacts=None)
-        assert not passed
+        ctx = _make_context(artifacts=None)
+        result = checker.check(crit, ctx)
+        assert not result.passed
 
 
 class TestPatternAbsent:
-    def test_passes_when_pattern_gone(self, engine, tmp_path):
+    def test_passes_when_pattern_gone(self, checker, tmp_path):
         (tmp_path / "service.py").write_text("x = get_dependencies()\n")
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_ABSENT,
             path="service.py",
             pattern=r"n\.dependencies",
         )
-        passed, msg = engine._check_pattern_absent(crit, tmp_path)
-        assert passed
-        assert "absent" in msg.lower()
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert result.passed
+        assert "absent" in result.message.lower()
 
-    def test_fails_when_pattern_still_present(self, engine, tmp_path):
+    def test_fails_when_pattern_still_present(self, checker, tmp_path):
         (tmp_path / "service.py").write_text("result = n.dependencies\n")
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_ABSENT,
             path="service.py",
             pattern=r"n\.dependencies",
         )
-        passed, msg = engine._check_pattern_absent(crit, tmp_path)
-        assert not passed
-        assert "still present" in msg.lower()
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "still present" in result.message.lower()
 
-    def test_passes_when_file_missing(self, engine, tmp_path):
+    def test_passes_when_file_missing(self, checker, tmp_path):
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_ABSENT,
             path="nonexistent.py",
             pattern="bug",
         )
-        passed, msg = engine._check_pattern_absent(crit, tmp_path)
-        assert passed
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert result.passed
 
-    def test_skips_when_no_path(self, engine, tmp_path):
+    def test_skips_when_no_path(self, checker, tmp_path):
         crit = SuccessCriterion(type=CriterionType.PATTERN_ABSENT, pattern="bug")
-        passed, msg = engine._check_pattern_absent(crit, tmp_path)
-        assert passed
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert result.passed
 
-    def test_invalid_regex_fails(self, engine, tmp_path):
+    def test_invalid_regex_fails(self, checker, tmp_path):
         (tmp_path / "code.py").write_text("x = 1\n")
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_ABSENT,
             path="code.py",
             pattern="[invalid",
         )
-        passed, msg = engine._check_pattern_absent(crit, tmp_path)
-        assert not passed
-        assert "invalid regex" in msg.lower()
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "invalid" in result.message.lower()
 
 
 class TestPatternPresent:
-    def test_passes_when_pattern_exists(self, engine, tmp_path):
+    def test_passes_when_pattern_exists(self, checker, tmp_path):
         (tmp_path / "service.py").write_text("result = get_deps(node)\n")
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_PRESENT,
             path="service.py",
             pattern=r"get_deps\(",
         )
-        passed, msg = engine._check_pattern_present(crit, tmp_path)
-        assert passed
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert result.passed
 
-    def test_fails_when_pattern_missing(self, engine, tmp_path):
+    def test_fails_when_pattern_missing(self, checker, tmp_path):
         (tmp_path / "service.py").write_text("x = 1\n")
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_PRESENT,
             path="service.py",
             pattern=r"get_deps\(",
         )
-        passed, msg = engine._check_pattern_present(crit, tmp_path)
-        assert not passed
-        assert "not found" in msg.lower()
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "not found" in result.message.lower()
 
-    def test_fails_when_file_missing(self, engine, tmp_path):
+    def test_fails_when_file_missing(self, checker, tmp_path):
         crit = SuccessCriterion(
             type=CriterionType.PATTERN_PRESENT,
             path="nonexistent.py",
             pattern="fix",
         )
-        passed, msg = engine._check_pattern_present(crit, tmp_path)
-        assert not passed
-        assert "does not exist" in msg.lower()
+        ctx = _make_context(work_dir=tmp_path)
+        result = checker.check(crit, ctx)
+        assert not result.passed
+        assert "does not exist" in result.message.lower()
 
 
 class TestFixBugTemplateCriteria:

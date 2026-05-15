@@ -334,7 +334,7 @@ class TestEvaluatorToNodeStatus:
                 criteria_results={"file": True},
             ),
         )
-        engine = _make_engine(evaluator=mock_evaluator)
+        engine = _make_engine(evaluator=mock_evaluator, work_dir="/tmp")
         node = _make_node("gen", success_criteria=[SuccessCriterion(
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])
@@ -351,7 +351,7 @@ class TestEvaluatorToNodeStatus:
                 criteria_results={"file": True, "lint": False},
             ),
         )
-        engine = _make_engine(evaluator=mock_evaluator)
+        engine = _make_engine(evaluator=mock_evaluator, work_dir="/tmp")
         node = _make_node("gen", success_criteria=[SuccessCriterion(
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])
@@ -369,7 +369,7 @@ class TestEvaluatorToNodeStatus:
                 suggestions=["review"],
             ),
         )
-        engine = _make_engine(evaluator=mock_evaluator)
+        engine = _make_engine(evaluator=mock_evaluator, work_dir="/tmp")
         node = _make_node("gen", success_criteria=[SuccessCriterion(
             type=CriterionType.CUSTOM, description="manual review",
         )])

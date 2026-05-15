@@ -33,8 +33,13 @@ def evaluator(tmp_store):
     return EvaluatorEngine(tmp_store)
 
 
-def _file(path: Path, content: str = "ok") -> Path:
-    """Helper: create a file with content."""
+def _file(path: Path, content: str | None = None) -> Path:
+    """Helper: create a file with content.
+
+    Default content is valid Python to pass the import smoke test (#344).
+    """
+    if content is None:
+        content = "# auto-generated\npass\n"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
     return path
@@ -360,7 +365,14 @@ class TestLintSemantics:
         """No flake8/ruff → WARN (not hard FAIL)."""
         _file(tmp_path / "app.py")
         import subprocess
-        mock_run.side_effect = FileNotFoundError("no flake8")
+
+        def _mock_run(cmd, **kwargs):
+            # Import smoke test calls should succeed
+            if cmd[1:3] == ["-c", "import app"]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            raise FileNotFoundError("no flake8")
+
+        mock_run.side_effect = _mock_run
         r = evaluator.evaluate_stage("s1", "impl", [
             SuccessCriterion(type=CriterionType.LINT, description="lint"),
         ], str(tmp_path), output_artifacts=["app.py"])
@@ -485,7 +497,7 @@ class TestArtifactVerification:
     def test_phantom_artifact_forces_fail(self, evaluator, tmp_path):
         _file(tmp_path / "real.py")
         r = evaluator.evaluate_stage("s1", "impl", [
-            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="real.py",
+            SuccessCriterion(type=CriterionType.FILE_EXISTS, path="real.py,phantom.py",
                              description="real"),
         ], str(tmp_path), output_artifacts=["real.py", "phantom.py"])
         assert not r.passed
@@ -617,7 +629,14 @@ class TestFalseFailPrevention:
         from session.store import SessionStore
         store = SessionStore(base_path=str(tmp_path / "events"))
         ev = EvaluatorEngine(store)
-        with patch("evaluator.engine.subprocess.run", side_effect=FileNotFoundError):
+
+        def _mock_run(cmd, **kwargs):
+            # Import smoke test calls should succeed
+            if len(cmd) >= 3 and cmd[1] == "-c" and "import" in cmd[2]:
+                return MagicMock(returncode=0, stdout="", stderr="")
+            raise FileNotFoundError("no flake8")
+
+        with patch("evaluator.engine.subprocess.run", side_effect=_mock_run):
             r = ev.evaluate_stage("s1", "impl", [
                 SuccessCriterion(type=CriterionType.LINT, description="lint"),
             ], str(tmp_path), output_artifacts=["app.py"])

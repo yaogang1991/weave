@@ -51,7 +51,7 @@ async def _mock_failure_handler(dag, node_id, error):
 
 class TestLintIssueRegression:
     @pytest.mark.asyncio
-    async def test_first_failure_records_issues(self):
+    async def test_first_failure_records_issues(self, tmp_path):
         """First eval failure should record lint issues in _best_attempts."""
         call_count = 0
         results = [_make_eval_result(False, 7.5, ["a.py:10:E501", "b.py:20:E501"])]
@@ -65,6 +65,7 @@ class TestLintIssueRegression:
         engine = DAGExecutionEngine(
             agent_executor=executor,
             failure_handler=_mock_failure_handler,
+            work_dir=str(tmp_path),
         )
         # Inject eval result
         engine.evaluator = MagicMock()

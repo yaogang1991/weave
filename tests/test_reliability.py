@@ -16,7 +16,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
@@ -114,10 +114,11 @@ class TestTimeoutMechanisms:
     """Task 07: asyncio.wait_for timeout at job level."""
 
     @pytest.mark.asyncio
-    async def test_job_execution_times_out(self, tmp_repo: JobRepository, run_service: RunService):
+    async def test_job_execution_times_out(self, tmp_repo: JobRepository, run_service: RunService, tmp_path):
         """A job that exceeds its timeout is marked TIMED_OUT."""
         job = await run_service.submit_job(
             requirement="Build something slow",
+            project_path=str(tmp_path),
             timeout=1,  # 1 second timeout
             max_attempts=1,
         )
@@ -131,8 +132,16 @@ class TestTimeoutMechanisms:
 
         run_service._execute_plan_and_run = slow_execute
 
-        _prepare_job_for_run(tmp_repo, job.id)
-        run = await run_service.run_job(job.id)
+        # Mock BackendLifecycleService to avoid real backend setup
+        mock_bls = MagicMock()
+        mock_bls.create_backend_manager.return_value = MagicMock()
+        mock_bls.setup_workspace.return_value = str(tmp_path)
+        mock_bls.load_project_hooks.return_value = {}
+        mock_bls.run_hook = AsyncMock()
+
+        with patch("control_plane.backend_lifecycle.BackendLifecycleService", return_value=mock_bls):
+            _prepare_job_for_run(tmp_repo, job.id)
+            run = await run_service.run_job(job.id)
 
         assert run.status == RunStatus.TIMED_OUT
         assert run.dag_result.get("error") == "timeout"
@@ -633,10 +642,11 @@ class TestRunServiceFailureHandling:
         assert job_after_3.error_category == "unknown"
 
     @pytest.mark.asyncio
-    async def test_timeout_run_is_retryable(self, tmp_repo: JobRepository, run_service: RunService):
+    async def test_timeout_run_is_retryable(self, tmp_repo: JobRepository, run_service: RunService, tmp_path):
         """A timed-out run can be retried."""
         job = await run_service.submit_job(
             requirement="Slow task",
+            project_path=str(tmp_path),
             timeout=1,
             max_attempts=2,
         )
@@ -647,8 +657,16 @@ class TestRunServiceFailureHandling:
 
         run_service._execute_plan_and_run = slow_execute
 
-        _prepare_job_for_run(tmp_repo, job.id)
-        run = await run_service.run_job(job.id)
+        # Mock BackendLifecycleService to avoid real backend setup
+        mock_bls = MagicMock()
+        mock_bls.create_backend_manager.return_value = MagicMock()
+        mock_bls.setup_workspace.return_value = str(tmp_path)
+        mock_bls.load_project_hooks.return_value = {}
+        mock_bls.run_hook = AsyncMock()
+
+        with patch("control_plane.backend_lifecycle.BackendLifecycleService", return_value=mock_bls):
+            _prepare_job_for_run(tmp_repo, job.id)
+            run = await run_service.run_job(job.id)
         assert run.status == RunStatus.TIMED_OUT
 
         job_after = tmp_repo.get_job(job.id)
