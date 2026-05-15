@@ -394,3 +394,49 @@ class TestProgressCallback:
         )
         assert not hasattr(engine, '_heartbeat_loop'), \
             "_heartbeat_loop should have been removed in PR3"
+
+
+# -- 8. PR4: Timeout inequality validation -----------------------------------
+
+class TestTimeoutValidation:
+    def test_valid_config_no_issues(self):
+        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
+        config = HarnessConfig(
+            llm=LLMConfig(api_key="test", timeout=120),
+            run_timeout_sec=1800,
+            node_timeout=NodeTimeoutConfig(default_timeout=300, overrides={"generator": 600}),
+        )
+        issues = config.validate_timeout_inequality()
+        assert issues == []
+
+    def test_llm_timeout_exceeds_node_timeout(self):
+        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
+        config = HarnessConfig(
+            llm=LLMConfig(api_key="test", timeout=400),
+            run_timeout_sec=1800,
+            node_timeout=NodeTimeoutConfig(default_timeout=300),
+        )
+        issues = config.validate_timeout_inequality()
+        assert len(issues) == 1
+        assert "HTTP timeout" in issues[0]
+
+    def test_node_timeout_exceeds_run_timeout(self):
+        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
+        config = HarnessConfig(
+            llm=LLMConfig(api_key="test", timeout=60),
+            run_timeout_sec=300,
+            node_timeout=NodeTimeoutConfig(default_timeout=300, overrides={"generator": 600}),
+        )
+        issues = config.validate_timeout_inequality()
+        assert len(issues) == 1
+        assert "Max node timeout" in issues[0]
+
+    def test_both_violations(self):
+        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
+        config = HarnessConfig(
+            llm=LLMConfig(api_key="test", timeout=200),
+            run_timeout_sec=100,
+            node_timeout=NodeTimeoutConfig(default_timeout=150, overrides={"generator": 500}),
+        )
+        issues = config.validate_timeout_inequality()
+        assert len(issues) == 2
