@@ -753,6 +753,20 @@ class RunService:
                     project_context = {}
                 project_context["existing_files"] = existing
 
+        # Inject retry context so the planner builds on existing work
+        # instead of starting from scratch (#328).
+        if job.attempt > 0:
+            if project_context is None:
+                project_context = {}
+            project_context["retry_attempt"] = job.attempt
+            project_context["max_attempts"] = job.retry_policy.max_attempts
+            if scan_root:
+                project_context["existing_file_count"] = sum(
+                    1 for p in scan_root.rglob("*.py")
+                    if not any(s in str(p) for s in
+                               ["__pycache__", ".git", "data/"])
+                )
+
         dag = await orchestrator.plan(
             requirement=job.requirement,
             project_context=project_context,
