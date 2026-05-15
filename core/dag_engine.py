@@ -803,6 +803,10 @@ class DAGExecutionEngine:
                             "file_snapshot": self._capture_file_snapshot(
                                 eval_work_dir, node.output_artifacts,
                             ),
+                            "criteria_results": getattr(
+                                eval_result, "criteria_results", {},
+                            ),
+                            "passed": eval_result.passed,
                         }
                     elif eval_result.score > prev_best["score"]:
                         self._best_attempts[node_id] = {
@@ -814,6 +818,10 @@ class DAGExecutionEngine:
                             "file_snapshot": self._capture_file_snapshot(
                                 eval_work_dir, node.output_artifacts,
                             ),
+                            "criteria_results": getattr(
+                                eval_result, "criteria_results", {},
+                            ),
+                            "passed": eval_result.passed,
                         }
                     else:
                         # Score not improved — check issue-level regression (#151)
@@ -847,6 +855,10 @@ class DAGExecutionEngine:
                                     "file_snapshot": self._capture_file_snapshot(
                                         eval_work_dir, node.output_artifacts,
                                     ),
+                                    "criteria_results": getattr(
+                                        eval_result, "criteria_results", {},
+                                    ),
+                                    "passed": eval_result.passed,
                                 }
                             else:
                                 is_regression = True
@@ -868,6 +880,10 @@ class DAGExecutionEngine:
                                 "file_snapshot": self._capture_file_snapshot(
                                     eval_work_dir, node.output_artifacts,
                                 ),
+                                "criteria_results": getattr(
+                                    eval_result, "criteria_results", {},
+                                ),
+                                "passed": eval_result.passed,
                             }
                         logger.warning(
                             "Node %s retry score %.1f <= best %.1f "
