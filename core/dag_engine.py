@@ -569,6 +569,9 @@ class DAGExecutionEngine:
         (FILE_EXISTS, FILE_CHANGED, FILE_PATTERN, TEST_FILE_EXISTS, TESTS_PASS).
         Pure analysis/text generators with CUSTOM-only criteria are excluded —
         they may legitimately produce zero file artifacts.
+
+        FILE_CHANGED-only nodes are also excluded (#377) — they modify existing
+        files rather than creating new ones, so zero output artifacts is normal.
         """
         # Only generator-type nodes (or any non-standard type with file criteria)
         # are expected to produce file artifacts. Planner/evaluator are excluded.
@@ -581,19 +584,29 @@ class DAGExecutionEngine:
             CriterionType.TEST_FILE_EXISTS,
             CriterionType.TESTS_PASS,
         }
+        # Track which file criteria types are present (#377)
+        found_file_types: set[CriterionType] = set()
         # Keywords in legacy string criteria that imply file/test output
         file_keywords = {"file", "coverage", "lint"}
         test_keywords = {"tests pass", "test pass", "test file"}
+        has_legacy_file_criteria = False
         for crit in node.success_criteria:
             if isinstance(crit, SuccessCriterion) and crit.type in file_criteria:
-                return True
-            if isinstance(crit, str) and is_producer:
+                found_file_types.add(crit.type)
+            elif isinstance(crit, str) and is_producer:
                 lower = crit.lower()
                 if any(kw in lower for kw in file_keywords):
-                    return True
+                    has_legacy_file_criteria = True
                 if any(kw in lower for kw in test_keywords):
-                    return True
-        return False
+                    has_legacy_file_criteria = True
+
+        if not found_file_types and not has_legacy_file_criteria:
+            return False
+        # If only FILE_CHANGED criteria exist (no FILE_EXISTS, TESTS_PASS, etc.),
+        # the node modifies existing files — zero new artifacts is expected (#377).
+        if found_file_types == {CriterionType.FILE_CHANGED}:
+            return False
+        return True
 
     # Codes that are purely formatting/whitespace and safe to tolerate on retry.
     # E999 is intentionally excluded — it indicates SyntaxError, not formatting.
