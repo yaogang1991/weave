@@ -62,7 +62,7 @@ def _classify_error(error: str) -> str:
     as well as legacy string patterns.
     """
     lowered = error.lower()
-    # Rate limit: structured exception name or legacy patterns
+    # Rate limit: structured exception names and legacy patterns
     if any(s in lowered for s in ("ratelimiterror", "429", "rate_limit", "rate limit")):
         return "rate_limit"
     if "nodetimeouterror" in lowered:
