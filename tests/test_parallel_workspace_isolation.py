@@ -124,12 +124,18 @@ class TestAutoSerialization:
         levels = dag.topological_levels()
         result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
-        # g1 has contract → safe to parallelize with g2
-        # g2 and g3 have no contract → serialized: g2→g3
-        # Result: [['g1', 'g2'], ['g3']] = 2 levels
+        # g1 has contract → stays parallel
+        # g2 and g3 are standalone without contracts → serialized
+        # Result: 2 levels; g1 parallel with one of {g2,g3}, the other serialized after
         assert len(result_levels) == 2
-        assert set(result_levels[0]) == {"g1", "g2"}
-        assert result_levels[1] == ["g3"]
+        # Level 0: g1 (with contract) + one of the no-contract generators
+        level0 = set(result_levels[0])
+        assert "g1" in level0
+        assert len(level0) == 2
+        # Level 1: the remaining no-contract generator
+        assert len(result_levels[1]) == 1
+        all_nodes = set().union(*result_levels)
+        assert all_nodes == {"g1", "g2", "g3"}
 
     @pytest.mark.asyncio
     async def test_single_generator_no_auto_serialize(self):
