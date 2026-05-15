@@ -25,6 +25,7 @@ import anthropic
 from openai import OpenAI
 
 from core.config import LLMConfig
+from core.exceptions import RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,16 @@ class LLMClient:
                 return self._call_once(messages, tools)
             except Exception as e:
                 if attempt == retries:
+                    # Rate-limit exhausted all retries → RateLimitError (#360).
+                    # This signals upstream layers that the failure was due to
+                    # rate-limiting, so retry budgets should NOT be consumed.
+                    error_lower = str(e).lower()
+                    if "429" in error_lower or "rate" in error_lower:
+                        raise RateLimitError(
+                            provider=self.config.provider,
+                            model=self.config.model,
+                            retries=retries,
+                        ) from e
                     raise
                 error_name = type(e).__name__.lower()
                 error_msg = str(e)
@@ -131,7 +142,7 @@ class LLMClient:
                 if "429" in error_lower or "rate" in error_lower:
                     wait_sec = self._parse_rate_limit_wait(error_msg)
                     if wait_sec is not None:
-                        time.sleep(min(wait_sec + 1, 300))  # cap at 5 min
+                        time.sleep(min(wait_sec + 1, 60))  # cap at 60s (#360)
                         continue
 
                 # Generic transient: exponential backoff

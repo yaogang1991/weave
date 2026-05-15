@@ -21,7 +21,7 @@ from core.models import DAGNode, HandoffArtifact, AgentCapability
 from core.config import LLMConfig
 from core.agent_registry import AgentRegistry
 from core.llm_router import LLMRouter
-from core.exceptions import PendingApprovalError
+from core.exceptions import PendingApprovalError, NodeTimeoutError
 from session.store import SessionStore
 from agent.worker import AgentWorker
 from tools.registry import ToolRegistry
@@ -360,7 +360,10 @@ Execute using your available tools. Produce clear, verifiable output.
 """
 
         # Run the agent (dumb loop) via AgentWorker
-        result = await self._run_with_tools(full_prompt, session_id, context)
+        result = await self._run_with_tools(
+            full_prompt, session_id, context,
+            node_id=node_id or "",
+        )
 
         # M3.2: Store learnings from execution result
         if (
@@ -388,6 +391,7 @@ Execute using your available tools. Produce clear, verifiable output.
         prompt: str,
         session_id: str,
         context: ExecutionContext | None = None,
+        node_id: str = "",
     ) -> dict[str, Any]:
         """Run agent loop and collect results via AgentWorker."""
 
@@ -420,21 +424,19 @@ Execute using your available tools. Produce clear, verifiable output.
 
         # AgentWorker.run() is synchronous (blocks on LLM API calls);
         # offload to a thread and cap total wall-clock time per node.
+        # Timeout raises NodeTimeoutError (not a status dict) so that
+        # dag_engine marks the node as FAILED rather than SUCCESS (#360).
         try:
             messages = await asyncio.wait_for(
                 asyncio.to_thread(_run_sync),
                 timeout=self.timeout,
             )
         except asyncio.TimeoutError:
-            return {
-                "status": "timeout",
-                "summary": (
-                    f"Agent execution timed out after {self.timeout}s. "
-                    f"Consider increasing HARNESS_AGENT_TIMEOUT (current: {self.timeout}s)"
-                ),
-                "artifacts": self.worker.artifacts if hasattr(self, 'worker') else [],
-                "output": "",
-            }
+            raise NodeTimeoutError(
+                node_id=node_id,
+                agent_type=self.capability.id,
+                timeout=self.timeout,
+            )
 
         final = messages[-1] if messages else None
         return {

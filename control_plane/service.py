@@ -56,9 +56,19 @@ logger = logging.getLogger(__name__)
 
 
 def _classify_error(error: str) -> str:
-    """Classify an error string into a canonical category."""
+    """Classify an error string into a canonical category (#360).
+
+    Recognises structured exception names (NodeTimeoutError, RateLimitError)
+    as well as legacy string patterns.
+    """
     lowered = error.lower()
-    if "429" in lowered or "ratelimit" in lowered or "rate limit" in lowered:
+    # Structured exception names (take priority over string patterns)
+    if "ratelimiterror" in lowered:
+        return "rate_limit"
+    if "nodetimeouterror" in lowered:
+        return "timeout"
+    # Legacy string patterns
+    if "429" in lowered or "rate_limit" in lowered or "rate limit" in lowered:
         return "rate_limit"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
@@ -342,6 +352,11 @@ class RunService:
                     ]
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
+
+                # NodeTimeoutError from agent_pool should mark run as TIMED_OUT
+                # rather than merely FAILED (#360).
+                if error_cat == "timeout" and failed_nodes:
+                    run = self._lifecycle.mark_timed_out(run, timeout)
 
                 # Must transition RUNNING -> FAILED before handle_job_failure
                 self.repository.transition_job_status(

@@ -33,6 +33,7 @@ from core.models import (
     CriterionType,
 )
 from core.exceptions import PendingApprovalError
+from core.exceptions import RateLimitError, NodeTimeoutError
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
@@ -1011,6 +1012,25 @@ class DAGExecutionEngine:
                 return
 
             node.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+
+            # RateLimitError: do NOT consume node retry budget (#360).
+            # The error will propagate to service.py which also skips the
+            # job-level retry budget for rate_limit errors.
+            if isinstance(e, RateLimitError):
+                node.status = NodeStatus.FAILED
+                node.completed_at = datetime.now(timezone.utc)
+                node.auto_eval_result = None
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="failed",
+                    details={
+                        "error": str(e),
+                        "reason": "rate_limit",
+                        "retry_budget_preserved": True,
+                    },
+                ))
+                return
+
             node.retry_count += 1
 
             if node.retry_count < node.max_retries:
