@@ -623,8 +623,24 @@ class PersonalGuardrailPolicy(GuardrailPolicy):
     """
     # 白名单：命令前缀或正则列表
     whitelist_patterns: list[str] = Field(default_factory=list)
-    # 自动确认的白名单命令
-    whitelist_commands: list[str] = Field(default_factory=list)
+    # 自动确认的白名单命令（#380: safe read-only / mkdir commands that
+    # should not require approval even in default interactive mode)
+    whitelist_commands: list[str] = Field(default_factory=lambda: [
+        "mkdir",     # create directories
+        "ls",        # list files
+        "cat",       # view files
+        "touch",     # create empty files
+        "pwd",       # print working directory
+        "which",     # locate commands
+        "echo",      # print text
+        "head",      # view file beginning
+        "tail",      # view file end
+        "wc",        # count lines/words
+        "find",      # find files
+        "python -m pytest",  # run tests
+        "python3 -m pytest", # run tests (alt)
+        "pytest",    # run tests (direct)
+    ])
     # HIGH 风险是否自动通过（个人模式下不推荐，但可配置）
     auto_approve_high: bool = False
     # 交互式确认超时（秒），超时则拒绝
