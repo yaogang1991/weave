@@ -356,6 +356,8 @@ class RunService:
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
 
+
+
                 # Must transition RUNNING -> FAILED before handle_job_failure
                 self.repository.transition_job_status(
                     job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,

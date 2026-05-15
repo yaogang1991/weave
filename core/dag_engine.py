@@ -35,7 +35,8 @@ from core.models import (
     SuccessCriterion,
 )
 from core.exceptions import PendingApprovalError
-from core.exceptions import RateLimitError, NodeTimeoutError
+from core.exceptions import RateLimitError  # NodeTimeoutError added in PR2
+from core.exceptions import NodeTimeoutError  # noqa: F401 — used in PR2
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
