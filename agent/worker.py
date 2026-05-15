@@ -52,6 +52,12 @@ TOOL_NON_EMPTY_ARGS: dict[str, list[str]] = {
 # args trigger a forced exit to prevent infinite loops (#290).
 EMPTY_TOOL_CALL_LIMIT = 10
 
+# Degenerate loop breaker: consecutive iterations where ALL tool calls have
+# completely empty args {} — the LLM is stuck and will not recover (#345).
+# Lower threshold because empty-dict args are unrecoverable, while missing-one-
+# field args might self-correct.  At ~55s per LLM call, 3 iters = ~3 min wasted.
+DEGENERATE_CALL_LIMIT = 3
+
 # Auto-retry: when ALL tool calls in a single LLM response have missing/blank
 # args, re-request the LLM before advancing to the next iteration (#282).
 # Prevents cascading failures in parallel execution where some models produce
@@ -112,6 +118,7 @@ class AgentWorker:
 
         self.artifacts = []
         consecutive_empty_iterations = 0
+        consecutive_degenerate_iterations = 0
 
         for iteration in range(max_iterations):
             # Cooperative cancellation check (#360 PR2)
@@ -145,8 +152,14 @@ class AgentWorker:
                     assistant_message,
                 )
 
-                if "tool_calls" not in assistant_message or not assistant_message["tool_calls"]:
-                    yield AgentMessage(role="assistant", content=assistant_message.get("content", ""))
+                if (
+                    "tool_calls" not in assistant_message
+                    or not assistant_message["tool_calls"]
+                ):
+                    yield AgentMessage(
+                        role="assistant",
+                        content=assistant_message.get("content", ""),
+                    )
                     return  # No tool calls → done
 
                 tool_results, any_tool_executed = self._execute_tool_calls(
@@ -214,6 +227,55 @@ class AgentWorker:
                         "message": (
                             f"Agent loop terminated after {consecutive_empty_iterations} "
                             f"consecutive iterations with only invalid tool calls."
+                        ),
+                    },
+                )
+                break
+
+            # Degenerate loop breaker: detect when the LLM keeps producing
+            # tool calls with completely empty args {} (#345).  This is
+            # unrecoverable — no amount of error feedback will fix it.
+            # Separate from the broad circuit breaker because the threshold
+            # is much lower (3 vs 10), saving ~7 iterations of wasted API
+            # calls (~7 min at typical latency).
+            if all_invalid:
+                all_empty_dict = all(
+                    tc.get("arguments") == {}
+                    for tc in assistant_message.get("tool_calls", [])
+                )
+                if all_empty_dict:
+                    consecutive_degenerate_iterations += 1
+                    logger.warning(
+                        "Degenerate empty-args iteration %d/%d (#345)",
+                        consecutive_degenerate_iterations,
+                        DEGENERATE_CALL_LIMIT,
+                    )
+                else:
+                    consecutive_degenerate_iterations = 0
+            else:
+                consecutive_degenerate_iterations = 0
+
+            if consecutive_degenerate_iterations >= DEGENERATE_CALL_LIMIT:
+                logger.error(
+                    "Degenerate loop breaker: %d consecutive iterations with "
+                    "completely empty tool call args. LLM is stuck — "
+                    "breaking loop (#345).",
+                    consecutive_degenerate_iterations,
+                )
+                self.session_store.emit_event(
+                    session_id,
+                    EventType.AGENT_ERROR,
+                    {
+                        "error": "degenerate_empty_args_breaker",
+                        "consecutive_degenerate_iterations": (
+                            consecutive_degenerate_iterations
+                        ),
+                        "message": (
+                            f"Agent loop terminated after "
+                            f"{consecutive_degenerate_iterations} "
+                            f"consecutive iterations with completely empty "
+                            f"tool call args. The LLM is in an unrecoverable "
+                            f"degenerate loop."
                         ),
                     },
                 )

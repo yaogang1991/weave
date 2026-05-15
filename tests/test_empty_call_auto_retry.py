@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 from core.models import ToolResult, EventType
 from core.config import LLMConfig
-from agent.worker import AgentWorker, EMPTY_CALL_MAX_RETRIES
+from agent.worker import AgentWorker, EMPTY_CALL_MAX_RETRIES, DEGENERATE_CALL_LIMIT
 
 
 @pytest.fixture
@@ -45,16 +45,14 @@ class TestEmptyCallAutoRetry:
         mock_tool_executor.execute.assert_called_once_with("bash", {"command": "ls"})
 
     def test_auto_retry_exhausted_then_breaker(self, worker):
-        """After EMPTY_CALL_MAX_RETRIES, empty iteration counted for breaker."""
-        # Each empty outer iteration = (MAX_RETRIES + 1) = 4 LLM calls
-        total_llm_calls = EMPTY_TOOL_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1)
+        """After EMPTY_CALL_MAX_RETRIES, degenerate breaker fires."""
         worker.llm.call = MagicMock(return_value={
             "role": "assistant", "content": "",
             "tool_calls": [_empty_bash_call()],
         })
         mock_exec = MagicMock()
         msgs = list(worker.run("s1", "sys", "do it", [], mock_exec, max_iterations=100))
-        assert len(msgs) == EMPTY_TOOL_CALL_LIMIT
+        assert len(msgs) == DEGENERATE_CALL_LIMIT
 
     def test_auto_retry_three_attempts_per_iteration(self, worker, mock_tool_executor):
         """Verify exactly EMPTY_CALL_MAX_RETRIES retries happen per empty iteration."""
@@ -109,7 +107,3 @@ class TestEmptyCallAutoRetry:
         assert len(msgs) == 2
         # Only 2 LLM calls total (no retry)
         assert worker.llm.call.call_count == 2
-
-
-# Import here to avoid circular dependency
-from agent.worker import EMPTY_TOOL_CALL_LIMIT

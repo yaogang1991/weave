@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 
 from core.models import ToolResult, EventType
 from core.config import LLMConfig
-from agent.worker import AgentWorker, EMPTY_TOOL_CALL_LIMIT, EMPTY_CALL_MAX_RETRIES
+from agent.worker import AgentWorker, EMPTY_TOOL_CALL_LIMIT, EMPTY_CALL_MAX_RETRIES, DEGENERATE_CALL_LIMIT
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def _empty_write_call(call_id="tc1"):
 
 class TestEmptyToolCallBreaker:
     def test_breaks_on_consecutive_missing_args(self, worker):
-        """Loop breaks after EMPTY_TOOL_CALL_LIMIT consecutive all-invalid iterations."""
+        """Degenerate breaker fires at DEGENERATE_CALL_LIMIT for completely empty args."""
         worker.llm.call = MagicMock(return_value={
             "role": "assistant",
             "content": "",
@@ -53,8 +53,8 @@ class TestEmptyToolCallBreaker:
 
         msgs = list(worker.run("s1", "sys", "do it", [], mock_exec, max_iterations=100))
 
-        # Should stop at EMPTY_TOOL_CALL_LIMIT, not reach max_iterations
-        assert len(msgs) == EMPTY_TOOL_CALL_LIMIT
+        # Degenerate breaker fires at DEGENERATE_CALL_LIMIT (faster than broad breaker)
+        assert len(msgs) == DEGENERATE_CALL_LIMIT
         # Tool executor should never have been called (all calls invalid)
         mock_exec.execute.assert_not_called()
 
@@ -108,7 +108,7 @@ class TestEmptyToolCallBreaker:
         assert len(msgs) == 6
 
     def test_emits_error_event_on_breaker(self, worker, tmp_store):
-        """Breaker emits an AGENT_ERROR event with circuit breaker details."""
+        """Degenerate breaker emits an AGENT_ERROR event with breaker details."""
         worker.llm.call = MagicMock(return_value={
             "role": "assistant",
             "content": "",
@@ -122,8 +122,8 @@ class TestEmptyToolCallBreaker:
         error_events = [e for e in events if e.type == EventType.AGENT_ERROR]
         assert len(error_events) == 1
         data = error_events[0].payload
-        assert data["error"] == "empty_tool_call_circuit_breaker"
-        assert data["consecutive_empty_iterations"] == EMPTY_TOOL_CALL_LIMIT
+        assert data["error"] == "degenerate_empty_args_breaker"
+        assert data["consecutive_degenerate_iterations"] == DEGENERATE_CALL_LIMIT
 
     def test_mixed_valid_invalid_does_not_trigger(self, worker, mock_tool_executor):
         """If at least one tool call per iteration is valid, breaker doesn't trigger."""
@@ -172,7 +172,7 @@ class TestEmptyToolCallBreaker:
         assert str(f) in worker.artifacts
 
     def test_multiple_empty_calls_per_iteration(self, worker):
-        """Breaker triggers when each iteration has multiple all-invalid tool calls."""
+        """Degenerate breaker triggers with multiple all-empty-dict tool calls."""
         worker.llm.call = MagicMock(return_value={
             "role": "assistant",
             "content": "",
@@ -180,7 +180,7 @@ class TestEmptyToolCallBreaker:
         })
         mock_exec = MagicMock()
         msgs = list(worker.run("s1", "sys", "do it", [], mock_exec, max_iterations=100))
-        assert len(msgs) == EMPTY_TOOL_CALL_LIMIT
+        assert len(msgs) == DEGENERATE_CALL_LIMIT
         mock_exec.execute.assert_not_called()
 
     def test_no_tool_calls_does_not_count_as_empty(self, worker):
