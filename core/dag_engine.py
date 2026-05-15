@@ -205,15 +205,14 @@ class DAGExecutionEngine:
 
     async def _watchdog_loop(self) -> None:
         """
-        Watchdog coroutine: monitors running nodes' heartbeats.
+        Watchdog coroutine: pure early-warning event source (#360 PR3).
 
-        Per-agent-type overrides are respected: generator nodes get more
-        generous intervals and thresholds.
-
-        Nodes exceeding miss_threshold are marked UNHEALTHY and killed.
+        Monitors running nodes' heartbeats and emits events for
+        observability. Does NOT kill nodes — node timeout is managed
+        exclusively by _execute_with_timeout.
 
         Per-agent-type overrides are respected: generator nodes, for
-        example, are allowed longer timeouts than planner/evaluator.
+        example, are allowed longer intervals than planner/evaluator.
 
         Alert events use a configurable threshold (default 50% of kill
         threshold) to reduce noise from slow-but-healthy LLM APIs (#146).
@@ -263,40 +262,18 @@ class DAGExecutionEngine:
                 elif health == NodeHealth.UNHEALTHY:
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
-                        event_type="unhealthy_killed",
+                        event_type="unhealthy_warning",
                         details={
                             "missed_count": node.missed_heartbeats,
                             "threshold": threshold,
                             "agent_type": node.agent_type,
-                            "action": "fail_fast",
-                        },
-                    ))
-
-                    node.health_status = NodeHealth.DEAD
-                    node.status = NodeStatus.FAILED
-                    node.error = (
-                        f"Node killed by watchdog: "
-                        f"{node.missed_heartbeats} heartbeats missed "
-                        f"(threshold: {threshold}, agent_type: {node.agent_type})"
-                    )
-                    node.completed_at = datetime.now(timezone.utc)
-
-                    task = self._running_tasks.pop(node_id, None)
-                    if task and not task.done():
-                        task.cancel()
-
-                    self._running_nodes.pop(node_id, None)
-
-                    await self._emit(ExecutionEvent(
-                        node_id="",
-                        event_type="health_alert",
-                        details={
-                            "alert_type": "node_unhealthy_killed",
-                            "node_id": node_id,
-                            "agent_type": node.agent_type,
                             "message": (
-                                f"Node {node_id} killed after "
-                                f"{node.missed_heartbeats} missed heartbeats"
+                                f"Node {node_id} unhealthy: "
+                                f"{node.missed_heartbeats} heartbeats missed "
+                                f"(threshold: {threshold}, agent_type: "
+                                f"{node.agent_type}). "
+                                f"Node timeout is managed by "
+                                f"_execute_with_timeout."
                             ),
                         },
                     ))
