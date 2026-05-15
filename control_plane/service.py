@@ -63,7 +63,7 @@ def _classify_error(error: str) -> str:
     """
     lowered = error.lower()
     # Structured exception names (take priority over string patterns)
-    if "ratelimiterror" in lowered:
+    if "ratelimiterror" in lowered or "ratelimit" in lowered:
         return "rate_limit"
     if "nodetimeouterror" in lowered:
         return "timeout"
@@ -353,15 +353,15 @@ class RunService:
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
 
-                # NodeTimeoutError from agent_pool should mark run as TIMED_OUT
-                # rather than merely FAILED (#360).
-                if error_cat == "timeout" and failed_nodes:
-                    run = self._lifecycle.mark_timed_out(run, timeout)
-
                 # Must transition RUNNING -> FAILED before handle_job_failure
                 self.repository.transition_job_status(
                     job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
                 )
+                # NodeTimeoutError should mark run as TIMED_OUT rather than
+                # merely FAILED. Called after transition to avoid state
+                # inconsistency if transition throws (#360 review feedback).
+                if error_cat == "timeout" and failed_nodes:
+                    run = self._lifecycle.mark_timed_out(run, timeout)
                 if work_dir is not None:
                     bls.preserve(backend_manager, job.id, run.id, reason=error_cat or "failed")
                 job = self.repository.get_job(job_id)
@@ -952,6 +952,10 @@ class RunService:
                 for agent_type in self.watchdog_config.agent_overrides
             },
         )
+
+        # Inject node timeout config so _get_node_timeout uses NodeTimeoutConfig
+        # instead of fallback (interval * threshold) (#360).
+        engine._node_timeout_config = _cfg.node_timeout
 
         # Register event handler: forward DAG node events to session store
         async def _session_event_handler(event):

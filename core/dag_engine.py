@@ -17,6 +17,7 @@ import concurrent.futures
 import functools
 import logging
 import os
+import threading
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -1073,8 +1074,6 @@ class DAGExecutionEngine:
           tool execution via progress_callback, replacing the old auto-heartbeat
           loop. Watchdog detects "no progress" rather than "event loop frozen".
         """
-        import threading
-
         timeout = self._get_node_timeout(node.agent_type)
         cancel_event = threading.Event()
 
