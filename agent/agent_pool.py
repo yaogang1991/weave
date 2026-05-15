@@ -283,6 +283,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         node_id: str | None = None,
         run_id: str | None = None,
         cancel_event: Any | None = None,
+        progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         """
         Execute this agent's task with isolated context.
@@ -299,6 +300,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         return await self._execute_inner(
             task, input_artifacts, session_id, node_id, context,
             cancel_event=cancel_event,
+            progress_callback=progress_callback,
         )
 
     async def _execute_inner(
@@ -309,6 +311,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         node_id: str | None = None,
         context: ExecutionContext | None = None,
         cancel_event: Any | None = None,
+        progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         """Internal execute implementation."""
         # Inject runtime environment context so LLM doesn't guess paths (#144)
@@ -374,6 +377,7 @@ Execute using your available tools. Produce clear, verifiable output.
             full_prompt, session_id, context,
             node_id=node_id or "",
             cancel_event=cancel_event,
+            progress_callback=progress_callback,
         )
 
         # M3.2: Store learnings from execution result
@@ -403,15 +407,14 @@ Execute using your available tools. Produce clear, verifiable output.
         session_id: str,
         context: ExecutionContext | None = None,
         node_id: str = "",
-        cancel_event: threading.Event | None = None,
+        cancel_event: Any | None = None,
+        progress_callback: Any | None = None,
     ) -> dict[str, Any]:
         """Run agent loop and collect results via AgentWorker.
 
         Timeout is managed by dag_engine._execute_with_timeout (#360 PR2).
-        This method only handles cooperative cancellation via cancel_event.
+        This method handles cooperative cancellation and progress reporting.
         """
-
-        import threading
 
         _ctx = context or ExecutionContext()
 
@@ -438,6 +441,7 @@ Execute using your available tools. Produce clear, verifiable output.
                     tool_executor=tool_executor,
                     max_iterations=self.max_iterations,
                     cancel_event=cancel_event,
+                    progress_callback=progress_callback,
                 )
             )
 
@@ -627,6 +631,7 @@ class AgentPool:
             node: DAGNode,
             artifacts: list[HandoffArtifact],
             cancel_event: Any | None = None,
+            progress_callback: Any | None = None,
         ) -> dict:
             worker = self.create_worker(node.agent_type)
             try:
@@ -636,6 +641,7 @@ class AgentPool:
                     node_id=node.id,
                     run_id=self.run_id,
                     cancel_event=cancel_event,
+                    progress_callback=progress_callback,
                 )
             except Exception as exc:
                 if not self.llm_router or not self._is_api_error(exc):
@@ -674,6 +680,7 @@ class AgentPool:
                             node_id=node.id,
                             run_id=self.run_id,
                             cancel_event=cancel_event,
+                            progress_callback=progress_callback,
                         )
                     except Exception as retry_exc:
                         if not self._is_api_error(retry_exc):

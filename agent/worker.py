@@ -93,6 +93,7 @@ class AgentWorker:
         tool_executor,
         max_iterations: int = 50,
         cancel_event: threading.Event | None = None,
+        progress_callback: Any | None = None,
     ) -> Iterator[AgentMessage]:
         """
         Run the agent loop until no more tool calls or max iterations reached.
@@ -101,6 +102,8 @@ class AgentWorker:
         Args:
             cancel_event: Cooperative cancellation — if set, the loop exits
                 at the next iteration boundary (#360 PR2).
+            progress_callback: Called after each LLM response and tool
+                execution to report progress to the watchdog (#360 PR3).
         """
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
@@ -132,6 +135,10 @@ class AgentWorker:
             for llm_attempt in range(EMPTY_CALL_MAX_RETRIES + 1):
                 assistant_message = self.llm.call(messages, tools)
 
+                # Report progress: LLM responded (#360 PR3)
+                if progress_callback:
+                    progress_callback()
+
                 self.session_store.emit_event(
                     session_id,
                     EventType.AGENT_MESSAGE,
@@ -144,6 +151,7 @@ class AgentWorker:
 
                 tool_results, any_tool_executed = self._execute_tool_calls(
                     assistant_message, session_id, tool_executor,
+                    progress_callback=progress_callback,
                 )
 
                 if any_tool_executed:
@@ -216,6 +224,7 @@ class AgentWorker:
         assistant_message: dict,
         session_id: str,
         tool_executor,
+        progress_callback: Any | None = None,
     ) -> tuple[list[dict], bool]:
         """Validate and execute tool calls from an LLM response.
 
@@ -279,6 +288,10 @@ class AgentWorker:
 
             result = tool_executor.execute(tool_name, args)
             any_tool_executed = True
+
+            # Report progress: tool executed (#360 PR3)
+            if progress_callback:
+                progress_callback()
             tool_results.append({
                 "role": "tool",
                 "tool_call_id": tool_call_id,

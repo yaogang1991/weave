@@ -286,7 +286,7 @@ class NodeTimeoutConfig(BaseModel):
     """
 
     default_timeout: int = Field(
-        default_factory=lambda: int(os.getenv(
+        default=int(os.getenv(
             "HARNESS_NODE_TIMEOUT",
             os.getenv("HARNESS_AGENT_TIMEOUT", "300"),
         )),
@@ -307,11 +307,13 @@ class NodeTimeoutConfig(BaseModel):
 
     @property
     def min_timeout(self) -> int:
-        return min(self.default_timeout, *self.overrides.values())
+        values = [self.default_timeout, *self.overrides.values()]
+        return min(values)
 
     @property
     def max_timeout(self) -> int:
-        return max(self.default_timeout, *self.overrides.values())
+        values = [self.default_timeout, *self.overrides.values()]
+        return max(values)
 
 
 class HarnessConfig(BaseModel):

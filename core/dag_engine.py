@@ -210,17 +210,16 @@ class DAGExecutionEngine:
 
     async def _watchdog_loop(self) -> None:
         """
-        Watchdog coroutine: monitors running nodes' heartbeats.
+        Watchdog coroutine: pure early-warning event source (#360 PR3).
 
-        Per-agent-type overrides are respected: generator nodes get more
-        generous intervals and thresholds.
-
-        Nodes exceeding miss_threshold are marked UNHEALTHY and killed.
+        Monitors running nodes' heartbeats and emits events for
+        observability. Does NOT kill nodes — node timeout is managed
+        exclusively by _execute_with_timeout.
 
         Per-agent-type overrides are respected: generator nodes, for
-        example, are allowed longer timeouts than planner/evaluator.
+        example, are allowed longer intervals than planner/evaluator.
 
-        Alert events use a configurable threshold (default 50% of kill
+        Alert events use a configurable threshold (default 50% of unhealthy
         threshold) to reduce noise from slow-but-healthy LLM APIs (#146).
 
         This runs as a background task during execute().
@@ -268,40 +267,18 @@ class DAGExecutionEngine:
                 elif health == NodeHealth.UNHEALTHY:
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
-                        event_type="unhealthy_killed",
+                        event_type="unhealthy_warning",
                         details={
                             "missed_count": node.missed_heartbeats,
                             "threshold": threshold,
                             "agent_type": node.agent_type,
-                            "action": "fail_fast",
-                        },
-                    ))
-
-                    node.health_status = NodeHealth.DEAD
-                    node.status = NodeStatus.FAILED
-                    node.error = (
-                        f"Node killed by watchdog: "
-                        f"{node.missed_heartbeats} heartbeats missed "
-                        f"(threshold: {threshold}, agent_type: {node.agent_type})"
-                    )
-                    node.completed_at = datetime.now(timezone.utc)
-
-                    task = self._running_tasks.pop(node_id, None)
-                    if task and not task.done():
-                        task.cancel()
-
-                    self._running_nodes.pop(node_id, None)
-
-                    await self._emit(ExecutionEvent(
-                        node_id="",
-                        event_type="health_alert",
-                        details={
-                            "alert_type": "node_unhealthy_killed",
-                            "node_id": node_id,
-                            "agent_type": node.agent_type,
                             "message": (
-                                f"Node {node_id} killed after "
-                                f"{node.missed_heartbeats} missed heartbeats"
+                                f"Node {node_id} unhealthy: "
+                                f"{node.missed_heartbeats} heartbeats missed "
+                                f"(threshold: {threshold}, agent_type: "
+                                f"{node.agent_type}). "
+                                f"Node timeout is managed by "
+                                f"_execute_with_timeout."
                             ),
                         },
                     ))
@@ -1151,37 +1128,38 @@ class DAGExecutionEngine:
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
     ) -> dict[str, Any]:
-        """Execute a node with unified wall-clock timeout (#360 PR2).
-
-        Replaces the old _execute_with_heartbeat (auto-heartbeat + watchdog kill)
-        and the old agent_pool asyncio.wait_for timeout with a single mechanism.
+        """Execute a node with unified wall-clock timeout (#360 PR3).
 
         - Timeout is per-agent-type via node_timeout config
         - Cooperative cancellation: threading.Event passed to agent thread
-        - Watchdog heartbeat loop runs for observability (early-warning events)
+        - Progress reporting: agent reports heartbeat after each LLM call and
+          tool execution via progress_callback, replacing the old auto-heartbeat
+          loop. Watchdog detects "no progress" rather than "event loop frozen".
         """
         timeout = self._get_node_timeout(node.agent_type)
         cancel_event = threading.Event()
 
-        # Pass cancel_event through to the agent executor so it can propagate
-        # to worker.run() for cooperative cancellation.
+        # Progress callback: agent thread calls this after each meaningful
+        # action (LLM response received, tool executed). This replaces the
+        # old _heartbeat_loop auto-heartbeat (#360 PR3).
+        loop = asyncio.get_running_loop()
+
+        def _on_progress() -> None:
+            # Thread-safe: schedule heartbeat on event loop thread
+            # instead of mutating node directly from worker thread.
+            try:
+                loop.call_soon_threadsafe(node.record_heartbeat)
+            except RuntimeError:
+                pass  # Event loop closed
+
         async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
             return await self.agent_executor(
-                n, arts, cancel_event=cancel_event,
+                n, arts,
+                cancel_event=cancel_event,
+                progress_callback=_on_progress,
             )
 
         task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
-
-        # Heartbeat loop for watchdog observability (does NOT kill nodes)
-        heartbeat_interval, _ = self._get_heartbeat_settings(node.agent_type)
-
-        async def _heartbeat_loop() -> None:
-            while not task.done():
-                await asyncio.sleep(heartbeat_interval)
-                if not task.done():
-                    node.record_heartbeat()
-
-        hb = asyncio.create_task(_heartbeat_loop())
 
         try:
             return await asyncio.wait_for(task, timeout=timeout)
@@ -1206,13 +1184,6 @@ class DAGExecutionEngine:
             except asyncio.CancelledError:
                 pass
             raise
-        finally:
-            if not hb.done():
-                hb.cancel()
-            try:
-                await hb
-            except asyncio.CancelledError:
-                pass
 
     def _get_node_timeout(self, agent_type: str) -> int:
         """Return node timeout for the given agent type.
@@ -1223,8 +1194,9 @@ class DAGExecutionEngine:
         if self._node_timeout_config is not None:
             return self._node_timeout_config.timeout_for(agent_type)
         # Fallback: derive from watchdog settings (backward compat)
+        # Floor of 1s prevents timeout=0 when interval*threshold rounds down.
         interval, threshold = self._get_heartbeat_settings(agent_type)
-        return int(interval * threshold)
+        return max(1, int(interval * threshold))
 
     def _collect_input_artifacts(
         self,

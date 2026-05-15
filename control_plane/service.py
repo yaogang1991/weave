@@ -356,17 +356,16 @@ class RunService:
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
 
+                # Must transition RUNNING -> FAILED before handle_job_failure
+                self.repository.transition_job_status(
+                    job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
+                )
                 # NodeTimeoutError should mark run as TIMED_OUT rather than
                 # merely FAILED (#360).  Note: `timeout` here is the run-level
                 # timeout (default 1800s); the actual node timeout (e.g. 300s)
                 # is recorded in the node error message.
                 if error_cat == "timeout" and failed_nodes:
                     run = self._lifecycle.mark_timed_out(run, timeout)
-
-                # Must transition RUNNING -> FAILED before handle_job_failure
-                self.repository.transition_job_status(
-                    job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
-                )
                 if work_dir is not None:
                     bls.preserve(backend_manager, job.id, run.id, reason=error_cat or "failed")
                 job = self.repository.get_job(job_id)

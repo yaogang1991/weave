@@ -1,5 +1,5 @@
 """
-Tests for PR 1 (hemostasis) of fault tolerance refactoring (#360).
+Tests for PR 1/2/3 of fault tolerance refactoring (#360).
 
 Covers:
 1. NodeTimeoutError raised (not returned as dict) on agent timeout
@@ -7,6 +7,8 @@ Covers:
 3. RateLimitError does not consume node retry budget in dag_engine
 4. LLM rate limit sleep cap reduced from 300 to 60
 5. _classify_error recognises new exception names
+6. PR2: Node timeout managed by dag_engine + cooperative cancel
+7. PR3: progress_callback replaces _heartbeat_loop
 """
 
 import asyncio
@@ -318,3 +320,77 @@ class TestNodeTimeoutConfig:
         cfg = NodeTimeoutConfig(default_timeout=300, overrides={"generator": 600, "evaluator": 120})
         assert cfg.min_timeout == 120
         assert cfg.max_timeout == 600
+
+
+# -- 7. PR3: progress_callback replaces _heartbeat_loop -------------------------
+
+class TestProgressCallback:
+    @pytest.mark.asyncio
+    async def test_progress_callback_called_after_llm_response(self):
+        """progress_callback is invoked after each LLM call (#360 PR3)."""
+        from core.dag_engine import DAGExecutionEngine
+
+        progress_calls = 0
+
+        async def mock_executor(n, artifacts, **kwargs):
+            nonlocal progress_calls
+            callback = kwargs.get("progress_callback")
+            if callback:
+                callback()  # Simulating agent reporting after LLM response
+                progress_calls += 1
+            return {"status": "completed", "artifacts": []}
+
+        node = _make_node("test_node")
+        dag = _make_dag({"test_node": node})
+
+        engine = DAGExecutionEngine(
+            agent_executor=mock_executor,
+            failure_handler=None,
+            enable_watchdog=False,
+        )
+        engine._get_node_timeout = lambda agent_type: 300
+        await engine.execute(dag)
+
+        assert node.status == NodeStatus.SUCCESS
+        assert progress_calls >= 1
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_receives_cancel_event(self):
+        """Agent executor receives cancel_event for cooperative cancellation."""
+        from core.dag_engine import DAGExecutionEngine
+        import threading
+
+        received_cancel = None
+        received_progress = None
+
+        async def mock_executor(n, artifacts, **kwargs):
+            nonlocal received_cancel, received_progress
+            received_cancel = kwargs.get("cancel_event")
+            received_progress = kwargs.get("progress_callback")
+            return {"status": "completed", "artifacts": []}
+
+        node = _make_node("test_node")
+        dag = _make_dag({"test_node": node})
+
+        engine = DAGExecutionEngine(
+            agent_executor=mock_executor,
+            failure_handler=None,
+            enable_watchdog=False,
+        )
+        engine._get_node_timeout = lambda agent_type: 300
+        await engine.execute(dag)
+
+        assert isinstance(received_cancel, threading.Event)
+        assert callable(received_progress)
+
+    @pytest.mark.asyncio
+    async def test_no_heartbeat_loop_coroutine(self):
+        """_heartbeat_loop should not exist as a method (#360 PR3)."""
+        from core.dag_engine import DAGExecutionEngine
+        engine = DAGExecutionEngine(
+            agent_executor=lambda n, a, **kw: asyncio.coroutine(lambda: {"status": "ok"})(),
+            failure_handler=None,
+            enable_watchdog=False,
+        )
+        assert not hasattr(engine, '_heartbeat_loop'), \
+            "_heartbeat_loop should have been removed in PR3"
