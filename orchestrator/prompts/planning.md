@@ -66,6 +66,14 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     the old file should be deleted/replaced). NEVER create duplicate files
     that serve the same purpose as existing ones. Include the file inventory
     in your planning reasoning.
+16. **Retry continuity**: When the prompt includes "Retry Context", this is a
+    retry of a previous failed/timed-out attempt. You MUST:
+    a. Review ALL existing files listed above — they represent completed work
+    b. Only plan nodes for MISSING or INCOMPLETE work
+    c. Skip modules that already have complete source AND test files
+    d. Adjust your DAG to be a completion plan, not a full rebuild
+    Example: If 8 of 12 planned files already exist, only create 4 generator
+    nodes for the remaining files plus an evaluator.
 
 ## Output Format
 
