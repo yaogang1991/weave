@@ -127,11 +127,15 @@ class TestEvaluatorIntegration:
     @pytest.mark.asyncio
     async def test_eval_passes(self):
         dag = _make_linear_dag(criteria=["tests pass"])
+
+        async def exec_with_artifacts(node, artifacts):
+            return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
+
         mock_eval = MagicMock()
         mock_eval.evaluate_stage = MagicMock(return_value=EvaluationResult(
             passed=True, score=10.0, feedback="OK",
         ))
-        engine = DAGExecutionEngine(_noop_executor, _noop_failure_handler, evaluator=mock_eval, work_dir="/tmp/test_workdir")
+        engine = DAGExecutionEngine(exec_with_artifacts, _noop_failure_handler, evaluator=mock_eval, work_dir="/tmp/test_workdir")
         result = await engine.execute(dag)
         assert result.nodes["a"].status == NodeStatus.SUCCESS
         mock_eval.evaluate_stage.assert_called_once()
@@ -143,7 +147,7 @@ class TestEvaluatorIntegration:
         call_count = 0
 
         async def exec_fn(node, artifacts):
-            return {"status": "completed", "summary": "ok", "artifacts": []}
+            return {"status": "completed", "summary": "ok", "artifacts": ["impl.py"]}
 
         mock_eval = MagicMock()
         mock_eval.evaluate_stage = MagicMock(return_value=EvaluationResult(
@@ -163,7 +167,11 @@ class TestEvaluatorIntegration:
     @pytest.mark.asyncio
     async def test_no_evaluator_skips_evaluation(self):
         dag = _make_linear_dag(criteria=["tests pass"])
-        engine = DAGExecutionEngine(_noop_executor, _noop_failure_handler, evaluator=None)
+
+        async def exec_with_artifacts(node, artifacts):
+            return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
+
+        engine = DAGExecutionEngine(exec_with_artifacts, _noop_failure_handler, evaluator=None)
         result = await engine.execute(dag)
         assert result.nodes["a"].status == NodeStatus.SUCCESS
 
