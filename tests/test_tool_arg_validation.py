@@ -68,8 +68,9 @@ class TestEmptyToolCallValidation:
 
         # Executor should NOT be called
         tool_executor.execute.assert_not_called()
-        # Should have 2 messages: one with tool call, one final
-        assert len(messages) == 2
+        # Worker retries empty tool calls internally; only the final
+        # assistant message (no tool calls) is yielded.
+        assert len(messages) == 1
 
     def test_write_empty_args_error_in_tool_result(self, worker, tmp_path):
         """The tool result message should contain clear error about missing args."""

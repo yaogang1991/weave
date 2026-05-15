@@ -56,6 +56,13 @@ class TestPytestTimeout:
 
     def test_coverage_check_timeout_returns_error(self, engine, work_dir):
         """_check_coverage returns a clear error when subprocess times out."""
+        # Create a matching test file so _find_test_files finds one and
+        # the method proceeds to call subprocess.run (which we mock to timeout).
+        (work_dir / "mymod").mkdir(parents=True, exist_ok=True)
+        (work_dir / "mymod" / "core.py").write_text("x = 1\n")
+        (work_dir / "tests").mkdir(parents=True, exist_ok=True)
+        (work_dir / "tests" / "test_core.py").write_text("def test_ok(): pass\n")
+
         with patch("evaluator.engine.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(
                 cmd=["pytest", "--cov"], timeout=60,

@@ -83,12 +83,13 @@ class TestLintWarnWhenUnavailable:
     @patch("evaluator.engine.subprocess.run")
     def test_no_linter_in_evaluate_stage(self, mock_run, evaluator, tmp_path):
         """Full evaluate_stage: no linter → WARN, overall still passes."""
-        (tmp_path / "hello.py").write_text("ok", encoding="utf-8")
+        (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.side_effect = [
             FileNotFoundError("autoflake"),
             FileNotFoundError("autopep8"),
             FileNotFoundError("flake8"),
             FileNotFoundError("ruff"),
+            MagicMock(returncode=0, stdout="", stderr=""),  # import smoke test
         ]
         result = evaluator.evaluate_stage(
             "s1", "impl",

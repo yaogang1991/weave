@@ -43,7 +43,7 @@ class TestPlanValidatorRenameMap:
         pv = PlanValidator()
         plan_data = {
             "nodes": [
-                {"id": "n1", "task": 'build a "types" package'},
+                {"id": "n1", "task": 'build a package called "types"'},
             ],
             "edges": [],
         }
@@ -151,41 +151,45 @@ class TestApplyRenameMap:
 
 class TestEvaluatorStdlibRenameFallback:
     def test_finds_prefixed_directory(self, tmp_path):
-        from evaluator.engine import EvaluatorEngine
+        from evaluator.checkers.file_exists import FileExistsChecker
 
         # Create the renamed directory with files
         (tmp_path / "exam_app" / "app_models").mkdir(parents=True)
         (tmp_path / "exam_app" / "app_models" / "user.py").write_text("x = 1")
 
-        result = EvaluatorEngine._try_stdlib_rename("exam_app/models/*.py", tmp_path)
+        result = FileExistsChecker._try_stdlib_rename("exam_app/models/*.py", tmp_path)
         assert result is not None
         assert "app_models" in result
 
     def test_returns_none_when_nothing_matches(self, tmp_path):
-        from evaluator.engine import EvaluatorEngine
+        from evaluator.checkers.file_exists import FileExistsChecker
 
-        result = EvaluatorEngine._try_stdlib_rename("nonexistent/models/*.py", tmp_path)
+        result = FileExistsChecker._try_stdlib_rename("nonexistent/models/*.py", tmp_path)
         assert result is None
 
     def test_file_pattern_fallback_passes(self, tmp_path):
         """FILE_PATTERN with renamed directory should pass via fallback."""
-        from evaluator.engine import EvaluatorEngine
-        from session.store import SessionStore
+        from evaluator.checkers.file_exists import FileExistsChecker
+        from evaluator.models import EvaluationContext
 
         (tmp_path / "exam_app" / "app_models").mkdir(parents=True)
         (tmp_path / "exam_app" / "app_models" / "user.py").write_text("x = 1")
         (tmp_path / "exam_app" / "app_models" / "role.py").write_text("y = 2")
 
-        store = MagicMock(spec=SessionStore)
-        engine = EvaluatorEngine(session_store=store)
+        checker = FileExistsChecker()
 
         crit = SuccessCriterion(
             type=CriterionType.FILE_PATTERN,
             pattern="exam_app/models/*.py",
         )
-        passed, msg, _ = engine._check_file_pattern(crit, tmp_path)
-        assert passed
-        assert "app_models" in msg
+        context = EvaluationContext(
+            work_dir=tmp_path,
+            artifacts=None,
+            session_store=None,
+        )
+        result = checker._check_file_pattern(crit, context)
+        assert result.passed
+        assert "app_models" in result.message
 
     def test_file_exists_fallback_passes(self, tmp_path):
         """FILE_EXISTS with renamed directory should pass via fallback."""

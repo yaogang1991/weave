@@ -1,9 +1,10 @@
 """Tests for retry regression prevention (issue #129).
 
 Verifies:
-1. Coverage parse failure returns FAIL even when tests pass (#152)
-2. Best-attempt tracking detects score regression
-3. Retry feedback includes regression warning
+1. Coverage parse failure returns WARN when tests pass (#152)
+2. Coverage parse failure returns FAIL when tests fail
+3. Best-attempt tracking detects score regression
+4. Retry feedback includes regression warning
 """
 from unittest.mock import MagicMock, patch
 
@@ -12,10 +13,11 @@ from core.models import SuccessCriterion, CriterionType
 
 
 class TestCoverageParseTolerance:
-    def test_coverage_parse_failure_fails_even_when_tests_ok(self, tmp_path):
-        """When coverage can't be parsed but pytest passed, coverage must
-        FAIL — unverifiable coverage is not a pass (see #152)."""
+    def test_coverage_parse_failure_warns_when_tests_ok(self, tmp_path):
+        """When coverage can't be parsed but pytest passed, coverage returns
+        WARN (passed=True, auto_verified=False) — unverifiable but not a fail."""
         engine = EvaluatorEngine(MagicMock())
+        (tmp_path / "test_module.py").write_text("def test_x(): pass\n")
 
         with patch("evaluator.engine.subprocess.run") as mock_run:
             # pytest+coverage runs with returncode 0 (tests pass) but no TOTAL line
@@ -24,9 +26,12 @@ class TestCoverageParseTolerance:
                 stdout="test_session starts\n2 passed\n",
                 stderr="",
             )
-            passed, msg = engine._check_coverage(tmp_path, 80)
+            passed, msg, auto = engine._check_coverage(
+                tmp_path, 80, output_artifacts=["test_module.py"],
+            )
 
-        assert not passed
+        assert passed  # passed but not auto-verified → WARN
+        assert not auto  # unverifiable → WARN in evaluate_stage
         assert "could not be parsed" in msg
         assert "not verified" in msg
 
@@ -40,7 +45,7 @@ class TestCoverageParseTolerance:
                 stdout="1 failed\n",
                 stderr="",
             )
-            passed, msg = engine._check_coverage(tmp_path, 80)
+            passed, msg, auto = engine._check_coverage(tmp_path, 80)
 
         assert not passed
         assert "Tests failed" in msg
@@ -57,7 +62,7 @@ class TestCoverageParseTolerance:
                        "TOTAL          20      4    80%\n",
                 stderr="",
             )
-            passed, msg = engine._check_coverage(tmp_path, 80)
+            passed, msg, auto = engine._check_coverage(tmp_path, 80)
 
         assert passed
         assert "80%" in msg
@@ -72,15 +77,15 @@ class TestCoverageParseTolerance:
                 stdout="TOTAL  20  10  50%\n",
                 stderr="",
             )
-            passed, msg = engine._check_coverage(tmp_path, 80)
+            passed, msg, auto = engine._check_coverage(tmp_path, 80)
 
         assert not passed
 
 
 class TestCoverageInEvaluationStage:
-    def test_coverage_parse_failure_fails_overall_eval(self, tmp_path):
-        """Full evaluate_stage fails when coverage can't parse, even if other
-        criteria succeed (#152: unverifiable coverage is not a pass)."""
+    def test_coverage_parse_failure_warns_overall_eval(self, tmp_path):
+        """Full evaluate_stage passes with WARN when coverage can't parse but
+        other criteria succeed (#152: unverifiable coverage → WARN, not FAIL)."""
         engine = EvaluatorEngine(MagicMock())
 
         (tmp_path / "module.py").write_text("x = 1\n")
@@ -117,6 +122,6 @@ class TestCoverageInEvaluationStage:
                 output_artifacts=["module.py"],
             )
 
-        assert not result.passed
-        # Coverage criterion should show as failed
-        assert result.criteria_results.get("coverage") is False
+        assert result.passed  # Overall passed with WARN on coverage
+        # Coverage criterion should show as True (WARN, not FAIL)
+        assert result.criteria_results.get("coverage") is True

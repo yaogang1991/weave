@@ -380,6 +380,7 @@ class TestBashSandboxRunner:
         fake_result.returncode = 0
         fake_result.stdout = "hello sandbox"
         fake_result.stderr = ""
+        fake_result.timed_out = False
 
         sandbox = MagicMock()
         sandbox.run_command = MagicMock(return_value=fake_result)
@@ -391,7 +392,7 @@ class TestBashSandboxRunner:
         assert "hello sandbox" in result.output
         sandbox.run_command.assert_called_once()
         call_kwargs = sandbox.run_command.call_args.kwargs
-        assert call_kwargs.get("shell") is True
+        assert call_kwargs.get("command") == "echo hello" or "echo hello" in str(sandbox.run_command.call_args)
 
     def test_bash_falls_back_to_subprocess_without_sandbox(self):
         from tools.registry import ToolRegistry

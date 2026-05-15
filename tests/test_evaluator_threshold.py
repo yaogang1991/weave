@@ -243,9 +243,9 @@ class TestHardCriteriaProtection:
     def test_mixed_hard_and_soft_with_threshold(self, tmp_store, tmp_path):
         """Mix of hard+soft criteria: soft fails can be overridden, hard fails cannot."""
         ev = EvaluatorEngine(tmp_store, pass_threshold=3.0)
-        (tmp_path / "a.py").write_text("TODO: fix this", encoding="utf-8")
-        (tmp_path / "b.py").write_text("ok", encoding="utf-8")
-        (tmp_path / "c.py").write_text("ok", encoding="utf-8")
+        (tmp_path / "a.py").write_text("# TODO: fix this\n", encoding="utf-8")
+        (tmp_path / "b.py").write_text("pass\n", encoding="utf-8")
+        (tmp_path / "c.py").write_text("pass\n", encoding="utf-8")
         result = ev.evaluate_stage(
             "s1", "impl",
             [
