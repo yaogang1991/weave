@@ -17,6 +17,7 @@ from typing import Iterator
 
 import json
 import logging
+import threading
 import uuid
 
 from core.models import AgentMessage, ToolCall, ToolResult, EventType
@@ -91,10 +92,15 @@ class AgentWorker:
         tools: list[dict],
         tool_executor,
         max_iterations: int = 50,
+        cancel_event: threading.Event | None = None,
     ) -> Iterator[AgentMessage]:
         """
         Run the agent loop until no more tool calls or max iterations reached.
         Yields each assistant message for streaming/real-time observation.
+
+        Args:
+            cancel_event: Cooperative cancellation — if set, the loop exits
+                at the next iteration boundary (#360 PR2).
         """
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
@@ -105,6 +111,14 @@ class AgentWorker:
         consecutive_empty_iterations = 0
 
         for iteration in range(max_iterations):
+            # Cooperative cancellation check (#360 PR2)
+            if cancel_event is not None and cancel_event.is_set():
+                logger.info(
+                    "Agent loop cancelled at iteration %d/%d (cooperative)",
+                    iteration, max_iterations,
+                )
+                return
+
             # Truncate context if exceeding token budget
             messages = self._truncate_messages(messages, self.max_context_tokens)
 

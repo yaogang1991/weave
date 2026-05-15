@@ -56,10 +56,17 @@ logger = logging.getLogger(__name__)
 
 
 def _classify_error(error: str) -> str:
-    """Classify an error string into a canonical category (#274)."""
+    """Classify an error string into a canonical category (#360).
+
+    Recognises structured exception names (NodeTimeoutError, RateLimitError)
+    as well as legacy string patterns.
+    """
     lowered = error.lower()
-    if "429" in lowered or "ratelimit" in lowered or "rate limit" in lowered:
+    # Rate limit: structured exception name or legacy patterns
+    if any(s in lowered for s in ("ratelimiterror", "429", "rate_limit", "rate limit")):
         return "rate_limit"
+    if "nodetimeouterror" in lowered:
+        return "timeout"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
     if "coverage" in lowered and ("below target" in lowered or "could not be verified" in lowered or "not verified" in lowered):
@@ -348,6 +355,13 @@ class RunService:
                     ]
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
+
+                # NodeTimeoutError should mark run as TIMED_OUT rather than
+                # merely FAILED (#360).  Note: `timeout` here is the run-level
+                # timeout (default 1800s); the actual node timeout (e.g. 300s)
+                # is recorded in the node error message.
+                if error_cat == "timeout" and failed_nodes:
+                    run = self._lifecycle.mark_timed_out(run, timeout)
 
                 # Must transition RUNNING -> FAILED before handle_job_failure
                 self.repository.transition_job_status(
@@ -956,6 +970,7 @@ class RunService:
                 agent_type: self.watchdog_config.alert_threshold_for(agent_type)
                 for agent_type in self.watchdog_config.agent_overrides
             },
+            node_timeout_config=_cfg.node_timeout,
         )
 
         # Register event handler: forward DAG node events to session store

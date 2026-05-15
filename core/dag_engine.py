@@ -17,6 +17,7 @@ import concurrent.futures
 import functools
 import logging
 import os
+import threading
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -34,6 +35,7 @@ from core.models import (
     SuccessCriterion,
 )
 from core.exceptions import PendingApprovalError
+from core.exceptions import RateLimitError, NodeTimeoutError
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
@@ -77,6 +79,8 @@ class DAGExecutionEngine:
         watchdog_overrides: dict[str, tuple[float, int]] | None = None,
         # Per-agent-type alert thresholds: {agent_type: min_missed_for_alert}
         alert_thresholds: dict[str, int] | None = None,
+        # M3.4: Node timeout configuration (#360)
+        node_timeout_config: Any | None = None,
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -102,6 +106,8 @@ class DAGExecutionEngine:
         # M3.2: Memory integration
         self.memory_manager = memory_manager
         self._session_id = session_id
+        # M3.4: Node timeout configuration (#360)
+        self._node_timeout_config = node_timeout_config
         # Dedicated thread pool for evaluator calls — avoids global pool
         # join timeout warnings on event loop exit.
         self._executor = concurrent.futures.ThreadPoolExecutor(
@@ -711,7 +717,7 @@ class DAGExecutionEngine:
         ))
 
         try:
-            result = await self._execute_with_heartbeat(node, input_artifacts)
+            result = await self._execute_with_timeout(node, input_artifacts)
 
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
@@ -1092,6 +1098,25 @@ class DAGExecutionEngine:
                 return
 
             node.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+
+            # RateLimitError: do NOT consume node retry budget (#360).
+            # The error will propagate to service.py which also skips the
+            # job-level retry budget for rate_limit errors.
+            if isinstance(e, RateLimitError):
+                node.status = NodeStatus.FAILED
+                node.completed_at = datetime.now(timezone.utc)
+                node.auto_eval_result = None
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="failed",
+                    details={
+                        "error": str(e),
+                        "reason": "rate_limit",
+                        "retry_budget_preserved": True,
+                    },
+                ))
+                return
+
             node.retry_count += 1
 
             if node.retry_count < node.max_retries:
@@ -1121,19 +1146,33 @@ class DAGExecutionEngine:
                 self._running_nodes.pop(node_id, None)
                 self._running_tasks.pop(node_id, None)
 
-    async def _execute_with_heartbeat(
+    async def _execute_with_timeout(
         self,
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
     ) -> dict[str, Any]:
-        """Execute a node with a dedicated heartbeat coroutine.
+        """Execute a node with unified wall-clock timeout (#360 PR2).
 
-        A background task records heartbeats at the per-agent-type interval
-        independently of the executor task.  This avoids timing gaps that
-        could occur with the previous ``asyncio.wait_for`` polling approach
-        when the LLM API response time is close to the heartbeat interval.
+        Replaces the old _execute_with_heartbeat (auto-heartbeat + watchdog kill)
+        and the old agent_pool asyncio.wait_for timeout with a single mechanism.
+
+        - Timeout is per-agent-type via node_timeout config
+        - Cooperative cancellation: threading.Event passed to agent thread
+        - Watchdog heartbeat loop runs for observability (early-warning events)
         """
-        task = asyncio.create_task(self.agent_executor(node, input_artifacts))
+        timeout = self._get_node_timeout(node.agent_type)
+        cancel_event = threading.Event()
+
+        # Pass cancel_event through to the agent executor so it can propagate
+        # to worker.run() for cooperative cancellation.
+        async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
+            return await self.agent_executor(
+                n, arts, cancel_event=cancel_event,
+            )
+
+        task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
+
+        # Heartbeat loop for watchdog observability (does NOT kill nodes)
         heartbeat_interval, _ = self._get_heartbeat_settings(node.agent_type)
 
         async def _heartbeat_loop() -> None:
@@ -1143,10 +1182,23 @@ class DAGExecutionEngine:
                     node.record_heartbeat()
 
         hb = asyncio.create_task(_heartbeat_loop())
+
         try:
-            return await task
+            return await asyncio.wait_for(task, timeout=timeout)
+        except asyncio.TimeoutError:
+            # Signal the thread to stop at next iteration boundary
+            cancel_event.set()
+            logger.warning(
+                "Node %s (%s) timed out after %ds — cancel event set",
+                node.id, node.agent_type, timeout,
+            )
+            raise NodeTimeoutError(
+                node_id=node.id,
+                agent_type=node.agent_type,
+                timeout=timeout,
+            )
         except asyncio.CancelledError:
-            # Watchdog (or caller) cancelled the task.
+            cancel_event.set()
             if not task.done():
                 task.cancel()
             try:
@@ -1161,6 +1213,18 @@ class DAGExecutionEngine:
                 await hb
             except asyncio.CancelledError:
                 pass
+
+    def _get_node_timeout(self, agent_type: str) -> int:
+        """Return node timeout for the given agent type.
+
+        Uses NodeTimeoutConfig from config if available, otherwise falls
+        back to watchdog-based calculation for backward compatibility.
+        """
+        if self._node_timeout_config is not None:
+            return self._node_timeout_config.timeout_for(agent_type)
+        # Fallback: derive from watchdog settings (backward compat)
+        interval, threshold = self._get_heartbeat_settings(agent_type)
+        return int(interval * threshold)
 
     def _collect_input_artifacts(
         self,

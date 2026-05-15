@@ -277,6 +277,43 @@ class ImpactConfig(BaseModel):
     )
 
 
+class NodeTimeoutConfig(BaseModel):
+    """Per-agent-type node execution timeout (#360 PR2).
+
+    Replaces the former agent_timeout (flat int) and watchdog_overrides
+    with a unified configuration.  Timeout enforcement lives in
+    dag_engine._execute_with_timeout, NOT in agent_pool.
+    """
+
+    default_timeout: int = Field(
+        default_factory=lambda: int(os.getenv(
+            "HARNESS_NODE_TIMEOUT",
+            os.getenv("HARNESS_AGENT_TIMEOUT", "300"),
+        )),
+        description="Default node execution timeout in seconds",
+    )
+    overrides: dict[str, int] = Field(
+        default_factory=lambda: {
+            "generator": int(os.getenv(
+                "HARNESS_NODE_TIMEOUT_GENERATOR", "600",
+            )),
+        },
+        description="Per-agent-type timeout overrides (agent_type -> seconds)",
+    )
+
+    def timeout_for(self, agent_type: str) -> int:
+        """Return timeout for the given agent type."""
+        return self.overrides.get(agent_type, self.default_timeout)
+
+    @property
+    def min_timeout(self) -> int:
+        return min(self.default_timeout, *self.overrides.values())
+
+    @property
+    def max_timeout(self) -> int:
+        return max(self.default_timeout, *self.overrides.values())
+
+
 class HarnessConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
@@ -285,7 +322,12 @@ class HarnessConfig(BaseModel):
     artifact_path: str = "./data/artifacts"
     checkpoint_interval: int = 10  # events
     max_context_messages: int = 50
-    agent_timeout: int = 300  # seconds per agent execution
+    # M2 agent_timeout kept for backward compat; superseded by node_timeout (#360)
+    agent_timeout: int = Field(
+        default_factory=lambda: int(os.getenv("HARNESS_AGENT_TIMEOUT", "300")),
+        description="Legacy — use node_timeout instead",
+    )
+    node_timeout: NodeTimeoutConfig = Field(default_factory=NodeTimeoutConfig)
     max_context_tokens: int = 100000  # token threshold for context truncation
     log_level: str = "INFO"
 

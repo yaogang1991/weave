@@ -282,6 +282,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         session_id: str,
         node_id: str | None = None,
         run_id: str | None = None,
+        cancel_event: Any | None = None,
     ) -> dict[str, Any]:
         """
         Execute this agent's task with isolated context.
@@ -297,6 +298,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         )
         return await self._execute_inner(
             task, input_artifacts, session_id, node_id, context,
+            cancel_event=cancel_event,
         )
 
     async def _execute_inner(
@@ -306,6 +308,7 @@ If NO automated evaluation results are provided, perform full evaluation:
         session_id: str,
         node_id: str | None = None,
         context: ExecutionContext | None = None,
+        cancel_event: Any | None = None,
     ) -> dict[str, Any]:
         """Internal execute implementation."""
         # Inject runtime environment context so LLM doesn't guess paths (#144)
@@ -367,7 +370,11 @@ Execute using your available tools. Produce clear, verifiable output.
 """
 
         # Run the agent (dumb loop) via AgentWorker
-        result = await self._run_with_tools(full_prompt, session_id, context)
+        result = await self._run_with_tools(
+            full_prompt, session_id, context,
+            node_id=node_id or "",
+            cancel_event=cancel_event,
+        )
 
         # M3.2: Store learnings from execution result
         if (
@@ -395,8 +402,16 @@ Execute using your available tools. Produce clear, verifiable output.
         prompt: str,
         session_id: str,
         context: ExecutionContext | None = None,
+        node_id: str = "",
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
-        """Run agent loop and collect results via AgentWorker."""
+        """Run agent loop and collect results via AgentWorker.
+
+        Timeout is managed by dag_engine._execute_with_timeout (#360 PR2).
+        This method only handles cooperative cancellation via cancel_event.
+        """
+
+        import threading
 
         _ctx = context or ExecutionContext()
 
@@ -422,26 +437,13 @@ Execute using your available tools. Produce clear, verifiable output.
                     tools=self.tools,
                     tool_executor=tool_executor,
                     max_iterations=self.max_iterations,
+                    cancel_event=cancel_event,
                 )
             )
 
-        # AgentWorker.run() is synchronous (blocks on LLM API calls);
-        # offload to a thread and cap total wall-clock time per node.
-        try:
-            messages = await asyncio.wait_for(
-                asyncio.to_thread(_run_sync),
-                timeout=self.timeout,
-            )
-        except asyncio.TimeoutError:
-            return {
-                "status": "timeout",
-                "summary": (
-                    f"Agent execution timed out after {self.timeout}s. "
-                    f"Consider increasing HARNESS_AGENT_TIMEOUT (current: {self.timeout}s)"
-                ),
-                "artifacts": self.worker.artifacts if hasattr(self, 'worker') else [],
-                "output": "",
-            }
+        # No timeout here — dag_engine manages it via _execute_with_timeout.
+        # Just run in thread and return result.
+        messages = await asyncio.to_thread(_run_sync)
 
         final = messages[-1] if messages else None
         return {
@@ -621,7 +623,11 @@ class AgentPool:
         """
         _log = logging.getLogger(__name__)
 
-        async def _executor(node: DAGNode, artifacts: list[HandoffArtifact]) -> dict:
+        async def _executor(
+            node: DAGNode,
+            artifacts: list[HandoffArtifact],
+            cancel_event: Any | None = None,
+        ) -> dict:
             worker = self.create_worker(node.agent_type)
             try:
                 task = _inject_file_path_constraints(node)
@@ -629,6 +635,7 @@ class AgentPool:
                     task, artifacts, session_id,
                     node_id=node.id,
                     run_id=self.run_id,
+                    cancel_event=cancel_event,
                 )
             except Exception as exc:
                 if not self.llm_router or not self._is_api_error(exc):
@@ -666,6 +673,7 @@ class AgentPool:
                             task, artifacts, session_id,
                             node_id=node.id,
                             run_id=self.run_id,
+                            cancel_event=cancel_event,
                         )
                     except Exception as retry_exc:
                         if not self._is_api_error(retry_exc):
