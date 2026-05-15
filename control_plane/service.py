@@ -63,7 +63,7 @@ def _classify_error(error: str) -> str:
     """
     lowered = error.lower()
     # Structured exception names (take priority over string patterns)
-    if "ratelimiterror" in lowered:
+    if "ratelimiterror" in lowered or "ratelimit" in lowered:
         return "rate_limit"
     if "nodetimeouterror" in lowered:
         return "timeout"
@@ -952,6 +952,10 @@ class RunService:
                 for agent_type in self.watchdog_config.agent_overrides
             },
         )
+
+        # Inject node timeout config so _get_node_timeout uses NodeTimeoutConfig
+        # instead of fallback (interval * threshold) (#360).
+        engine._node_timeout_config = _cfg.node_timeout
 
         # Register event handler: forward DAG node events to session store
         async def _session_event_handler(event):

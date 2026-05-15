@@ -43,7 +43,7 @@ class NodeTimeoutError(Exception):
     """Raised when a DAG node exceeds its wall-clock timeout.
 
     Propagation chain:
-        agent_pool._run_with_tools() — asyncio.wait_for timeout
+        DAGEngine._execute_with_timeout() — asyncio.wait_for timeout
           -> raises NodeTimeoutError
         -> DAGEngine._execute_single_node() — marks node FAILED, may retry
         -> RunService.run_job() — classifies as "timeout"

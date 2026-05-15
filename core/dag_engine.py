@@ -17,6 +17,7 @@ import concurrent.futures
 import functools
 import logging
 import os
+import threading
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
@@ -1074,9 +1075,6 @@ class DAGExecutionEngine:
         - Cooperative cancellation: threading.Event passed to agent thread
         - Watchdog heartbeat loop runs for observability (early-warning events)
         """
-        import threading
-        from core.config import NodeTimeoutConfig
-
         timeout = self._get_node_timeout(node.agent_type)
         cancel_event = threading.Event()
 

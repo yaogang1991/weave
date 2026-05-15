@@ -120,7 +120,7 @@ class LLMClient:
                     # This signals upstream layers that the failure was due to
                     # rate-limiting, so retry budgets should NOT be consumed.
                     error_lower = str(e).lower()
-                    if "429" in error_lower or "rate" in error_lower:
+                    if "429" in error_lower or "rate_limit" in error_lower or "ratelimit" in error_lower:
                         raise RateLimitError(
                             provider=self.config.provider,
                             model=self.config.model,
@@ -139,7 +139,7 @@ class LLMClient:
                     raise
 
                 # For 429 / rate-limit: parse reset time and wait
-                if "429" in error_lower or "rate" in error_lower:
+                if "429" in error_lower or "rate_limit" in error_lower or "ratelimit" in error_lower:
                     wait_sec = self._parse_rate_limit_wait(error_msg)
                     if wait_sec is not None:
                         time.sleep(min(wait_sec + 1, 60))  # cap at 60s (#360)
