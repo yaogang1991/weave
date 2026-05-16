@@ -652,7 +652,12 @@ class AgentPool:
             )
         )
 
-    def create_worker(self, agent_type: str, tool_registry: Any | None = None) -> WorkerAgent:
+    def create_worker(
+        self,
+        agent_type: str,
+        tool_registry: Any | None = None,
+        guardrails: Any | None = None,
+    ) -> WorkerAgent:
         """Create a fresh WorkerAgent instance for the given type.
 
         Always creates a new instance to prevent concurrent context pollution
@@ -661,6 +666,8 @@ class AgentPool:
         Args:
             tool_registry: Override tool registry for per-node workspace
                 isolation (#176 PR2). When None, uses the pool's shared registry.
+            guardrails: Override guardrails for per-node workspace isolation
+                (#414). When None, uses the pool's shared guardrails.
         """
         capability = self.agent_registry.get(agent_type)
         if not capability:
@@ -677,7 +684,7 @@ class AgentPool:
             llm_config=llm_config,
             session_store=self.session_store,
             tool_registry=tool_registry or self.tool_registry,
-            guardrails=self.guardrails,
+            guardrails=guardrails or self.guardrails,
             max_iterations=self.max_iterations,
             timeout=self.timeout,
             max_context_tokens=self.max_context_tokens,
@@ -710,6 +717,7 @@ class AgentPool:
             # Per-node workspace isolation: create ToolRegistry with node's
             # workspace as base_cwd so tools operate in the isolated directory (#176 PR2).
             node_tool_registry = self.tool_registry
+            node_guardrails = self.guardrails
             if workspace_path:
                 from tools.registry import ToolRegistry as _TR
                 # Clone existing registry (preserves MCP/project tools) and
@@ -724,9 +732,16 @@ class AgentPool:
                         node_tool_registry._schemas[name] = (
                             self.tool_registry._schemas.get(name, {})
                         )
+                # Create per-node Guardrails wrapping the isolated registry
+                # so check_and_execute() uses node_tool_registry (#414 re-review).
+                if self.guardrails:
+                    node_guardrails = Guardrails(
+                        self.guardrails.policy, node_tool_registry,
+                    )
             worker = self.create_worker(
                 node.agent_type,
                 tool_registry=node_tool_registry,
+                guardrails=node_guardrails,
             )
 
             # Set ownership context on tool registry before execution (#272)
@@ -771,7 +786,7 @@ class AgentPool:
                         llm_config=fallback.config,
                         session_store=self.session_store,
                         tool_registry=node_tool_registry,
-                        guardrails=self.guardrails,
+                        guardrails=node_guardrails,
                         max_iterations=self.max_iterations,
                         timeout=self.timeout,
                         max_context_tokens=self.max_context_tokens,
