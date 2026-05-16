@@ -155,38 +155,37 @@ class LLMClient:
 
         Wraps the actual call in a hard timeout to prevent indefinite hangs
         when the SDK timeout doesn't fire (e.g., third-party API bugs #367).
+
+        Semaphore is acquired in the main thread so the permit is released
+        immediately on hard timeout, preventing permit leak and deadlock (#367 review).
         """
         result: dict | None = None
         exc: Exception | None = None
 
         def _target():
             nonlocal result, exc
-            sem = _get_api_semaphore(self.config.max_concurrent_api)
-            if sem is not None:
-                logger.debug(
-                    "Acquiring API semaphore (limit=%d)",
-                    self.config.max_concurrent_api,
-                )
-                sem.acquire()
             try:
                 result = self._do_call(messages, tools)
             except Exception as e:
                 exc = e
-            finally:
-                if sem is not None:
-                    sem.release()
 
-        # Hard timeout: if the SDK's httpx timeout doesn't fire within
-        # timeout + 30s (buffer), force-terminate the call (#367).
-        hard_timeout = self.config.timeout + 30
-        thread = threading.Thread(target=_target, daemon=True)
-        thread.start()
-        thread.join(timeout=hard_timeout)
-        if thread.is_alive():
-            raise TimeoutError(
-                f"LLM call exceeded hard timeout of {hard_timeout}s — "
-                f"the API may be unresponsive. Model: {self.config.model}"
-            )
+        sem = _get_api_semaphore(self.config.max_concurrent_api)
+        if sem is not None:
+            logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
+            sem.acquire()
+        try:
+            hard_timeout = self.config.timeout + 30
+            thread = threading.Thread(target=_target, daemon=True)
+            thread.start()
+            thread.join(timeout=hard_timeout)
+            if thread.is_alive():
+                raise TimeoutError(
+                    f"LLM call exceeded hard timeout of {hard_timeout}s — "
+                    f"the API may be unresponsive. Model: {self.config.model}"
+                )
+        finally:
+            if sem is not None:
+                sem.release()
         if exc is not None:
             raise exc
         if result is None:

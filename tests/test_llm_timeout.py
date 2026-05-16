@@ -137,3 +137,33 @@ class TestHardTimeout:
                     pass
 
         assert thread_timeout == 32  # 2s config + 30s buffer
+
+    def test_semaphore_released_on_hard_timeout(self):
+        """Semaphore permit must be released even when hard timeout fires (#367 review)."""
+        config = _make_config(timeout=1)
+
+        with patch("core.llm_client.OpenAI") as mock_openai:
+            mock_client = MagicMock()
+
+            def slow_create(*args, **kwargs):
+                time.sleep(300)
+                return MagicMock()
+
+            mock_client.chat.completions.create = slow_create
+            mock_openai.return_value = mock_client
+
+            with patch("core.llm_client._get_api_semaphore") as mock_sem:
+                sem = threading.Semaphore(1)
+                mock_sem.return_value = sem
+
+                client = LLMClient(config)
+                with pytest.raises(TimeoutError, match="hard timeout"):
+                    client.call(
+                        [{"role": "user", "content": "hi"}],
+                        max_retries=0,
+                    )
+
+                # Semaphore must be released after hard timeout
+                assert sem.acquire(blocking=False), \
+                    "Semaphore was not released after hard timeout — permit leak"
+                sem.release()
