@@ -135,6 +135,7 @@ class EvaluatorEngine:
         artifact_path: str,
         work_dir: str | None = None,
         output_artifacts: list[str] | None = None,
+        owned_files: list[str] | None = None,
     ) -> EvaluationResult:
         """Evaluate a stage against its success criteria."""
         eval_dir = work_dir or artifact_path
@@ -148,12 +149,15 @@ class EvaluatorEngine:
 
         structured = normalize_criteria(criteria)
 
-        # Scope artifacts to node-owned files (#320).
+        # Scope artifacts to node-owned files (#320, #395).
         # When success_criteria specify exact files (file_exists) or patterns
         # (file_pattern), only lint/check those files — not files created by
-        # sibling generator nodes running in parallel.
+        # sibling generator nodes running in parallel.  Additionally, when
+        # owned_files is provided, use it to filter artifacts that the node
+        # is not responsible for (#395).
         output_artifacts = self._scope_artifacts_to_criteria(
             output_artifacts, structured, Path(eval_dir) if eval_dir else None,
+            owned_files=owned_files,
         )
 
         results: dict[str] = {}
@@ -436,6 +440,7 @@ class EvaluatorEngine:
         output_artifacts: list[str] | None,
         criteria: list[SuccessCriterion],
         work_dir: Path | None,
+        owned_files: list[str] | None = None,
     ) -> list[str] | None:
         """Filter output_artifacts to only files the node is supposed to own.
 
@@ -444,10 +449,50 @@ class EvaluatorEngine:
         cross-node lint contamination when parallel generator nodes share
         the same workspace (#320).
 
-        If no file-based criteria exist, return artifacts unchanged.
+        When owned_files is provided, artifacts are further filtered to only
+        include files the node is responsible for, preventing cross-node lint
+        pollution (#395).
+
+        If no file-based criteria exist and owned_files is not provided,
+        return artifacts unchanged.
         """
         if not output_artifacts:
             return output_artifacts
+
+        # Filter by owned_files first (#395): when the DAG node declares
+        # which files it owns, remove any artifact not in that list.  This
+        # prevents cross-node lint pollution where evaluator flags lint in
+        # files created by sibling generator nodes.
+        if owned_files:
+            owned_set = set(owned_files)
+            filtered = []
+            for art in output_artifacts:
+                art_rel = art
+                if work_dir:
+                    try:
+                        p = Path(art)
+                        if p.is_absolute():
+                            art_rel = str(p.relative_to(work_dir))
+                    except ValueError:
+                        pass
+                if any(
+                    art_rel == own
+                    or art_rel.endswith("/" + own)
+                    or own.endswith("/" + art_rel)
+                    for own in owned_set
+                ):
+                    filtered.append(art)
+            if filtered:
+                if len(filtered) < len(output_artifacts):
+                    logger.info(
+                        "Scoped artifacts from %d to %d based on owned_files (#395)",
+                        len(output_artifacts), len(filtered),
+                    )
+                output_artifacts = filtered
+            else:
+                # owned_files didn't match any artifact — keep originals
+                # to avoid false negatives when owned_files is stale
+                pass
 
         # Collect expected file paths/patterns from criteria
         expected_paths: list[str] = []
