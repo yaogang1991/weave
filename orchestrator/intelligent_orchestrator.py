@@ -213,6 +213,7 @@ class IntelligentOrchestrator:
         max_retries = 2
         plan_data = None
         for attempt in range(max_retries + 1):
+            messages = self._prune_messages_for_size(messages)
             response = self.llm.call(messages, tools=[])
             plan_data = self._extract_json(response.get("content", ""))
             if plan_data is not None:
@@ -277,9 +278,15 @@ class IntelligentOrchestrator:
                     "Plan has too many nodes, retrying with constraint: %s",
                     err_msg,
                 )
+                node_resp = response.get("content", "")
+                if len(node_resp) > 2000:
+                    node_resp = (
+                        node_resp[:2000]
+                        + "\n... (truncated for message size limit)"
+                    )
                 messages.append({
                     "role": "assistant",
-                    "content": response.get("content", ""),
+                    "content": node_resp,
                 })
                 messages.append({
                     "role": "user",
@@ -289,6 +296,7 @@ class IntelligentOrchestrator:
                         "related sub-tasks, and return a valid JSON plan."
                     ),
                 })
+                messages = self._prune_messages_for_size(messages)
                 response = self.llm.call(messages, tools=[])
                 plan_data = self._extract_json(response.get("content", ""))
                 if plan_data is None:
@@ -528,6 +536,10 @@ class IntelligentOrchestrator:
     _DEFAULT_CONTEXT_WINDOW = 200_000
     # Conservative chars-per-token estimate (English + code mix).
     _CHARS_PER_TOKEN = 3.5
+    # Anthropic API total message size limit (bytes).  We prune at 80% to
+    # leave headroom for the response and API envelope overhead (#419).
+    _MAX_MESSAGE_BYTES = 2_097_152  # 2 MiB
+    _PRUNE_THRESHOLD = 0.80
 
     def _estimate_tokens(self, text: str) -> int:
         """Rough token estimate: chars / 3.5."""
@@ -606,6 +618,85 @@ class IntelligentOrchestrator:
             f"and produce a minimal viable plan.]"
         )
         return truncated
+
+    # -- Message size management (#419) ------------------------------------
+
+    @staticmethod
+    def _estimate_messages_bytes(messages: list[dict]) -> int:
+        """Estimate total byte size of messages payload (UTF-8)."""
+        total = 0
+        for msg in messages:
+            content = msg.get("content", "")
+            total += len(content.encode("utf-8", errors="replace"))
+            # Account for role key + dict overhead (~50 bytes per message)
+            total += 50
+        return total
+
+    def _prune_messages_for_size(
+        self,
+        messages: list[dict],
+    ) -> list[dict]:
+        """Prune messages to stay within the Anthropic 2 MiB limit (#419).
+
+        Strategy:
+        1. Keep the system prompt (index 0) and the last user message intact.
+        2. Truncate intermediate assistant messages to a summary.
+        3. If still too large, truncate the user message content.
+        """
+        max_bytes = int(self._MAX_MESSAGE_BYTES * self._PRUNE_THRESHOLD)
+        current = self._estimate_messages_bytes(messages)
+
+        if current <= max_bytes:
+            return messages
+
+        logger.warning(
+            "Messages payload %d bytes exceeds %d byte threshold — pruning.",
+            current, max_bytes,
+        )
+
+        # Work on a copy to avoid mutating the original
+        pruned = [dict(m) for m in messages]
+
+        # Pass 1: truncate assistant messages (indices 1..n-1, skipping last)
+        for i in range(1, len(pruned) - 1):
+            if pruned[i].get("role") == "assistant":
+                content = pruned[i].get("content", "")
+                if len(content) > 2000:
+                    pruned[i] = {
+                        "role": "assistant",
+                        "content": (
+                            content[:2000]
+                            + "\n... (truncated for message size limit)"
+                        ),
+                    }
+
+        current = self._estimate_messages_bytes(pruned)
+        if current <= max_bytes:
+            return pruned
+
+        # Pass 2: truncate user messages (except the first system prompt)
+        for i in range(1, len(pruned)):
+            if pruned[i].get("role") == "user":
+                content = pruned[i].get("content", "")
+                if len(content) > 4000:
+                    pruned[i] = dict(pruned[i])
+                    pruned[i]["content"] = (
+                        content[:4000]
+                        + "\n... (truncated for message size limit)"
+                    )
+
+        current = self._estimate_messages_bytes(pruned)
+        if current <= max_bytes:
+            return pruned
+
+        # Pass 3: drop intermediate messages entirely, keep only first + last
+        if len(pruned) > 2:
+            pruned = [pruned[0], pruned[-1]]
+            logger.warning(
+                "Dropped intermediate messages — keeping only system + last user."
+            )
+
+        return pruned
 
     def _extract_json(self, text: str) -> dict | None:
         """
@@ -732,14 +823,21 @@ class IntelligentOrchestrator:
         max_retries = 2
         plan_data = None
         for attempt in range(max_retries + 1):
+            messages = self._prune_messages_for_size(messages)
             response = self.llm.call(messages, tools=[])
             plan_data = self._extract_json(response.get("content", ""))
             if plan_data is not None:
                 break
             if attempt < max_retries:
+                replan_resp = response.get("content", "")
+                if len(replan_resp) > 2000:
+                    replan_resp = (
+                        replan_resp[:2000]
+                        + "\n... (truncated for message size limit)"
+                    )
                 messages.append({
                     "role": "assistant",
-                    "content": response.get("content", ""),
+                    "content": replan_resp,
                 })
                 messages.append({
                     "role": "user",
