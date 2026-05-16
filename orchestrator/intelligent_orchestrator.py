@@ -110,11 +110,13 @@ class IntelligentOrchestrator:
         llm_router: LLMRouter | None = None,
         learning_optimizer: Any | None = None,
         prompt_registry: PromptRegistry | None = None,
+        skill_registry: Any | None = None,
     ):
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
         self.learning_optimizer = learning_optimizer
+        self.skill_registry = skill_registry
         self._prompt_registry = prompt_registry or get_prompt_registry()
         if llm_router:
             self.llm = llm_router.get_client("orchestrator")
@@ -184,6 +186,15 @@ class IntelligentOrchestrator:
                     user_prompt += f"\n\n{hints}"
             except Exception:
                 pass  # Learning hints must not break planning
+
+        # M3.6: Inject skill descriptions if available
+        if self.skill_registry:
+            try:
+                skills_desc = self.skill_registry.to_prompt_description()
+                if skills_desc:
+                    user_prompt += f"\n\n{skills_desc}"
+            except Exception:
+                pass  # Skill descriptions must not break planning
 
         # Step 3: Call LLM for planning (with retry on JSON parse failure)
         messages = [

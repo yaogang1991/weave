@@ -82,9 +82,21 @@ class SandboxConfig(BaseModel):
     credential_proxy: bool = True
 
 
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server connection."""
+    name: str
+    command: str                                      # e.g. "npx", "python"
+    args: list[str] = Field(default_factory=list)     # e.g. ["-y", "@modelcontextprotocol/server-github"]
+    env: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = True
+    default_risk_level: str = "medium"                # LOW, MEDIUM, HIGH, CRITICAL
+
+
 class MCPConfig(BaseModel):
-    servers: list[dict[str, Any]] = Field(default_factory=list)
+    """Configuration for MCP (Model Context Protocol) integration."""
+    servers: list[MCPServerConfig] = Field(default_factory=list)
     auto_discover: bool = False
+    connection_timeout: int = 30  # seconds to wait for server startup
 
 
 class AgentWatchdogOverride(BaseModel):
@@ -523,6 +535,11 @@ class HarnessConfig(BaseModel):
                 ),
             ),
             watchdog=WatchdogConfig.from_env(),
+            mcp=MCPConfig(
+                auto_discover=os.getenv("HARNESS_MCP_AUTO_DISCOVER", "false").lower()
+                    in ("true", "1", "yes"),
+                connection_timeout=int(os.getenv("HARNESS_MCP_CONNECTION_TIMEOUT", "30")),
+            ),
         )
         instance.warn_on_timeout_issues()
         return instance

@@ -371,6 +371,20 @@ class Guardrails:
             return False, f"Too many errors ({len(errors)}), stopping for safety"
         return True, "Within limits"
 
+    def register_mcp_risk_map(
+        self,
+        mcp_tools: list,
+        default_risk: RiskLevel = RiskLevel.MEDIUM,
+    ) -> None:
+        """Register risk levels for MCP tools.
+
+        Default is MEDIUM (file-edit-level risk). The evaluate() method
+        already falls back to HIGH for unknown tools, so MCP tools not
+        explicitly registered will default to HIGH (safe fallback).
+        """
+        for tool in mcp_tools:
+            self.RISK_MAP[tool.prefixed_name] = default_risk
+
     # -- approval-request formatting ----------------------------------
 
     def format_approval_request(self, tool_name: str, arguments: dict) -> str:

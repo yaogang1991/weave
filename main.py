@@ -520,6 +520,33 @@ async def cmd_execute(args, dag: DAG | None = None):
         )
     guardrails = Guardrails(policy, tool_registry)
 
+    # M3.6: Connect to MCP servers and register their tools
+    mcp_client = None
+    if config.mcp.servers:
+        try:
+            from mcp.client import MCPClient
+            from core.models import RiskLevel
+            mcp_client = MCPClient(config.mcp)
+            connected = await mcp_client.connect_all()
+            if connected > 0:
+                discovered = await mcp_client.discover_all_tools()
+                if discovered:
+                    tool_registry.register_mcp_tools(mcp_client, discovered)
+                    guardrails.register_mcp_risk_map(
+                        discovered, default_risk=RiskLevel.MEDIUM
+                    )
+                    print(f"Registered {len(discovered)} MCP tools from "
+                          f"{connected} server(s)")
+        except Exception as e:
+            print(f"MCP initialization warning: {e}")
+
+    # M3.6: Load skill registry
+    skill_registry = None
+    skills_dir = Path(args.project) / ".harness" / "skills" if args.project else None
+    if skills_dir and skills_dir.is_dir():
+        from skills.registry import SkillRegistry
+        skill_registry = SkillRegistry(skills_dir=skills_dir)
+
     # M3.1: LLM router for multi-model support
     llm_router = None
     if config.model_routing.routing:
@@ -566,6 +593,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         config.llm, store, registry,
         llm_router=llm_router,
         learning_optimizer=learning_optimizer,
+        skill_registry=skill_registry,
     )
 
     # Create evaluator for quality gates
@@ -735,6 +763,10 @@ async def cmd_execute(args, dag: DAG | None = None):
             await server_task
         except asyncio.CancelledError:
             pass
+
+    # M3.6: Disconnect MCP servers
+    if mcp_client:
+        await mcp_client.disconnect_all()
 
     return result_dag
 
@@ -1297,6 +1329,63 @@ async def cmd_learning_status(args):
 # =============================================================================
 
 
+
+async def cmd_skills(args):
+    """List available skills."""
+    from skills.registry import SkillRegistry
+    project_path = getattr(args, "project", None) or "."
+    registry = SkillRegistry(skills_dir=Path(project_path) / ".harness" / "skills")
+    skills = registry.list_skills()
+
+    agent_filter = getattr(args, "agent", None)
+    if agent_filter:
+        skills = [s for s in skills if not s.agent_types or agent_filter in s.agent_types]
+
+    result = {
+        "skills": [
+            {
+                "name": s.name,
+                "description": s.description,
+                "agent_types": s.agent_types or ["all"],
+                "variables": {k: v.default for k, v in s.variables.items()},
+                "tool_allowlist": s.tool_allowlist,
+            }
+            for s in skills
+        ],
+        "count": len(skills),
+    }
+    print(json.dumps(result, indent=2))
+
+
+async def cmd_skill(args):
+    """Invoke a skill (creates a plan+run with skill context)."""
+    from skills.registry import SkillRegistry
+    project_path = getattr(args, "project", None) or "."
+    registry = SkillRegistry(skills_dir=Path(project_path) / ".harness" / "skills")
+
+    variables = _parse_template_vars(getattr(args, "var", []) or [])
+    prompt = registry.instantiate(args.name, variables)
+
+    run_args = argparse.Namespace(
+        requirement=prompt,
+        project=project_path,
+        file=None,
+        template=None,
+        var=[],
+        viz=False,
+        visualize=False,
+        no_browser=True,
+        allow_self_modify=getattr(args, "allow_self_modify", False),
+        max_parallel=getattr(args, "max_parallel", 3),
+        max_iterations=getattr(args, "max_iterations", 50),
+        pass_threshold=None,
+        non_interactive=False,
+        timeout=None,
+        cleanup_stdlib_shadowing=False,
+    )
+    return await cmd_run(run_args)
+
+
 async def cmd_templates(args):
     """List available DAG templates."""
     from templates.library import TemplateRegistry
@@ -1691,6 +1780,21 @@ Examples:
     templates_parser.add_argument("--name", help="Show details of a specific template")
     templates_parser.set_defaults(func=cmd_templates)
 
+    # Skills commands (M3.6)
+    skills_parser = subparsers.add_parser("skills", help="List available skills")
+    skills_parser.add_argument("--agent", help="Filter by agent type")
+    skills_parser.add_argument("--project", default=".", help="Project path")
+    skills_parser.set_defaults(func=cmd_skills)
+
+    skill_parser = subparsers.add_parser("skill", help="Invoke a skill")
+    skill_parser.add_argument("name", help="Skill name")
+    skill_parser.add_argument("--var", action="append", default=[], metavar="KEY=VALUE",
+        help="Skill variable (repeatable)")
+    skill_parser.add_argument("--project", default=".", help="Project path")
+    skill_parser.add_argument("--max-parallel", type=int, default=3)
+    skill_parser.add_argument("--max-iterations", type=int, default=50)
+    skill_parser.set_defaults(func=cmd_skill)
+
     # impact-predict command
     impact_predict_parser = subparsers.add_parser(
         "impact-predict", help="Predict impact of a change"
@@ -1735,6 +1839,7 @@ Examples:
         "learning-analyze", "learning-insights", "learning-status",
         "templates",
         "impact-predict", "impact-graph", "impact-history",
+        "skills",
     }
     # Template-based plan doesn't need an LLM key (run still executes agents)
     if args.command == "plan" and getattr(args, "template", None):
