@@ -91,13 +91,13 @@ class TestDockerSandboxMVP:
         """DockerSandbox.run_command uses docker CLI when available."""
         sandbox = DockerSandbox()
 
-        async def mock_create_subprocess_shell(*args, **kwargs):
+        async def mock_create_subprocess_exec(*args, **kwargs):
             proc = AsyncMock()
             proc.communicate = AsyncMock(return_value=(b"hello\n", b""))
             proc.returncode = 0
             return proc
 
-        with patch("asyncio.create_subprocess_shell", side_effect=mock_create_subprocess_shell):
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
             with patch.object(sandbox, "is_available", return_value=True):
                 result = await sandbox.run_command("echo hello", cwd="/workspace")
 
@@ -112,7 +112,7 @@ class TestDockerSandboxMVP:
 
         sandbox = DockerSandbox()
 
-        async def mock_create_subprocess_shell(*args, **kwargs):
+        async def mock_create_subprocess_exec(*args, **kwargs):
             proc = AsyncMock()
 
             async def slow_communicate():
@@ -124,7 +124,7 @@ class TestDockerSandboxMVP:
             proc.returncode = 0
             return proc
 
-        with patch("asyncio.create_subprocess_shell", side_effect=mock_create_subprocess_shell):
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
             with patch.object(sandbox, "is_available", return_value=True):
                 result = await sandbox.run_command("sleep 10", cwd="/workspace", timeout=1)
 
@@ -138,13 +138,13 @@ class TestDockerSandboxMVP:
         """DockerSandbox returns failure on nonzero exit code."""
         sandbox = DockerSandbox()
 
-        async def mock_create_subprocess_shell(*args, **kwargs):
+        async def mock_create_subprocess_exec(*args, **kwargs):
             proc = AsyncMock()
             proc.communicate = AsyncMock(return_value=(b"", b"error: not found\n"))
             proc.returncode = 127
             return proc
 
-        with patch("asyncio.create_subprocess_shell", side_effect=mock_create_subprocess_shell):
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
             with patch.object(sandbox, "is_available", return_value=True):
                 result = await sandbox.run_command("bad_command", cwd="/workspace")
 
@@ -158,21 +158,23 @@ class TestDockerSandboxMVP:
         sandbox = DockerSandbox()
         captured_kwargs = {}
 
-        async def mock_create_subprocess_shell(*args, **kwargs):
-            captured_kwargs.update(kwargs)
+        async def mock_create_subprocess_exec(*args, **kwargs):
+            captured_kwargs.update({"args": args, "kwargs": kwargs})
             proc = AsyncMock()
             proc.communicate = AsyncMock(return_value=(b"bar\n", b""))
             proc.returncode = 0
             return proc
 
-        with patch("asyncio.create_subprocess_shell", side_effect=mock_create_subprocess_shell):
+        with patch("asyncio.create_subprocess_exec", side_effect=mock_create_subprocess_exec):
             with patch.object(sandbox, "is_available", return_value=True):
                 await sandbox.run_command(
                     "echo $FOO", cwd="/workspace", env={"FOO": "bar"},
                 )
 
-        # Docker sandbox should pass env to the subprocess
-        assert captured_kwargs.get("env") is not None or True  # env may be in docker args
+        # Docker sandbox should pass env via -e flag in argument list
+        docker_args = captured_kwargs.get("args", ())
+        assert any("-e" == arg for arg in docker_args)
+        assert any("FOO=bar" in arg for arg in docker_args)
 
     def test_docker_sandbox_default_image(self):
         """DockerSandbox has a sensible default image."""

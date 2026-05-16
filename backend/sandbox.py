@@ -154,12 +154,12 @@ class DockerSandbox(SandboxProvider):
                 "Install Docker or switch to 'local' sandbox."
             )
 
-        docker_cmd = self._build_docker_command(command, cwd, env)
+        docker_args = self._build_docker_args(command, cwd, env)
         start = time.monotonic()
 
         try:
-            proc = await asyncio.create_subprocess_shell(
-                docker_cmd,
+            proc = await asyncio.create_subprocess_exec(
+                *docker_args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -188,31 +188,28 @@ class DockerSandbox(SandboxProvider):
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
-    def _build_docker_command(
+    def _build_docker_args(
         self,
         command: str,
         cwd: str,
         env: dict[str, str] | None = None,
-    ) -> str:
-        """Build the docker run shell command."""
-        parts = [
-            "docker",
-            "run",
-            "--rm",
-            f"-v \"{cwd}:/workspace\"",
-            f"--network {self._network_mode}",
-            "-w /workspace",
+    ) -> list[str]:
+        """Build the docker run argument list (no shell, no injection risk)."""
+        args = [
+            "docker", "run", "--rm",
+            "-v", f"{cwd}:/workspace",
+            "--network", self._network_mode,
+            "-w", "/workspace",
         ]
 
         # Pass env variables explicitly (whitelist, not host leak)
         if env:
             for key, value in env.items():
-                parts.append(f"-e {key}={value}")
+                args.extend(["-e", f"{key}={value}"])
 
-        parts.append(self._image)
-        parts.append(f"bash -c {repr(command)}")
+        args.extend([self._image, "bash", "-c", command])
 
-        return " ".join(parts)
+        return args
 
     def is_available(self) -> bool:
         """Check if Docker CLI is available on the host."""

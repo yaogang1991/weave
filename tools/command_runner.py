@@ -89,16 +89,11 @@ class SyncSandboxAdapter:
     ) -> ToolCommandResult:
         try:
             coro = self._sandbox.run_command(command, cwd, timeout, env)
-        except NotImplementedError as e:
+        except (NotImplementedError, Exception) as e:
+            prefix = "" if isinstance(e, NotImplementedError) else "Sandbox error: "
             return ToolCommandResult(
                 returncode=-1,
-                stderr=str(e),
-                timed_out=False,
-            )
-        except Exception as e:
-            return ToolCommandResult(
-                returncode=-1,
-                stderr=f"Sandbox error: {e}",
+                stderr=f"{prefix}{e}",
                 timed_out=False,
             )
 
@@ -120,16 +115,11 @@ class SyncSandboxAdapter:
                         new_loop.close()
                 else:
                     result = asyncio.run(coro)
-            except NotImplementedError as e:
+            except (NotImplementedError, Exception) as e:
+                prefix = "" if isinstance(e, NotImplementedError) else "Sandbox error: "
                 return ToolCommandResult(
                     returncode=-1,
-                    stderr=str(e),
-                    timed_out=False,
-                )
-            except Exception as e:
-                return ToolCommandResult(
-                    returncode=-1,
-                    stderr=f"Sandbox error: {e}",
+                    stderr=f"{prefix}{e}",
                     timed_out=False,
                 )
 
