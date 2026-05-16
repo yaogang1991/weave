@@ -60,7 +60,7 @@ class TestRetryFeedbackContent:
         # Second attempt: produce artifact, eval passes
         attempt = 0
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             nonlocal attempt
             attempt += 1
             return {
@@ -160,7 +160,7 @@ class TestEventFeedbackNotTruncated:
 
         events = []
 
-        async def capturing_executor(node, artifacts):
+        async def capturing_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": ["main.py"]}
 
         async def failure_handler(dag, node_id, error):

@@ -642,7 +642,10 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     # Default console progress + bridge DAG ExecutionEvents into SessionStore
     async def on_event(event):
-        print(f"  [{event.event_type.upper()}] {event.node_id}: {event.details}")
+        print(
+            f"  [{event.event_type.upper()}] {event.node_id}: {event.details}",
+            flush=True,
+        )
         # Translate DAG ExecutionEvent → SessionStore WORKFLOW_STAGE events
         if event.event_type == "started":
             node = dag.nodes.get(event.node_id)
@@ -684,15 +687,15 @@ async def cmd_execute(args, dag: DAG | None = None):
             "error": f"Approval required: {exc.ticket_id}",
         })
         if exc.ticket_id:
-            print(f"\nAgent requested approval for a high-risk operation.")
-            print(f"  Ticket ID: {exc.ticket_id}")
-            print(f"  Approve:   python main.py approve {exc.ticket_id}")
-            print(f"  Reject:    python main.py reject {exc.ticket_id}")
-            print("Then rerun to continue, or use worker mode for automatic poll.")
+            print(f"\nAgent requested approval for a high-risk operation.", flush=True)
+            print(f"  Ticket ID: {exc.ticket_id}", flush=True)
+            print(f"  Approve:   python main.py approve {exc.ticket_id}", flush=True)
+            print(f"  Reject:    python main.py reject {exc.ticket_id}", flush=True)
+            print("Then rerun to continue, or use worker mode for automatic poll.", flush=True)
         else:
-            print("\nAgent requested approval but no ticket was created.")
-            print("This may be a configuration issue.")
-        print("For local auto-approval: set HARNESS_NON_INTERACTIVE=true or use --non-interactive.")
+            print("\nAgent requested approval but no ticket was created.", flush=True)
+            print("This may be a configuration issue.", flush=True)
+        print("For local auto-approval: set HARNESS_NON_INTERACTIVE=true or use --non-interactive.", flush=True)
         return None
     except Exception as exc:
         store.emit_event(session_id, EventType.SESSION_ERROR, {

@@ -96,7 +96,7 @@ class TestRegressionRestore:
             metadata={"lint_new_issues": [], "lint_all_issues": []},
         )
 
-        async def mock_executor(node, artifacts):
+        async def mock_executor(node, artifacts, **kwargs):
             return {"artifacts": ["main.py", "test_main.py"]}
 
         engine = DAGExecutionEngine(
@@ -171,7 +171,7 @@ class TestRegressionRestore:
             metadata={"lint_new_issues": [], "lint_all_issues": []},
         )
 
-        async def mock_executor(node, artifacts):
+        async def mock_executor(node, artifacts, **kwargs):
             return {"artifacts": ["main.py", "test_main.py"]}
 
         engine = DAGExecutionEngine(
@@ -207,7 +207,7 @@ class TestRegressionRestore:
         (tmp_path / "extra_module.py").write_text("# unwanted file\n", encoding="utf-8")
 
         # Override executor to return artifacts including the extra file
-        async def mock_executor_extra(node, artifacts):
+        async def mock_executor_extra(node, artifacts, **kwargs):
             return {"artifacts": ["main.py", "test_main.py", "extra_module.py"]}
 
         engine.agent_executor = mock_executor_extra

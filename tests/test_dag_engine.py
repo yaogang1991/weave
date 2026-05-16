@@ -31,7 +31,7 @@ def _make_three_node_dag():
     return dag
 
 
-async def _noop_executor(node, artifacts):
+async def _noop_executor(node, artifacts, **kwargs):
     return {"status": "completed", "summary": "done", "artifacts": [], "output": "ok"}
 
 
@@ -52,7 +52,7 @@ class TestTopologicalExecution:
         dag = _make_three_node_dag()
         execution_order = []
 
-        async def tracking_executor(node, artifacts):
+        async def tracking_executor(node, artifacts, **kwargs):
             execution_order.append(node.id)
             return {"status": "completed", "summary": "done", "artifacts": []}
 
@@ -74,7 +74,7 @@ class TestTopologicalExecution:
 
         execution_order = []
 
-        async def tracking_executor(node, artifacts):
+        async def tracking_executor(node, artifacts, **kwargs):
             execution_order.append(node.id)
             return {"status": "completed", "summary": "done", "artifacts": []}
 
@@ -90,7 +90,7 @@ class TestFailureHandling:
     async def test_failure_aborts_remaining(self):
         dag = _make_three_node_dag()
 
-        async def fail_on_b(node, artifacts):
+        async def fail_on_b(node, artifacts, **kwargs):
             if node.id == "b":
                 raise RuntimeError("boom")
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -107,7 +107,7 @@ class TestFailureHandling:
         dag.nodes["a"].max_retries = 2
         call_count = 0
 
-        async def fail_once(node, artifacts):
+        async def fail_once(node, artifacts, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -128,7 +128,7 @@ class TestEvaluatorIntegration:
     async def test_eval_passes(self):
         dag = _make_linear_dag(criteria=["tests pass"])
 
-        async def exec_with_artifacts(node, artifacts):
+        async def exec_with_artifacts(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
 
         mock_eval = MagicMock()
@@ -146,7 +146,7 @@ class TestEvaluatorIntegration:
         dag.nodes["a"].max_retries = 2
         call_count = 0
 
-        async def exec_fn(node, artifacts):
+        async def exec_fn(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": ["impl.py"]}
 
         mock_eval = MagicMock()
@@ -168,7 +168,7 @@ class TestEvaluatorIntegration:
     async def test_no_evaluator_skips_evaluation(self):
         dag = _make_linear_dag(criteria=["tests pass"])
 
-        async def exec_with_artifacts(node, artifacts):
+        async def exec_with_artifacts(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
 
         engine = DAGExecutionEngine(exec_with_artifacts, _noop_failure_handler, evaluator=None)
@@ -195,7 +195,7 @@ class TestHandoffArtifacts:
 
         received_artifacts = []
 
-        async def capturing_executor(node, artifacts):
+        async def capturing_executor(node, artifacts, **kwargs):
             if node.id == "b":
                 received_artifacts.extend(artifacts)
             return {"status": "completed", "summary": f"{node.id} done", "artifacts": [f"{node.id}_file.py"]}

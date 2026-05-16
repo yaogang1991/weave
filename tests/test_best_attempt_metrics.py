@@ -59,7 +59,7 @@ class TestBestAttemptCriteriaTracking:
             False, 5.0, ["a.py:10:E501"], criteria,
         )
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {"summary": "ok", "artifacts": ["a.py"]}
 
         engine = DAGExecutionEngine(

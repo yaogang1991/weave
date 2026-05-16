@@ -411,7 +411,7 @@ class TestHealthEventChain:
         async def capture_event(event: ExecutionEvent):
             events.append(event)
 
-        async def failing_executor(node, artifacts):
+        async def failing_executor(node, artifacts, **kwargs):
             raise RuntimeError("Agent error")
 
         async def retry_failure_handler(dag, node_id, error):
@@ -465,7 +465,7 @@ class TestHealthEventChain:
         async def capture_event(event: ExecutionEvent):
             events.append(event)
 
-        async def failing_executor(node, artifacts):
+        async def failing_executor(node, artifacts, **kwargs):
             raise RuntimeError("Critical error")
 
         async def abort_failure_handler(dag, node_id, error):
@@ -516,7 +516,7 @@ class TestHealthEventChain:
         async def capture_event(event: ExecutionEvent):
             events.append(event)
 
-        async def failing_executor(node, artifacts):
+        async def failing_executor(node, artifacts, **kwargs):
             raise RuntimeError("Optional step failed")
 
         async def skip_failure_handler(dag, node_id, error):
@@ -634,7 +634,7 @@ class TestPerAgentWatchdog:
         assert "timeout" in result_dag.nodes["eval1"].error.lower()
 
     def test_get_heartbeat_settings_default(self):
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"summary": "ok"}
 
         async def noop_handler(dag, node_id, error):
@@ -653,7 +653,7 @@ class TestPerAgentWatchdog:
         assert threshold == 5
 
     def test_get_heartbeat_settings_with_override(self):
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"summary": "ok"}
 
         async def noop_handler(dag, node_id, error):
@@ -753,7 +753,7 @@ class TestAlertThreshold:
         )
         engine.on_event(capture_event)
 
-        async def hanging_executor(node, artifacts):
+        async def hanging_executor(node, artifacts, **kwargs):
             await asyncio.sleep(10)
         engine.agent_executor = hanging_executor
 
@@ -784,7 +784,7 @@ class TestAlertThreshold:
 
     def test_default_alert_threshold_is_2(self):
         """Without explicit alert_thresholds, default is 2."""
-        async def noop(node, artifacts):
+        async def noop(node, artifacts, **kwargs):
             return {"summary": "ok"}
 
         async def noop_handler(dag, node_id, error):
@@ -798,7 +798,7 @@ class TestAlertThreshold:
         assert engine._get_alert_threshold("generator") == 2
 
     def test_custom_alert_threshold(self):
-        async def noop(node, artifacts):
+        async def noop(node, artifacts, **kwargs):
             return {"summary": "ok"}
 
         async def noop_handler(dag, node_id, error):

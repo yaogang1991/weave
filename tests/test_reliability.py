@@ -97,7 +97,7 @@ def _make_three_node_dag():
     return dag
 
 
-async def _noop_executor(node, artifacts):
+async def _noop_executor(node, artifacts, **kwargs):
     return {"status": "completed", "summary": "done", "artifacts": [], "output": "ok"}
 
 
@@ -204,7 +204,7 @@ class TestRetryBackoff:
         dag.nodes["a"].max_retries = 3
         call_count = 0
 
-        async def fail_twice(node, artifacts):
+        async def fail_twice(node, artifacts, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count <= 2:
@@ -225,7 +225,7 @@ class TestRetryBackoff:
         dag = _make_linear_dag()
         dag.nodes["a"].max_retries = 2  # 0, 1, 2 -> max 3 attempts
 
-        async def always_fail(node, artifacts):
+        async def always_fail(node, artifacts, **kwargs):
             raise RuntimeError("persistent failure")
 
         engine = DAGExecutionEngine(always_fail, _noop_failure_handler)
@@ -354,7 +354,7 @@ class TestReplanClosedLoop:
         dag = _make_linear_dag()
         dag.nodes["a"].max_retries = 0  # Fail immediately
 
-        async def always_fail(node, artifacts):
+        async def always_fail(node, artifacts, **kwargs):
             raise RuntimeError("boom")
 
         replan_called = False
@@ -385,7 +385,7 @@ class TestReplanClosedLoop:
         """If no replan_handler is set, 'replan' decision falls back to abort."""
         dag = _make_three_node_dag()
 
-        async def fail_on_b(node, artifacts):
+        async def fail_on_b(node, artifacts, **kwargs):
             if node.id == "b":
                 raise RuntimeError("boom")
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -410,7 +410,7 @@ class TestReplanClosedLoop:
         execution_log = []
         b_should_fail = True
 
-        async def exec_fn(node, artifacts):
+        async def exec_fn(node, artifacts, **kwargs):
             nonlocal b_should_fail
             execution_log.append(node.id)
             if node.id == "b" and b_should_fail:
@@ -451,7 +451,7 @@ class TestReplanClosedLoop:
 
         exec_count = {}
 
-        async def counting_executor(node, artifacts):
+        async def counting_executor(node, artifacts, **kwargs):
             exec_count[node.id] = exec_count.get(node.id, 0) + 1
             return {"status": "completed", "summary": f"{node.id} done", "artifacts": []}
 
@@ -489,7 +489,7 @@ class TestMaxReplansProtection:
         dag = _make_linear_dag()
         dag.nodes["a"].max_retries = 0  # Fail immediately
 
-        async def always_fail(node, artifacts):
+        async def always_fail(node, artifacts, **kwargs):
             raise RuntimeError("persistent")
 
         async def always_replan(dag_ref, node_id, error):
@@ -523,7 +523,7 @@ class TestMaxReplansProtection:
         dag = _make_linear_dag()
         dag.nodes["a"].max_retries = 0
 
-        async def always_fail(node, artifacts):
+        async def always_fail(node, artifacts, **kwargs):
             raise RuntimeError("boom")
 
         async def always_replan(dag_ref, node_id, error):
@@ -547,7 +547,7 @@ class TestMaxReplansProtection:
 
         replan_calls = []
 
-        async def always_fail(node, artifacts):
+        async def always_fail(node, artifacts, **kwargs):
             raise RuntimeError("boom")
 
         async def always_replan(dag_ref, node_id, error):

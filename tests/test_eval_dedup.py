@@ -66,7 +66,7 @@ class TestAutoEvalHandoff:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -111,7 +111,7 @@ class TestAutoEvalHandoff:
         dag.add_node(gen2_node)
         dag.add_edge("gen", "gen2")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -150,7 +150,7 @@ class TestAutoEvalHandoff:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -212,7 +212,7 @@ class TestAutoEvalResultAlignment:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -266,7 +266,7 @@ class TestAutoEvalResultAlignment:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -315,7 +315,7 @@ class TestAutoEvalResultAlignment:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -371,7 +371,7 @@ class TestAutoEvalResultAlignment:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -419,7 +419,7 @@ class TestAutoEvalResultAlignment:
         dag.add_node(eval_node)
         dag.add_edge("gen", "eval")
 
-        async def noop_executor(node, artifacts):
+        async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def noop_failure_handler(dag, node_id, error):
@@ -481,7 +481,7 @@ class TestRegressionRestoreEvalResult:
 
         executor_call_count = 0
 
-        async def counting_executor(node, artifacts):
+        async def counting_executor(node, artifacts, **kwargs):
             nonlocal executor_call_count
             executor_call_count += 1
             return {
@@ -570,7 +570,7 @@ class TestRegressionRestoreEvalResult:
 
         executor_call_count = 0
 
-        async def counting_executor(node, artifacts):
+        async def counting_executor(node, artifacts, **kwargs):
             nonlocal executor_call_count
             executor_call_count += 1
             return {

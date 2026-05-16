@@ -56,7 +56,7 @@ class TestLintIssueRegression:
         call_count = 0
         results = [_make_eval_result(False, 7.5, ["a.py:10:E501", "b.py:20:E501"])]
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             nonlocal call_count
             _ = results[min(call_count, len(results) - 1)]
             call_count += 1

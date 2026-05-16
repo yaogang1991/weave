@@ -34,7 +34,7 @@ class TestZeroOutputFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler, work_dir="/tmp/test_workdir")
@@ -51,7 +51,7 @@ class TestZeroOutputFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         mock_eval = MagicMock()
@@ -77,7 +77,7 @@ class TestZeroOutputFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def executor_with_output(node, artifacts):
+        async def executor_with_output(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": ["parser.py"]}
 
         engine = DAGExecutionEngine(executor_with_output, _noop_failure_handler)
@@ -93,7 +93,7 @@ class TestZeroOutputFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler)
@@ -109,7 +109,7 @@ class TestZeroOutputFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler)
@@ -125,7 +125,7 @@ class TestZeroOutputFastFail:
             success_criteria=[],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler)
@@ -147,7 +147,7 @@ class TestZeroOutputFastFail:
             ],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler, work_dir="/tmp/test_workdir")
@@ -164,7 +164,7 @@ class TestZeroOutputFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def no_output_executor(node, artifacts):
+        async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         events = []

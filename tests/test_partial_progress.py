@@ -13,7 +13,7 @@ from core.models import DAG, DAGNode, NodeStatus
 
 def _make_engine(tmp_path, eval_side_effect):
     """Create a DAGExecutionEngine with mocked evaluator."""
-    async def mock_executor(node, artifacts):
+    async def mock_executor(node, artifacts, **kwargs):
         return {"artifacts": ["main.py"]}
 
     mock_evaluator = MagicMock()

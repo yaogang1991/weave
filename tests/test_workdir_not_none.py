@@ -51,7 +51,7 @@ class TestDagEngineWorkDirFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
 
         mock_evaluator = MagicMock()
@@ -82,7 +82,7 @@ class TestDagEngineWorkDirFastFail:
             success_criteria=["tests pass"],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": ["impl.py"]}
 
         mock_evaluator = MagicMock()

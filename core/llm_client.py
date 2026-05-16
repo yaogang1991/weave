@@ -19,7 +19,6 @@ read blocks indefinitely).
 
 from __future__ import annotations
 
-import concurrent.futures
 import json
 import logging
 import re
@@ -104,10 +103,10 @@ class LLMClient:
 
     def _create_client(self):
         # Explicit httpx.Timeout with separate connect/read/write/pool
-        # (#401). A plain int timeout can fail to fire when a TCP connection
-        # is silently dropped — the socket read blocks indefinitely because
-        # no timeout applies at the socket level.  Setting connect and read
-        # separately ensures each phase has its own deadline.
+        # (#401, #367). A plain int timeout can fail to fire when a TCP
+        # connection is silently dropped — the socket read blocks indefinitely
+        # because no timeout applies at the socket level.  Setting connect and
+        # read separately ensures each phase has its own deadline.
         timeout = httpx.Timeout(
             connect=30.0,
             read=float(self.config.timeout),
@@ -190,30 +189,35 @@ class LLMClient:
     def _call_once(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> dict:
-        """Single LLM call with hard wall-clock timeout (#401).
+        """Single LLM call with hard wall-clock timeout (#401, #367).
 
-        Wraps the SDK call in a separate thread with a deadline.  If the
+        Wraps the actual call in a separate thread with a deadline.  If the
         SDK's own httpx timeout fails to fire (silently dropped TCP), the
         hard timeout ensures we don't block indefinitely.  The stuck thread
         becomes a daemon that cleans up when the process exits.
+
+        Semaphore is acquired in the main thread so the permit is released
+        immediately on hard timeout, preventing permit leak and deadlock (#367).
         """
-        sem = _get_api_semaphore(self.config.max_concurrent_api)
+        result: dict | None = None
+        exc: Exception | None = None
 
-        def _guarded_call():
-            if sem is not None:
-                logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
-                sem.acquire()
-                try:
-                    return self._do_call(messages, tools)
-                finally:
-                    sem.release()
-            return self._do_call(messages, tools)
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            future = pool.submit(_guarded_call)
+        def _target():
+            nonlocal result, exc
             try:
-                return future.result(timeout=self._hard_timeout)
-            except concurrent.futures.TimeoutError:
+                result = self._do_call(messages, tools)
+            except Exception as e:
+                exc = e
+
+        sem = _get_api_semaphore(self.config.max_concurrent_api)
+        if sem is not None:
+            logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
+            sem.acquire()
+        try:
+            thread = threading.Thread(target=_target, daemon=True)
+            thread.start()
+            thread.join(timeout=self._hard_timeout)
+            if thread.is_alive():
                 logger.error(
                     "LLM call exceeded hard timeout (%ds). "
                     "SDK timeout (%ds) did not fire — possible hung connection (#401). "
@@ -226,6 +230,14 @@ class LLMClient:
                     f"(SDK timeout: {self.config.timeout}s). "
                     f"Provider: {self.config.provider}, Model: {self.config.model}"
                 )
+        finally:
+            if sem is not None:
+                sem.release()
+        if exc is not None:
+            raise exc
+        if result is None:
+            raise RuntimeError("LLM call returned no result")
+        return result
 
     def _do_call(
         self, messages: list[dict], tools: list[dict] | None = None

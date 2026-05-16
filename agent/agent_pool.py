@@ -449,6 +449,18 @@ Execute using your available tools. Produce clear, verifiable output.
         # Just run in thread and return result.
         messages = await asyncio.to_thread(_run_sync)
 
+        # Post-generation cleanup: auto-remove unused imports/variables
+        # from artifacts before evaluation (#391).  This eliminates the
+        # most common cause of node retries (60-70% are F401) so the
+        # evaluator sees clean files from the start.  The evaluator also
+        # runs autoflake as a safety net, but cleaning here avoids the
+        # retry-feedback round-trip entirely.
+        artifacts = self.worker.artifacts
+        if artifacts and self.capability.id == "generator":
+            await asyncio.to_thread(
+                self._cleanup_unused_imports, artifacts,
+            )
+
         final = messages[-1] if messages else None
         return {
             "status": "completed",
@@ -456,6 +468,62 @@ Execute using your available tools. Produce clear, verifiable output.
             "artifacts": self.worker.artifacts,
             "output": final.content if final else "",
         }
+
+    @staticmethod
+    def _cleanup_unused_imports(artifacts: list[str]) -> None:
+        """Run autoflake on generated files to remove unused imports (#391).
+
+        This runs after the generator agent loop finishes but before the
+        evaluator, so files are clean when lint checking starts.  Silently
+        skips if autoflake is not installed or times out.
+        """
+        import subprocess
+        import sys as _sys
+
+        py_files = [f for f in artifacts if f.endswith(".py")]
+        if not py_files:
+            return
+
+        # Resolve relative paths against CWD
+        from pathlib import Path
+        resolved = []
+        for f in py_files:
+            p = Path(f)
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            if p.is_file():
+                resolved.append(str(p))
+
+        if not resolved:
+            return
+
+        try:
+            result = subprocess.run(
+                [
+                    _sys.executable, "-m", "autoflake",
+                    "--in-place",
+                    "--remove-all-unused-imports",
+                    "--remove-unused-variables",
+                ] + resolved,
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                logger.info(
+                    "Post-generation autoflake cleaned %d file(s) (#391)",
+                    len(resolved),
+                )
+            else:
+                logger.debug(
+                    "autoflake returned %d for %d file(s): %s",
+                    result.returncode, len(resolved),
+                    result.stderr[:200] if result.stderr else "",
+                )
+        except FileNotFoundError:
+            logger.debug("autoflake not installed, skipping post-gen cleanup (#391)")
+        except subprocess.TimeoutExpired:
+            logger.warning("autoflake timed out during post-gen cleanup (#391)")
+        except Exception as exc:
+            logger.warning("autoflake post-gen cleanup error: %s", exc)
 
     def _build_runtime_context(self) -> str:
         """Build runtime environment info for agent prompt (#144).

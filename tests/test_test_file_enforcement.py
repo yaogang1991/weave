@@ -54,7 +54,7 @@ class TestTestFileEnforcement:
             success_criteria=[SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS)],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": node_artifacts}
 
         async def failure_handler(dag, node_id, error):
@@ -78,7 +78,7 @@ class TestTestFileEnforcement:
             success_criteria=[SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS)],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {
                 "status": "completed",
                 "summary": "ok",
@@ -104,7 +104,7 @@ class TestTestFileEnforcement:
             success_criteria=["lint clean"],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {
                 "status": "completed",
                 "summary": "ok",
@@ -132,7 +132,7 @@ class TestTestFileEnforcement:
             success_criteria=[SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS)],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
 
         async def failure_handler(dag, node_id, error):
@@ -155,7 +155,7 @@ class TestTestFileEnforcement:
             success_criteria=[SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS)],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {
                 "status": "completed",
                 "summary": "ok",
@@ -188,7 +188,7 @@ class TestTestFileEnforcement:
             success_criteria=["tests pass"],
         ))
 
-        async def executor(node, artifacts):
+        async def executor(node, artifacts, **kwargs):
             return {
                 "status": "completed",
                 "summary": "ok",
