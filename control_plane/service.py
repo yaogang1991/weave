@@ -321,6 +321,8 @@ class RunService:
                 ),
                 work_dir=work_dir,
                 backend_manager=backend_manager,
+                job_id=job.id,
+                run_id=run.id,
             )
             summary = engine.get_execution_summary(result_dag)
 
@@ -987,6 +989,9 @@ class RunService:
                 for agent_type in self.watchdog_config.agent_overrides
             },
             node_timeout_config=_cfg.node_timeout,
+            backend_manager=backend_manager,
+            job_id=job_id,
+            run_id=run_id or "",
         )
 
         async def _session_event_handler(event):
