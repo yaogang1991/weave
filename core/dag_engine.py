@@ -738,6 +738,11 @@ class DAGExecutionEngine:
                     "Node %s: setup_node failed (%s), using shared workspace",
                     node_id, exc,
                 )
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="workspace_isolation_failed",
+                    details={"error": str(exc)},
+                ))
 
         try:
             result = await self._execute_with_timeout(
@@ -1075,6 +1080,20 @@ class DAGExecutionEngine:
             node.retry_count += 1
 
             if node.retry_count < node.max_retries:
+                # Clean up workspace before retry so setup_node gets a clean
+                # slate (e.g. git worktree add would fail if dir exists).
+                if node_workspace and self.backend_manager:
+                    try:
+                        self.backend_manager.cleanup_node(
+                            self._job_id, self._run_id, node_id,
+                        )
+                        node_workspace = None
+                        workspace_path = None
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "Node %s: pre-retry cleanup failed: %s",
+                            node_id, cleanup_exc,
+                        )
                 node.status = NodeStatus.RETRYING
                 await self._emit(ExecutionEvent(
                     node_id=node_id,

@@ -707,21 +707,27 @@ class AgentPool:
             progress_callback: Any | None = None,
             workspace_path: str | None = None,
         ) -> dict:
-            worker = self.create_worker(node.agent_type)
-
             # Per-node workspace isolation: create ToolRegistry with node's
             # workspace as base_cwd so tools operate in the isolated directory (#176 PR2).
             node_tool_registry = self.tool_registry
             if workspace_path:
                 from tools.registry import ToolRegistry as _TR
+                # Clone existing registry (preserves MCP/project tools) and
+                # redirect base_cwd to the isolated workspace.
                 node_tool_registry = _TR(
                     base_cwd=workspace_path,
                     sandbox_runner=self.tool_registry.sandbox_runner,
                 )
-                worker = self.create_worker(
-                    node.agent_type,
-                    tool_registry=node_tool_registry,
-                )
+                for name, handler in self.tool_registry._tools.items():
+                    if name not in node_tool_registry._tools:
+                        node_tool_registry._tools[name] = handler
+                        node_tool_registry._schemas[name] = (
+                            self.tool_registry._schemas.get(name, {})
+                        )
+            worker = self.create_worker(
+                node.agent_type,
+                tool_registry=node_tool_registry,
+            )
 
             # Set ownership context on tool registry before execution (#272)
             if node.owned_files:
@@ -764,7 +770,7 @@ class AgentPool:
                         capability=capability,
                         llm_config=fallback.config,
                         session_store=self.session_store,
-                        tool_registry=self.tool_registry,
+                        tool_registry=node_tool_registry,
                         guardrails=self.guardrails,
                         max_iterations=self.max_iterations,
                         timeout=self.timeout,
@@ -788,6 +794,6 @@ class AgentPool:
                         failed_model = fallback.config.model
                         continue
             finally:
-                self.tool_registry.set_ownership_context(None)
+                node_tool_registry.set_ownership_context(None)
 
         return _executor
