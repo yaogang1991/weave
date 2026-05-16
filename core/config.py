@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _load_claude_settings() -> dict[str, str]:
@@ -82,9 +82,31 @@ class SandboxConfig(BaseModel):
     credential_proxy: bool = True
 
 
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server connection."""
+    name: str
+    command: str                                      # e.g. "npx", "python"
+    args: list[str] = Field(default_factory=list)     # e.g. ["-y", "@modelcontextprotocol/server-github"]
+    env: dict[str, str] = Field(default_factory=dict)
+    enabled: bool = True
+    default_risk_level: str = "medium"                # LOW, MEDIUM, HIGH, CRITICAL
+
+    @field_validator("default_risk_level")
+    @classmethod
+    def _validate_risk_level(cls, v: str) -> str:
+        valid = {"low", "medium", "high", "critical"}
+        if v.lower() not in valid:
+            raise ValueError(
+                f"Invalid default_risk_level '{v}', must be one of {valid}"
+            )
+        return v.lower()
+
+
 class MCPConfig(BaseModel):
-    servers: list[dict[str, Any]] = Field(default_factory=list)
+    """Configuration for MCP (Model Context Protocol) integration."""
+    servers: list[MCPServerConfig] = Field(default_factory=list)
     auto_discover: bool = False
+    connection_timeout: int = 30  # seconds to wait for server startup
 
 
 class AgentWatchdogOverride(BaseModel):
@@ -523,6 +545,11 @@ class HarnessConfig(BaseModel):
                 ),
             ),
             watchdog=WatchdogConfig.from_env(),
+            mcp=MCPConfig(
+                auto_discover=os.getenv("HARNESS_MCP_AUTO_DISCOVER", "false").lower()
+                    in ("true", "1", "yes"),
+                connection_timeout=int(os.getenv("HARNESS_MCP_CONNECTION_TIMEOUT", "30")),
+            ),
         )
         instance.warn_on_timeout_issues()
         return instance

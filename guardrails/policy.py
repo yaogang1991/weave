@@ -117,6 +117,8 @@ class Guardrails:
         self.policy = policy
         self.tool_registry = tool_registry
         self._pending_approvals: dict[str, str] = {}
+        # Instance-level copy to prevent cross-instance leakage (#413 review).
+        self.RISK_MAP = dict(self.RISK_MAP)
 
     # -- public tri-state evaluation ----------------------------------
 
@@ -370,6 +372,20 @@ class Guardrails:
         if len(errors) >= 5:
             return False, f"Too many errors ({len(errors)}), stopping for safety"
         return True, "Within limits"
+
+    def register_mcp_risk_map(
+        self,
+        mcp_tools: list,
+        default_risk: RiskLevel = RiskLevel.MEDIUM,
+    ) -> None:
+        """Register risk levels for MCP tools.
+
+        Default is MEDIUM (file-edit-level risk). The evaluate() method
+        already falls back to HIGH for unknown tools, so MCP tools not
+        explicitly registered will default to HIGH (safe fallback).
+        """
+        for tool in mcp_tools:
+            self.RISK_MAP[tool.prefixed_name] = default_risk
 
     # -- approval-request formatting ----------------------------------
 

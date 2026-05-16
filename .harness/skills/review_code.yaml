@@ -1,0 +1,30 @@
+name: review_code
+description: Perform a thorough code review of specified files
+version: "1.0"
+agent_types:
+  - evaluator
+tool_allowlist:
+  - read
+  - grep
+  - glob
+variables:
+  target_files:
+    default: ""
+    description: "Comma-separated list of files to review"
+    required: true
+  focus:
+    default: "all"
+    description: "Review focus: security, performance, style, all"
+prompt: |
+  Perform a thorough code review of the following files: {target_files}
+
+  Focus areas: {focus}
+
+  For each file:
+  1. Read the entire file
+  2. Check for potential bugs and edge cases
+  3. Evaluate code style and naming conventions
+  4. Look for security vulnerabilities
+  5. Assess performance characteristics
+
+  Provide structured feedback with severity levels (critical/warning/info).

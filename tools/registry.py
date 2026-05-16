@@ -8,7 +8,7 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from core.models import ToolResult
 from tools.command_runner import ToolCommandRunner
@@ -219,6 +219,23 @@ class ToolRegistry:
         """Register or replace a tool. Schema keyed by name prevents duplicates."""
         self._tools[name] = handler
         self._schemas[name] = schema
+
+    def register_mcp_tools(self, mcp_client: Any, discovered_tools: list) -> int:
+        """Register MCP-discovered tools in the registry.
+
+        Returns the number of tools registered.
+        """
+        count = 0
+        for tool_info in discovered_tools:
+            handler = _make_mcp_handler(mcp_client, tool_info.prefixed_name)
+            schema = {
+                "name": tool_info.prefixed_name,
+                "description": f"[MCP:{tool_info.server_name}] {tool_info.description}",
+                "input_schema": tool_info.input_schema,
+            }
+            self.register(tool_info.prefixed_name, handler, schema)
+            count += 1
+        return count
 
     def get_schema(self, name: str) -> dict | None:
         return self._schemas.get(name)
@@ -728,3 +745,33 @@ class ToolRegistry:
             )
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
+
+
+def _make_mcp_handler(mcp_client: Any, prefixed_name: str) -> Callable:
+    """Create a tool handler function that routes to MCP server."""
+    def handler(**kwargs) -> ToolResult:
+        start = time.time()
+        try:
+            result = mcp_client.call_tool_sync(prefixed_name, kwargs)
+            duration = int((time.time() - start) * 1000)
+            if result.get("is_error"):
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    error=str(result.get("content", "MCP tool error")),
+                    duration_ms=duration,
+                )
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=str(result.get("content", "")),
+                duration_ms=duration,
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                error=f"MCP tool error ({prefixed_name}): {e}",
+                duration_ms=int((time.time() - start) * 1000),
+            )
+    return handler
