@@ -237,6 +237,20 @@ class ArtifactHandoffService:
                 "3. Common fixes: add missing method calls, "
                 "fix None checks, add initialization\n"
             )
+        if _has_init_import_error(feedback):
+            naming_guidance += (
+                "\n__INIT__.PY IMPORT ERROR DETECTED: Your "
+                "__init__.py eagerly imports modules/packages "
+                "that don't exist yet (#423).\n"
+                "1. Rewrite __init__.py to be MINIMAL — just a "
+                "docstring or empty\n"
+                "2. Do NOT import from submodules that other "
+                "nodes haven't created yet\n"
+                "3. Do NOT import external packages that may "
+                "not be installed\n"
+                "4. If re-exports are needed, use lazy imports: "
+                "def __getattr__(name): ...\n"
+            )
 
         retry_hint = (
             f"RETRY ATTEMPT #{node.retry_count}: Your previous "
@@ -337,4 +351,12 @@ def _has_runtime_error(feedback: str) -> bool:
         "RuntimeError" in feedback
         or "AttributeError" in feedback
         or "KeyError" in feedback
+    )
+
+
+def _has_init_import_error(feedback: str) -> bool:
+    """Detect __init__.py eager-import failures (#423)."""
+    return (
+        "__init__" in feedback
+        and ("import_check" in feedback or "ImportError" in feedback)
     )

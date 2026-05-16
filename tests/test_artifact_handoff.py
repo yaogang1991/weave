@@ -15,6 +15,7 @@ from core.artifact_handoff import (
     _has_timeout,
     _has_coverage_low,
     _has_runtime_error,
+    _has_init_import_error,
 )
 from core.models import (
     DAG,
@@ -84,6 +85,17 @@ class TestErrorPatternDetection:
         assert _has_runtime_error("AttributeError: no attr")
         assert _has_runtime_error("KeyError: missing key")
         assert not _has_runtime_error("clean run")
+
+    def test_init_import_error(self):
+        assert _has_init_import_error(
+            "FAIL import_check: mylib/__init__.py — "
+            "ImportError: cannot import name 'backend'"
+        )
+        assert _has_init_import_error(
+            "__init__.py import_check failed"
+        )
+        assert not _has_init_import_error("import_check: main.py")
+        assert not _has_init_import_error("__init__.py updated")
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +290,26 @@ class TestRetryFeedback:
 
         feedback = [a for a in artifacts if a.metadata.get("type") == "eval_feedback"][0]
         assert "TIMEOUT DETECTED" in feedback.content
+
+    def test_init_import_error_guidance(self):
+        service = ArtifactHandoffService()
+        nodes = {
+            "target": DAGNode(
+                id="target", agent_type="generator",
+                task_description="Build", status=NodeStatus.RETRYING,
+                eval_feedback=(
+                    "FAIL import_check: mylib/__init__.py — "
+                    "ImportError: cannot import name 'backend'"
+                ),
+                retry_count=1,
+            ),
+        }
+        dag = DAG(nodes=nodes, edges=[])
+        artifacts = service.collect(dag, "target")
+
+        feedback = [a for a in artifacts if a.metadata.get("type") == "eval_feedback"][0]
+        assert "__INIT__.PY IMPORT ERROR" in feedback.content
+        assert "MINIMAL" in feedback.content
 
     def test_no_feedback_when_empty(self):
         service = ArtifactHandoffService()

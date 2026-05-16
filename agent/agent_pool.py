@@ -153,6 +153,15 @@ Rules:
     features before writing any files. Write feature A's file, then feature B's
     file, etc. This ensures at least partial output even if the iteration budget
     runs out (#409).
+21. __INIT__.PY SAFETY: When creating __init__.py files, use a MINIMAL style
+    with NO submodule imports. Only re-export symbols from files that ALREADY
+    EXIST in the same package. Use lazy/conditional imports for optional
+    dependencies. NEVER import submodules that haven't been created yet or
+    external packages that may not be installed.
+    GOOD:  (empty or docstring-only, e.g. ''Unit conversion library.'')
+    GOOD:  from .core import Converter    (only if core.py exists)
+    BAD:   from .backend_sql import *     (backend_sql.py doesn't exist yet)
+    BAD:   import bcrypt                  (external, may not be installed)
 
 Work systematically: gather context → implement → verify.
 """,
