@@ -10,10 +10,16 @@ Includes built-in retry with exponential backoff for transient errors
 
 For parallel DAG nodes sharing one process, a global semaphore limits
 concurrent API calls to prevent rate-limiting (#300).
+
+Hard per-call timeout (#401): wraps each SDK call in a thread with a
+wall-clock deadline. This catches cases where the SDK's own HTTP timeout
+fails to fire (e.g., silently dropped TCP connections where the socket
+read blocks indefinitely).
 """
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import logging
 import re
@@ -22,6 +28,7 @@ import time
 from datetime import datetime, timezone
 
 import anthropic
+import httpx
 from openai import OpenAI
 
 from core.config import LLMConfig
@@ -73,6 +80,11 @@ class LLMClient:
         self.config = config
         self.max_retries = max_retries
         self._client = self._create_client()
+        # Hard per-call wall-clock timeout (#401).  If the SDK's own httpx
+        # read timeout fails to fire (silently dropped TCP connection), this
+        # acts as a safety net so the call always returns within a bounded
+        # time.  Set to 2× the configured timeout + 30s buffer.
+        self._hard_timeout = config.timeout * 2 + 30
 
     @staticmethod
     def _parse_tool_arguments(raw: str | None) -> dict:
@@ -91,17 +103,28 @@ class LLMClient:
             return {}
 
     def _create_client(self):
+        # Explicit httpx.Timeout with separate connect/read/write/pool
+        # (#401). A plain int timeout can fail to fire when a TCP connection
+        # is silently dropped — the socket read blocks indefinitely because
+        # no timeout applies at the socket level.  Setting connect and read
+        # separately ensures each phase has its own deadline.
+        timeout = httpx.Timeout(
+            connect=30.0,
+            read=float(self.config.timeout),
+            write=30.0,
+            pool=30.0,
+        )
         if self.config.provider == "anthropic":
             return anthropic.Anthropic(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url or None,
-                timeout=self.config.timeout,
+                timeout=timeout,
             )
         else:
             return OpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url or None,
-                timeout=self.config.timeout,
+                timeout=timeout,
             )
 
     def call(
@@ -167,16 +190,42 @@ class LLMClient:
     def _call_once(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> dict:
-        """Single LLM call — no retry. Acquires global semaphore if configured (#300)."""
+        """Single LLM call with hard wall-clock timeout (#401).
+
+        Wraps the SDK call in a separate thread with a deadline.  If the
+        SDK's own httpx timeout fails to fire (silently dropped TCP), the
+        hard timeout ensures we don't block indefinitely.  The stuck thread
+        becomes a daemon that cleans up when the process exits.
+        """
         sem = _get_api_semaphore(self.config.max_concurrent_api)
-        if sem is not None:
-            logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
-            sem.acquire()
+
+        def _guarded_call():
+            if sem is not None:
+                logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
+                sem.acquire()
+                try:
+                    return self._do_call(messages, tools)
+                finally:
+                    sem.release()
+            return self._do_call(messages, tools)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(_guarded_call)
             try:
-                return self._do_call(messages, tools)
-            finally:
-                sem.release()
-        return self._do_call(messages, tools)
+                return future.result(timeout=self._hard_timeout)
+            except concurrent.futures.TimeoutError:
+                logger.error(
+                    "LLM call exceeded hard timeout (%ds). "
+                    "SDK timeout (%ds) did not fire — possible hung connection (#401). "
+                    "provider=%s model=%s",
+                    self._hard_timeout, self.config.timeout,
+                    self.config.provider, self.config.model,
+                )
+                raise TimeoutError(
+                    f"LLM call exceeded hard timeout of {self._hard_timeout}s "
+                    f"(SDK timeout: {self.config.timeout}s). "
+                    f"Provider: {self.config.provider}, Model: {self.config.model}"
+                )
 
     def _do_call(
         self, messages: list[dict], tools: list[dict] | None = None
