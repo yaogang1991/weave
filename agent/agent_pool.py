@@ -479,6 +479,7 @@ Execute using your available tools. Produce clear, verifiable output.
         """
         import subprocess
         import sys as _sys
+        _log = logging.getLogger(__name__)
 
         py_files = [f for f in artifacts if f.endswith(".py")]
         if not py_files:
@@ -508,22 +509,22 @@ Execute using your available tools. Produce clear, verifiable output.
                 capture_output=True, text=True, timeout=30,
             )
             if result.returncode == 0:
-                logger.info(
+                _log.info(
                     "Post-generation autoflake cleaned %d file(s) (#391)",
                     len(resolved),
                 )
             else:
-                logger.debug(
+                _log.debug(
                     "autoflake returned %d for %d file(s): %s",
                     result.returncode, len(resolved),
                     result.stderr[:200] if result.stderr else "",
                 )
         except FileNotFoundError:
-            logger.debug("autoflake not installed, skipping post-gen cleanup (#391)")
+            _log.debug("autoflake not installed, skipping post-gen cleanup (#391)")
         except subprocess.TimeoutExpired:
-            logger.warning("autoflake timed out during post-gen cleanup (#391)")
+            _log.warning("autoflake timed out during post-gen cleanup (#391)")
         except Exception as exc:
-            logger.warning("autoflake post-gen cleanup error: %s", exc)
+            _log.warning("autoflake post-gen cleanup error: %s", exc)
 
     def _build_runtime_context(self) -> str:
         """Build runtime environment info for agent prompt (#144).
