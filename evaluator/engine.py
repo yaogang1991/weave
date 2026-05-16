@@ -364,11 +364,14 @@ class EvaluatorEngine:
             p = Path(art)
             if p.suffix != ".py":
                 continue
-            # Skip test files — they may have test-specific imports
+            # Skip test files — they may have test-specific imports.
+            # Only check directory parts for "tests"/"test" dirs, and
+            # the filename for "test_" prefix.  Do NOT match directory
+            # names starting with "test_" (e.g., pytest's tmp_path).
             parts = p.parts
-            if any(
-                part in ("tests", "test") or part.startswith("test_")
-                for part in parts
+            if (
+                any(part in ("tests", "test") for part in parts[:-1])
+                or p.name.startswith("test_")
             ):
                 continue
             full = p if p.is_absolute() else eval_dir / p

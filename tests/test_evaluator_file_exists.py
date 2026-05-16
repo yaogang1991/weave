@@ -134,13 +134,21 @@ class TestFileExistsDiskVerification:
         assert "b.py" in msg
 
     def test_no_candidates_passes_by_default(self, engine, tmp_work_dir):
-        """No files specified → pass by default."""
+        """No files specified and no artifacts → pass vacuously (None)."""
+        crit = SuccessCriterion(type=CriterionType.FILE_EXISTS)
+        passed, msg, auto = engine._check_criterion(
+            crit, str(tmp_work_dir), output_artifacts=None,
+        )
+        assert passed is True
+        assert auto is True
+
+    def test_empty_artifacts_fails(self, engine, tmp_work_dir):
+        """Empty output_artifacts [] → fail (#372 zero-output guard)."""
         crit = SuccessCriterion(type=CriterionType.FILE_EXISTS)
         passed, msg, auto = engine._check_criterion(
             crit, str(tmp_work_dir), output_artifacts=[],
         )
-        assert passed is True
-        assert auto is True
+        assert passed is False
 
 
 class TestAgentArtifactTrackingDiskCheck:

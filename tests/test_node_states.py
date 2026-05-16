@@ -334,7 +334,8 @@ class TestEvaluatorToNodeStatus:
                 criteria_results={"file": True},
             ),
         )
-        engine = _make_engine(evaluator=mock_evaluator, work_dir="/tmp")
+        executor = AsyncMock(return_value={"artifacts": ["a.py"]})
+        engine = _make_engine(evaluator=mock_evaluator, agent_executor=executor, work_dir="/tmp")
         node = _make_node("gen", success_criteria=[SuccessCriterion(
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])
@@ -351,7 +352,8 @@ class TestEvaluatorToNodeStatus:
                 criteria_results={"file": True, "lint": False},
             ),
         )
-        engine = _make_engine(evaluator=mock_evaluator, work_dir="/tmp")
+        executor = AsyncMock(return_value={"artifacts": ["a.py"]})
+        engine = _make_engine(evaluator=mock_evaluator, agent_executor=executor, work_dir="/tmp")
         node = _make_node("gen", success_criteria=[SuccessCriterion(
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])

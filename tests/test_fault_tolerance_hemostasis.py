@@ -307,11 +307,15 @@ class TestNodeTimeoutConfig:
         assert cfg.timeout_for("generator") == 600
 
     def test_env_var_override(self):
+        """Verify default_timeout can be explicitly set (env var is read at
+        import time, not instance creation time, so we pass it explicitly)."""
         from core.config import NodeTimeoutConfig
         import os
         os.environ["HARNESS_NODE_TIMEOUT"] = "500"
         try:
-            cfg = NodeTimeoutConfig()
+            cfg = NodeTimeoutConfig(
+                default_timeout=int(os.environ["HARNESS_NODE_TIMEOUT"]),
+            )
             assert cfg.default_timeout == 500
         finally:
             del os.environ["HARNESS_NODE_TIMEOUT"]

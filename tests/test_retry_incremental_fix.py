@@ -54,7 +54,7 @@ def test_retry_includes_incremental_fix_rules():
 
     captured_prompt = {}
 
-    async def mock_run(prompt, session_id, context=None):
+    async def mock_run(prompt, session_id, context=None, **kwargs):
         captured_prompt["prompt"] = prompt
         return {
             "status": "completed",
@@ -89,7 +89,7 @@ def test_no_retry_instruction_without_eval_feedback():
 
     captured_prompt = {}
 
-    async def mock_run(prompt, session_id, context=None):
+    async def mock_run(prompt, session_id, context=None, **kwargs):
         captured_prompt["prompt"] = prompt
         return {
             "status": "completed",
@@ -130,7 +130,7 @@ def test_retry_instruction_mentions_edit_tool():
 
     captured_prompt = {}
 
-    async def mock_run(prompt, session_id, context=None):
+    async def mock_run(prompt, session_id, context=None, **kwargs):
         captured_prompt["prompt"] = prompt
         return {
             "status": "completed",

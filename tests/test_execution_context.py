@@ -312,7 +312,7 @@ class TestRuntimeContextInjection:
             artifacts = []
 
             def run(self, session_id, system_prompt, user_message,
-                    tools, tool_executor, max_iterations=50):
+                    tools, tool_executor, max_iterations=50, **kwargs):
                 captured_prompts.append(user_message)
                 return []
 
