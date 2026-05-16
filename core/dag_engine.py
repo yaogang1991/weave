@@ -37,6 +37,7 @@ from core.models import (
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError  # NodeTimeoutError added in PR2
 from core.exceptions import NodeTimeoutError  # noqa: F401 — used in PR2
+from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 
@@ -122,6 +123,8 @@ class DAGExecutionEngine:
         )
         # Best-attempt tracking delegated to RetryPolicyEngine (#177 PR4).
         self._retry_policy = RetryPolicyEngine()
+        # Quality gate delegated to QualityGate service (#177 PR4).
+        self._quality_gate = QualityGate(retry_policy=self._retry_policy)
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
 
@@ -173,38 +176,27 @@ class DAGExecutionEngine:
 
     @staticmethod
     def _eval_status_to_node_status(eval_status: EvalStatus) -> NodeStatus:
-        """Map EvalStatus from evaluator to NodeStatus for DAG nodes (#270)."""
-        mapping = {
-            EvalStatus.CLEAN_PASS: NodeStatus.SUCCESS,
-            EvalStatus.PARTIAL_PASS: NodeStatus.PARTIAL_PASS,
-            EvalStatus.WARNED: NodeStatus.WARNED,
-            EvalStatus.FAILED: NodeStatus.FAILED,
-        }
-        return mapping.get(eval_status, NodeStatus.SUCCESS)
+        """Map EvalStatus from evaluator to NodeStatus for DAG nodes (#270).
+
+        Delegated to QualityGate (#177 PR4).
+        """
+        return QualityGate.eval_status_to_node_status(eval_status)
 
     @staticmethod
     def _is_terminal_success(status: NodeStatus) -> bool:
         """Check if a node status represents a successful terminal state (#270).
 
-        SUCCESS, PARTIAL_PASS, and WARNED all allow downstream to continue.
+        Delegated to QualityGate (#177 PR4).
         """
-        return status in (
-            NodeStatus.SUCCESS,
-            NodeStatus.PARTIAL_PASS,
-            NodeStatus.WARNED,
-        )
+        return QualityGate.is_terminal_success(status)
 
     @staticmethod
     def _is_test_file_exists_criterion(criterion: str | object) -> bool:
-        """Check if a criterion requires test files to exist (#247)."""
-        # Handle structured SuccessCriterion
-        if hasattr(criterion, "type"):
-            return getattr(criterion.type, "value", "") == "test_file_exists"
-        # Handle string criteria
-        if isinstance(criterion, str):
-            lower = criterion.lower()
-            return "test_file_exist" in lower or "test file exist" in lower
-        return False
+        """Check if a criterion requires test files to exist (#247).
+
+        Delegated to QualityGate (#177 PR4).
+        """
+        return QualityGate.is_test_file_exists_criterion(criterion)
 
     def _skip_remaining(self, dag: DAG, levels: list[list[str]], from_level: int) -> None:
         """Mark all pending nodes from from_level onward as SKIPPED."""
@@ -703,58 +695,21 @@ class DAGExecutionEngine:
             # explicitly includes a TEST_FILE_EXISTS criterion. This is
             # distinct from TESTS_PASS which means "tests must pass", not
             # "must create test files".
-            if node.agent_type == "generator" and node.output_artifacts:
-                has_test_file_criteria = any(
-                    self._is_test_file_exists_criterion(c) for c in node.success_criteria
-                )
-                if has_test_file_criteria:
-                    # Broader test file detection: test_*.py, *_test.py, *_spec.py,
-                    # files under tests/ or test/ directories
-                    def _is_test_file(artifact_path: str) -> bool:
-                        basename = artifact_path.lower().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
-                        if basename.startswith("test_") or basename.endswith("_test.py"):
-                            return True
-                        if basename.endswith("_spec.py"):
-                            return True
-                        # Files inside tests/ or test/ directories
-                        lower_path = artifact_path.lower()
-                        if "/tests/" in lower_path or "/test/" in lower_path:
-                            if basename.endswith(".py"):
-                                return True
-                        return False
-
-                    has_test_files = any(
-                        _is_test_file(a) for a in node.output_artifacts
-                    )
-                    if not has_test_files:
-                        logger.warning(
-                            "Node %s: TEST_FILE_EXISTS required but no test files "
-                            "in output_artifacts — failing fast (#247)",
-                            node_id,
-                        )
-                        node.eval_feedback = (
-                            f"EVALUATION FAILED: You were required to create test "
-                            f"files, but none were found in your output.\n"
-                            f"Output artifacts: {node.output_artifacts}\n\n"
-                            f"You MUST create test files (e.g., test_*.py) for "
-                            f"your implementation. Create them using the write "
-                            f"tool BEFORE finishing.\n"
-                            f"Focus on: functional tests, edge cases, import "
-                            f"validation. Each source module should have a "
-                            f"corresponding test file."
-                        )
-                        node.error = "No test files created (TEST_FILE_EXISTS required)"
-                        node.status = NodeStatus.FAILED
-                        node.completed_at = datetime.now(timezone.utc)
-                        await self._emit(ExecutionEvent(
-                            node_id=node_id,
-                            event_type="failed",
-                            details={
-                                "reason": "no_test_files",
-                                "artifacts": node.output_artifacts,
-                            },
-                        ))
-                        return
+            # Delegated to QualityGate (#177 PR4).
+            test_check = self._quality_gate.check_test_file_requirement(
+                node, node_id,
+            )
+            if test_check is not None:
+                node.eval_feedback = test_check.eval_feedback
+                node.error = test_check.error
+                node.status = test_check.node_status
+                node.completed_at = datetime.now(timezone.utc)
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type=test_check.event_type,
+                    details=test_check.event_details,
+                ))
+                return
 
             if self.evaluator and node.success_criteria and node.agent_type == "generator":
                 if not self.work_dir:
@@ -787,111 +742,25 @@ class DAGExecutionEngine:
                     ),
                 )
 
-                # Store auto-eval result for downstream evaluator agents (#145)
-                node.auto_eval_result = eval_result.model_dump()
+                # Delegate evaluation result processing to QualityGate (#177 PR4).
+                outcome = self._quality_gate.evaluate(
+                    eval_result, node, node_id, eval_work_dir,
+                )
 
-                if not eval_result.passed:
-                    # Delegate retry regression tracking to RetryPolicyEngine (#177 PR4).
-                    is_regression, best = self._retry_policy.record_attempt(
-                        node_id=node_id,
-                        score=eval_result.score,
-                        feedback=eval_result.feedback,
-                        output_artifacts=node.output_artifacts,
-                        work_dir=eval_work_dir,
-                        eval_metadata=eval_result.metadata,
-                        criteria_results=getattr(
-                            eval_result, "criteria_results", {},
-                        ),
-                        passed=eval_result.passed,
-                    )
-                    # Regression detected: restore best attempt files (#212).
-                    if is_regression and best and "file_snapshot" in best:
-                        logger.info(
-                            "Node %s: restoring best attempt artifacts "
-                            "(score %.1f > current %.1f)",
-                            node_id, best["score"], eval_result.score,
-                        )
-                        self._retry_policy.restore_file_snapshot(
-                            eval_work_dir, best["file_snapshot"],
-                        )
-                        # Delete extra files added by the regression attempt
-                        # that were not present in the best artifact set.
-                        best_artifact_set = best.get(
-                            "artifact_set", set(best["file_snapshot"].keys()),
-                        )
-                        for artifact in (node.output_artifacts or []):
-                            if artifact not in best_artifact_set:
-                                path = os.path.join(eval_work_dir, artifact)
-                                try:
-                                    if os.path.isfile(path):
-                                        os.remove(path)
-                                        logger.info(
-                                            "Node %s: removed extra file %s "
-                                            "not in best attempt",
-                                            node_id, artifact,
-                                        )
-                                except OSError:
-                                    pass
-                        node.output_artifacts = best["artifacts"]
-                    node.retry_count += 1
-                    # Build retry feedback with regression awareness.
-                    best = self._retry_policy.get_best(node_id)
-                    regression_hint = ""
-                    if is_regression or (best and eval_result.score < best["score"]):
-                        regression_hint = (
-                            "\n\nWARNING: Your previous attempt scored higher "
-                            f"({best['score']:.1f} vs current {eval_result.score:.1f}). "
-                            "The code may already be correct — only fix the "
-                            "specific issues reported, do NOT rewrite working code."
-                        )
-                    # Add targeted lint fix guidance (#151)
-                    prev_issues = best.get("lint_issues", set()) if best else set()
-                    curr_issues = set(
-                        eval_result.metadata.get(
-                            "lint_new_issues",
-                            eval_result.metadata.get("lint_all_issues", []),
-                        )
-                    )
-                    new_only = curr_issues - prev_issues
-                    if new_only and not regression_hint:
-                        lint_guidance = (
-                            "\n\nLINT_FIX_GUIDANCE: Fix ONLY these new lint "
-                            "issues. Do NOT rewrite working code:\n"
-                            + "\n".join(
-                                f"  - {iss}" for iss in sorted(new_only)[:10]
-                            )
-                        )
-                    else:
-                        lint_guidance = ""
-                    node.eval_feedback = (
-                        f"{eval_result.feedback}\n\n"
-                        f"Output artifacts: {node.output_artifacts or 'none'}\n\n"
-                        f"IMPORTANT: Fix the issues INCREMENTALLY. Do NOT rewrite working "
-                        f"code from scratch. Use the edit tool to fix specific problems.\n"
-                        f"Fix ALL issues listed above."
-                        f"{regression_hint}"
-                        f"{lint_guidance}"
-                    )
-                    node.error = f"Evaluation failed (score: {eval_result.score}): {eval_result.feedback}"
-                    node.status = NodeStatus.FAILED
+                node.auto_eval_result = outcome.auto_eval_result
+
+                if not outcome.passed:
+                    node.retry_count += outcome.retry_count_increment
+                    node.eval_feedback = outcome.eval_feedback
+                    node.error = outcome.error
+                    node.status = outcome.node_status
                     node.completed_at = datetime.now(timezone.utc)
 
-                    # On regression, align auto_eval_result with the best
-                    # attempt so downstream evaluators get accurate info
-                    # (#145 review feedback).
-                    if is_regression and best:
-                        node.auto_eval_result = {
-                            "passed": False,
-                            "score": best["score"],
-                            "feedback": best["feedback"],
-                            "_note": (
-                                "Updated to best-attempt result "
-                                "(regression detected)"
-                            ),
-                        }
-                    # If node exhausted retries and is ultimately not
-                    # successful, clear auto_eval_result so no stale
-                    # result leaks to downstream evaluators (#145).
+                    # Update artifacts from regression restoration
+                    if outcome.restored_artifacts is not None:
+                        node.output_artifacts = outcome.restored_artifacts
+
+                    # If node exhausted retries, clear auto_eval_result
                     if node.retry_count >= node.max_retries:
                         node.auto_eval_result = None
 
