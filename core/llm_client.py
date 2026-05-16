@@ -91,17 +91,28 @@ class LLMClient:
             return {}
 
     def _create_client(self):
+        # Use httpx.Timeout for fine-grained control over connect vs read
+        # timeouts.  Some third-party APIs (e.g., Kimi) accept the connection
+        # but hang indefinitely on large prompts.  A plain int timeout only
+        # covers the connect phase in some SDK versions (#367).
+        import httpx
+        timeout = httpx.Timeout(
+            connect=10.0,          # connection timeout — fast fail if unreachable
+            read=self.config.timeout,  # read timeout — covers full response wait
+            write=30.0,            # write timeout — for sending large prompts
+            pool=10.0,             # pool timeout — waiting for a connection slot
+        )
         if self.config.provider == "anthropic":
             return anthropic.Anthropic(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url or None,
-                timeout=self.config.timeout,
+                timeout=timeout,
             )
         else:
             return OpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url or None,
-                timeout=self.config.timeout,
+                timeout=timeout,
             )
 
     def call(
@@ -167,16 +178,46 @@ class LLMClient:
     def _call_once(
         self, messages: list[dict], tools: list[dict] | None = None
     ) -> dict:
-        """Single LLM call — no retry. Acquires global semaphore if configured (#300)."""
+        """Single LLM call — no retry. Acquires global semaphore if configured (#300).
+
+        Wraps the actual call in a hard timeout to prevent indefinite hangs
+        when the SDK timeout doesn't fire (e.g., third-party API bugs #367).
+
+        Semaphore is acquired in the main thread so the permit is released
+        immediately on hard timeout, preventing permit leak and deadlock (#367 review).
+        """
+        result: dict | None = None
+        exc: Exception | None = None
+
+        def _target():
+            nonlocal result, exc
+            try:
+                result = self._do_call(messages, tools)
+            except Exception as e:
+                exc = e
+
         sem = _get_api_semaphore(self.config.max_concurrent_api)
         if sem is not None:
             logger.debug("Acquiring API semaphore (limit=%d)", self.config.max_concurrent_api)
             sem.acquire()
-            try:
-                return self._do_call(messages, tools)
-            finally:
+        try:
+            hard_timeout = self.config.timeout + 30
+            thread = threading.Thread(target=_target, daemon=True)
+            thread.start()
+            thread.join(timeout=hard_timeout)
+            if thread.is_alive():
+                raise TimeoutError(
+                    f"LLM call exceeded hard timeout of {hard_timeout}s — "
+                    f"the API may be unresponsive. Model: {self.config.model}"
+                )
+        finally:
+            if sem is not None:
                 sem.release()
-        return self._do_call(messages, tools)
+        if exc is not None:
+            raise exc
+        if result is None:
+            raise RuntimeError("LLM call returned no result")
+        return result
 
     def _do_call(
         self, messages: list[dict], tools: list[dict] | None = None
