@@ -485,12 +485,14 @@ class IntelligentOrchestrator:
 
     @staticmethod
     def _apply_rename_map(dag: DAG, rename_map: dict[str, str]) -> None:
-        """Update criterion paths in-place when stdlib shadowing triggered a rename.
+        """Update criterion paths and task descriptions when stdlib shadowing
+        triggered a rename (#422).
 
         For each node, scan success_criteria for file_exists / file_pattern
         paths that contain a stdlib-conflicting name and replace it with the
         prefixed alternative.  Also rewrites plain-string criteria that
-        contain the conflicting name as a path segment.
+        contain the conflicting name as a path segment, and updates task
+        descriptions to match.
         """
         for node in dag.nodes.values():
             updated: list[str | SuccessCriterion] = []
@@ -518,6 +520,32 @@ class IntelligentOrchestrator:
                 else:
                     updated.append(crit)
             node.success_criteria = updated
+
+            # Also update task description so the generator creates files
+            # with the renamed paths (#422).  Use word-boundary matching
+            # to avoid double-renaming already-prefixed names.
+            for old, new in rename_map.items():
+                # Replace `old.py` preceded by a non-word char or start-of-string
+                task = node.task_description
+                result = []
+                i = 0
+                target = f"{old}.py"
+                while i < len(task):
+                    pos = task.find(target, i)
+                    if pos == -1:
+                        result.append(task[i:])
+                        break
+                    # Check preceding character is not a word char (avoids
+                    # matching "app_numbers.py" when old="numbers").
+                    # Underscores count as word chars here.
+                    if pos == 0 or not (task[pos - 1].isalnum() or task[pos - 1] == '_'):
+                        result.append(task[i:pos])
+                        result.append(f"{new}.py")
+                        i = pos + len(target)
+                    else:
+                        result.append(task[i:pos + len(target)])
+                        i = pos + len(target)
+                node.task_description = "".join(result)
 
     # -- Token limit protection (#417) ----------------------------------------
 

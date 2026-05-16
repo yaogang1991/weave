@@ -144,6 +144,50 @@ class TestApplyRenameMap:
         crit = dag.nodes["gen1"].success_criteria[0]
         assert crit.path == "exam_app/utils/helpers.py"
 
+    def test_updates_task_description_with_renamed_files(self):
+        """Task description should be updated to match renamed criteria (#422)."""
+        dag = DAG(reasoning="test")
+        node = DAGNode(
+            id="gen1",
+            agent_type="generator",
+            task_description="implement convertlib/numbers.py module",
+            success_criteria=[
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="convertlib/numbers.py",
+                ),
+            ],
+        )
+        dag.add_node(node)
+
+        IntelligentOrchestrator._apply_rename_map(dag, {"numbers": "app_numbers"})
+
+        # Task description should now reference app_numbers.py (prefixed)
+        # Note: "numbers.py" is a substring of "app_numbers.py", so we check
+        # that the full expected form is present
+        assert "convertlib/app_numbers.py" in dag.nodes["gen1"].task_description
+        # Criteria should also be updated
+        crit = dag.nodes["gen1"].success_criteria[0]
+        assert isinstance(crit, SuccessCriterion)
+        assert crit.path == "convertlib/app_numbers.py"
+
+    def test_does_not_double_rename_already_prefixed(self):
+        """Already-prefixed names like app_numbers.py should not be renamed again."""
+        dag = DAG(reasoning="test")
+        node = DAGNode(
+            id="gen1",
+            agent_type="generator",
+            task_description="implement app_numbers.py module",
+            success_criteria=[],
+        )
+        dag.add_node(node)
+
+        IntelligentOrchestrator._apply_rename_map(dag, {"numbers": "app_numbers"})
+
+        # Should NOT become "app_app_numbers.py"
+        assert "app_app_numbers" not in dag.nodes["gen1"].task_description
+        assert "app_numbers.py" in dag.nodes["gen1"].task_description
+
 
 # ---------------------------------------------------------------------------
 # EvaluatorEngine._try_stdlib_rename
