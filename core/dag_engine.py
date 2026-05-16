@@ -37,6 +37,7 @@ from core.models import (
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError  # NodeTimeoutError added in PR2
 from core.exceptions import NodeTimeoutError  # noqa: F401 — used in PR2
+from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
@@ -128,6 +129,11 @@ class DAGExecutionEngine:
         self._retry_policy = RetryPolicyEngine()
         # Quality gate delegated to QualityGate service (#177 PR4).
         self._quality_gate = QualityGate(retry_policy=self._retry_policy)
+        # Artifact handoff delegated to ArtifactHandoffService (#177 PR4).
+        self._artifact_handoff = ArtifactHandoffService(
+            memory_manager=memory_manager,
+            session_id=session_id,
+        )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
         # Job/run identifiers for per-node workspace isolation (#176 PR2)
@@ -1024,227 +1030,11 @@ class DAGExecutionEngine:
         node_id: str,
         failed_soft: list[str] | None = None,
     ) -> list[HandoffArtifact]:
-        """Collect output artifacts from all dependency nodes."""
-        dependencies = dag.get_dependencies(node_id)
-        artifacts: list[HandoffArtifact] = []
+        """Collect output artifacts from all dependency nodes.
 
-        for dep_id in dependencies:
-            dep_node = dag.nodes[dep_id]
-            if self._is_terminal_success(dep_node.status):
-                artifact = HandoffArtifact(
-                    from_agent=dep_node.agent_type,
-                    to_agent=dag.nodes[node_id].agent_type,
-                    content=dep_node.result.get("summary", ""),
-                    file_paths=dep_node.output_artifacts,
-                    metadata={
-                        "from_node": dep_id,
-                        "task": dep_node.task_description,
-                    },
-                )
-                artifacts.append(artifact)
-
-                # Pass auto-eval results to downstream evaluator agents (#145).
-                # Only pass when dep_node is SUCCESS (already guaranteed by the
-                # enclosing if) AND auto_eval_result corresponds to the current
-                # output_artifacts (i.e., evaluation passed).
-                if (
-                    dep_node.auto_eval_result
-                    and dep_node.auto_eval_result.get("passed") is True
-                    and dag.nodes[node_id].agent_type == "evaluator"
-                ):
-                    eval_info = dep_node.auto_eval_result
-                    criteria = eval_info.get("criteria_results", {})
-                    has_warnings = (
-                        criteria
-                        and not all(criteria.values())
-                    )
-                    header = (
-                        "AUTOMATED EVALUATION RESULTS "
-                        "(passed via threshold — some criteria have WARNINGS)"
-                        if has_warnings
-                        else "AUTOMATED EVALUATION RESULTS (already verified)"
-                    )
-                    summary = (
-                        f"{header}:\n"
-                        f"- Passed: {eval_info.get('passed')}\n"
-                        f"- Score: {eval_info.get('score')}\n"
-                        f"- Criteria: {criteria}\n"
-                        f"- Feedback:\n{eval_info.get('feedback', '')}\n"
-                    )
-                    artifacts.append(HandoffArtifact(
-                        from_agent="auto_evaluator",
-                        to_agent="evaluator",
-                        content=summary,
-                        metadata={
-                            "type": "evaluation_result",
-                            "passed": eval_info.get("passed"),
-                            "score": eval_info.get("score"),
-                            "criteria_results": criteria,
-                            "feedback": eval_info.get("feedback"),
-                            "has_warnings": has_warnings,
-                        },
-                    ))
-
-                # M3.2: Share relevant memories from upstream agent
-                if (
-                    self.memory_manager
-                    and self._session_id
-                    and dep_node.agent_type != dag.nodes[node_id].agent_type
-                ):
-                    try:
-                        from memory.sharing import MemorySharing
-                        sharing = MemorySharing(self.memory_manager)
-                        sharing.share_with_downstream(
-                            from_agent=dep_node.agent_type,
-                            to_agent=dag.nodes[node_id].agent_type,
-                            session_id=self._session_id,
-                            dag=dag,
-                            node_id=node_id,
-                        )
-                    except Exception as e:
-                        logger.debug("Memory sharing failed: %s", e)
-
-        # Include evaluation feedback from previous attempt (retry scenario)
-        node = dag.nodes[node_id]
-        if node.eval_feedback:
-            feedback = node.eval_feedback
-            # Detect naming mismatch patterns and add targeted guidance
-            # (#311) — helps the generator understand what specifically
-            # went wrong with imports or type signatures.
-            has_import_error = (
-                "ImportError" in feedback
-                or "cannot import" in feedback
-                or "ModuleNotFoundError" in feedback
-            )
-            has_type_error = (
-                "TypeError" in feedback
-                or "unexpected keyword" in feedback
-            )
-            has_timeout = (
-                "timed out" in feedback
-                or "TimeoutExpired" in feedback
-                or "timeout" in feedback.lower()
-            )
-            has_coverage_low = (
-                "coverage" in feedback.lower()
-                and ("below target" in feedback.lower()
-                     or "not verified" in feedback.lower()
-                     or "could not be parsed" in feedback.lower())
-            )
-            has_runtime_error = (
-                "RuntimeError" in feedback
-                or "AttributeError" in feedback
-                or "KeyError" in feedback
-            )
-            naming_guidance = ""
-            if has_import_error:
-                naming_guidance += (
-                    "\nNAMING MISMATCH DETECTED: Your tests import "
-                    "symbols that don't exist in the source modules. "
-                    "To fix:\n"
-                    "1. READ the source files first to discover the "
-                    "actual class/function names\n"
-                    "2. Run: `python -c 'from module import Symbol'` "
-                    "to verify each import\n"
-                    "3. Fix your TEST code to match the actual source "
-                    "API — do NOT modify the source\n"
-                )
-            if has_type_error:
-                naming_guidance += (
-                    "\nTYPE ERROR DETECTED: Your code calls functions "
-                    "with wrong arguments or mismatched async/sync "
-                    "patterns.\n"
-                    "1. Check if async functions are called without "
-                    "`await` or `asyncio.run()`\n"
-                    "2. Verify function signatures match actual "
-                    "parameter names\n"
-                )
-            if has_timeout:
-                naming_guidance += (
-                    "\nTIMEOUT DETECTED: Your tests or code hung during "
-                    "execution.\n"
-                    "1. Check for infinite loops or missing loop "
-                    "termination conditions\n"
-                    "2. Use daemon threads and proper teardown in tests\n"
-                    "3. Add timeouts to any blocking operations "
-                    "(network, subprocess)\n"
-                    "4. Avoid global state or locks that can deadlock\n"
-                )
-            if has_coverage_low:
-                naming_guidance += (
-                    "\nLOW COVERAGE DETECTED: Coverage is below target.\n"
-                    "1. Do NOT rewrite existing tests or source code\n"
-                    "2. ADD new test functions that cover untested "
-                    "branches and edge cases\n"
-                    "3. Focus on: error paths, boundary conditions, "
-                    "empty inputs\n"
-                    "4. Run coverage to see which lines are missed: "
-                    "`pytest --cov=module --cov-report=term-missing`\n"
-                )
-            if has_runtime_error:
-                naming_guidance += (
-                    "\nRUNTIME ERROR DETECTED: Source code has bugs "
-                    "that cause crashes.\n"
-                    "1. Read the traceback to find the exact crash "
-                    "location\n"
-                    "2. You may EDIT source files to fix the bug "
-                    "(targeted fix, not rewrite)\n"
-                    "3. Common fixes: add missing method calls, "
-                    "fix None checks, add initialization\n"
-                )
-
-            retry_hint = (
-                f"RETRY ATTEMPT #{node.retry_count}: Your previous "
-                f"attempt FAILED evaluation.\n\n"
-                f"Evaluation feedback:\n{feedback}\n\n"
-                f"{naming_guidance}"
-                f"IMPORTANT: Do NOT repeat the same approach. "
-                f"Analyze what went wrong and try a DIFFERENT "
-                f"strategy."
-            )
-            artifacts.append(HandoffArtifact(
-                from_agent="evaluator",
-                to_agent=node.agent_type,
-                content=retry_hint,
-                metadata={
-                    "type": "eval_feedback",
-                    "attempt": node.retry_count,
-                },
-            ))
-
-        # Soft dependency warning: downstream gets structured info about
-        # failed/skipped soft deps so it can adapt its behavior (#271).
-        if failed_soft:
-            dep_summaries = []
-            for dep_id in failed_soft:
-                dep_node = dag.nodes[dep_id]
-                dep_summaries.append(
-                    f"- {dep_id} ({dep_node.agent_type}): "
-                    f"{dep_node.status.value}"
-                    f"{'; ' + dep_node.error[:200] if dep_node.error else ''}"
-                )
-            warning_content = (
-                "DEPENDENCY WARNING: The following soft (optional) "
-                "dependencies failed or were skipped:\n"
-                + "\n".join(dep_summaries)
-                + "\n\nYou may proceed, but outputs from these nodes "
-                "are NOT available."
-            )
-            artifacts.append(HandoffArtifact(
-                from_agent="dag_engine",
-                to_agent=dag.nodes[node_id].agent_type,
-                content=warning_content,
-                metadata={
-                    "type": "dependency_warning",
-                    "failed_soft_deps": failed_soft,
-                    "dep_statuses": {
-                        dep_id: dag.nodes[dep_id].status.value
-                        for dep_id in failed_soft
-                    },
-                },
-            ))
-
-        return artifacts
+        Delegated to ArtifactHandoffService (#177 PR4).
+        """
+        return self._artifact_handoff.collect(dag, node_id, failed_soft)
 
     def get_execution_summary(self, dag: DAG) -> dict[str, Any]:
         """Generate a summary of DAG execution results."""

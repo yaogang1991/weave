@@ -88,22 +88,21 @@ class TestRetryStrategyGuidance:
 
     def test_timeout_guidance_in_feedback(self):
         """Timeout failures should include cleanup guidance."""
-        from core.dag_engine import DAGExecutionEngine
-        # We just verify the code contains the timeout guidance strings
-        source = open("core/dag_engine.py").read()
+        # Guidance strings are in ArtifactHandoffService (#177 PR4)
+        source = open("core/artifact_handoff.py").read()
         assert "TIMEOUT DETECTED" in source
         assert "daemon threads" in source
         assert "deadlock" in source
 
     def test_coverage_guidance_in_feedback(self):
         """Coverage failures should include supplement-tests guidance."""
-        source = open("core/dag_engine.py").read()
+        source = open("core/artifact_handoff.py").read()
         assert "LOW COVERAGE DETECTED" in source
         assert "ADD new test functions" in source
         assert "Do NOT rewrite existing tests" in source
 
     def test_runtime_error_guidance_in_feedback(self):
         """Runtime errors should include source fix guidance."""
-        source = open("core/dag_engine.py").read()
+        source = open("core/artifact_handoff.py").read()
         assert "RUNTIME ERROR DETECTED" in source
         assert "EDIT source files" in source

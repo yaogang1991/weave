@@ -52,21 +52,15 @@ def _make_dag_with_feedback(feedback_text, retry_count=1):
 
 def test_retry_feedback_detects_import_error():
     """Feedback with ImportError should include naming guidance."""
-    from core.dag_engine import DAGExecutionEngine
+    from core.artifact_handoff import ArtifactHandoffService
 
     dag = _make_dag_with_feedback(
         "FAIL tests: ImportError: cannot import name 'AsyncContext' "
         "from 'tracelib.context'"
     )
 
-    # Call the private method directly via a mock engine
-    engine = MagicMock(spec=DAGExecutionEngine)
-    from core.dag_engine import DAGExecutionEngine as RealEngine
-
-    # Use the actual _collect_input_artifacts method
-    artifacts = RealEngine._collect_input_artifacts(
-        engine, dag, "impl",
-    )
+    service = ArtifactHandoffService()
+    artifacts = service.collect(dag, "impl")
 
     # Find the eval_feedback artifact
     feedback_arts = [
@@ -82,19 +76,15 @@ def test_retry_feedback_detects_import_error():
 
 def test_retry_feedback_detects_type_error():
     """Feedback with TypeError should include type error guidance."""
-    from core.dag_engine import DAGExecutionEngine
+    from core.artifact_handoff import ArtifactHandoffService
 
     dag = _make_dag_with_feedback(
         "FAIL tests: TypeError: urlsafe_b64decode() got an "
         "unexpected keyword argument 'validate'"
     )
 
-    engine = MagicMock(spec=DAGExecutionEngine)
-    from core.dag_engine import DAGExecutionEngine as RealEngine
-
-    artifacts = RealEngine._collect_input_artifacts(
-        engine, dag, "impl",
-    )
+    service = ArtifactHandoffService()
+    artifacts = service.collect(dag, "impl")
 
     feedback_arts = [
         a for a in artifacts
@@ -109,18 +99,14 @@ def test_retry_feedback_detects_type_error():
 
 def test_retry_feedback_no_guidance_for_other_errors():
     """Feedback without import/type errors should NOT add guidance."""
-    from core.dag_engine import DAGExecutionEngine
+    from core.artifact_handoff import ArtifactHandoffService
 
     dag = _make_dag_with_feedback(
         "FAIL tests: AssertionError: expected 200, got 404"
     )
 
-    engine = MagicMock(spec=DAGExecutionEngine)
-    from core.dag_engine import DAGExecutionEngine as RealEngine
-
-    artifacts = RealEngine._collect_input_artifacts(
-        engine, dag, "impl",
-    )
+    service = ArtifactHandoffService()
+    artifacts = service.collect(dag, "impl")
 
     feedback_arts = [
         a for a in artifacts
