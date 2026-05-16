@@ -38,6 +38,7 @@ from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError  # NodeTimeoutError added in PR2
 from core.exceptions import NodeTimeoutError  # noqa: F401 — used in PR2
 from core.retry_policy import RetryPolicyEngine
+from core.watchdog import WatchdogService
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
@@ -98,14 +99,15 @@ class DAGExecutionEngine:
         self.backoff_base = backoff_base
         self.backoff_cap = backoff_cap
         self.event_handlers: list[EventHandler] = []
-        # M2.0: Watchdog configuration
-        self.heartbeat_interval_sec = heartbeat_interval_sec
-        self.heartbeat_miss_threshold = heartbeat_miss_threshold
-        self.enable_watchdog = enable_watchdog
-        self._watchdog_overrides = watchdog_overrides or {}
-        self._alert_thresholds = alert_thresholds or {}
-        self._watchdog_task: asyncio.Task | None = None
-        self._running_nodes: dict[str, DAGNode] = {}
+        # M2.0: Watchdog delegated to WatchdogService (#177 PR4).
+        self._watchdog = WatchdogService(
+            heartbeat_interval_sec=heartbeat_interval_sec,
+            heartbeat_miss_threshold=heartbeat_miss_threshold,
+            enabled=enable_watchdog,
+            watchdog_overrides=watchdog_overrides or {},
+            alert_thresholds=alert_thresholds or {},
+            emit_func=self._emit,
+        )
         self._running_tasks: dict[str, asyncio.Task] = {}
         # M3.2: Memory integration
         self.memory_manager = memory_manager
@@ -123,22 +125,36 @@ class DAGExecutionEngine:
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
 
+    # -- Backward-compat proxies for extracted services (#177 PR4) ------------
+
+    @property
+    def heartbeat_interval_sec(self) -> float:
+        return self._watchdog._interval_sec
+
+    @property
+    def heartbeat_miss_threshold(self) -> int:
+        return self._watchdog._miss_threshold
+
+    @property
+    def enable_watchdog(self) -> bool:
+        return self._watchdog._enabled
+
+    @property
+    def _running_nodes(self) -> dict[str, DAGNode]:
+        return self._watchdog._running_nodes
+
     @property
     def _best_attempts(self) -> dict[str, dict]:
         """Proxy to RetryPolicyEngine._best_attempts for backward compat."""
         return self._retry_policy._best_attempts
 
     def _get_heartbeat_settings(self, agent_type: str) -> tuple[float, int]:
-        """Return (interval_sec, miss_threshold) for the given agent type."""
-        if agent_type in self._watchdog_overrides:
-            return self._watchdog_overrides[agent_type]
-        return self.heartbeat_interval_sec, self.heartbeat_miss_threshold
+        """Proxy to WatchdogService for backward compat."""
+        return self._watchdog.get_heartbeat_settings(agent_type)
 
     def _get_alert_threshold(self, agent_type: str) -> int:
-        """Minimum missed_count to emit heartbeat_missed event."""
-        if agent_type in self._alert_thresholds:
-            return self._alert_thresholds[agent_type]
-        return 2
+        """Proxy to WatchdogService for backward compat."""
+        return self._watchdog.get_alert_threshold(agent_type)
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -220,90 +236,16 @@ class DAGExecutionEngine:
     # ------------------------------------------------------------------
 
     async def _watchdog_loop(self) -> None:
-        """
-        Watchdog coroutine: pure early-warning event source (#360 PR3).
-
-        Monitors running nodes' heartbeats and emits events for
-        observability. Does NOT kill nodes — node timeout is managed
-        exclusively by _execute_with_timeout.
-
-        Per-agent-type overrides are respected: generator nodes, for
-        example, are allowed longer intervals than planner/evaluator.
-
-        Alert events use a configurable threshold (default 50% of unhealthy
-        threshold) to reduce noise from slow-but-healthy LLM APIs (#146).
-
-        This runs as a background task during execute().
-        """
-        check_interval = self.heartbeat_interval_sec * 1.5
-        while True:
-            try:
-                await asyncio.sleep(check_interval)
-            except asyncio.CancelledError:
-                return
-
-            for node_id, node in list(self._running_nodes.items()):
-                if node.status != NodeStatus.RUNNING:
-                    continue
-
-                interval, threshold = self._get_heartbeat_settings(
-                    node.agent_type,
-                )
-                health = node.check_health(interval, threshold)
-                alert_min = self._get_alert_threshold(node.agent_type)
-
-                if health == NodeHealth.MISSED:
-                    if node.missed_heartbeats >= alert_min:
-                        await self._emit(ExecutionEvent(
-                            node_id=node_id,
-                            event_type="heartbeat_missed",
-                            details={
-                                "missed_count": node.missed_heartbeats,
-                                "threshold": threshold,
-                                "agent_type": node.agent_type,
-                                "last_heartbeat": (
-                                    node.last_heartbeat_at.isoformat()
-                                    if node.last_heartbeat_at else None
-                                ),
-                            },
-                        ))
-                    else:
-                        logger.debug(
-                            "Node %s heartbeat missed (count=%d, threshold=%d)"
-                            " — below alert_min=%d, not emitting event",
-                            node_id, node.missed_heartbeats,
-                            threshold, alert_min,
-                        )
-
-                elif health == NodeHealth.UNHEALTHY:
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="unhealthy_warning",
-                        details={
-                            "missed_count": node.missed_heartbeats,
-                            "threshold": threshold,
-                            "agent_type": node.agent_type,
-                            "message": (
-                                f"Node {node_id} unhealthy: "
-                                f"{node.missed_heartbeats} heartbeats missed "
-                                f"(threshold: {threshold}, agent_type: "
-                                f"{node.agent_type}). "
-                                f"Node timeout is managed by "
-                                f"_execute_with_timeout."
-                            ),
-                        },
-                    ))
+        """Proxy to WatchdogService._loop for backward compat."""
+        await self._watchdog._loop()
 
     def _start_watchdog(self) -> None:
-        """Start the watchdog background task."""
-        if self.enable_watchdog and self._watchdog_task is None:
-            self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+        """Proxy to WatchdogService.start for backward compat."""
+        self._watchdog.start()
 
     def _stop_watchdog(self) -> None:
-        """Stop the watchdog background task."""
-        if self._watchdog_task:
-            self._watchdog_task.cancel()
-            self._watchdog_task = None
+        """Proxy to WatchdogService.stop for backward compat."""
+        self._watchdog.stop()
 
     async def execute(self, dag: DAG) -> DAG:
         """
@@ -317,7 +259,7 @@ class DAGExecutionEngine:
             raise ValueError(f"Invalid DAG: {e}")
 
         # M2.0: Start watchdog
-        self._running_nodes = {}
+        self._watchdog.clear()
         self._start_watchdog()
 
         # R3: Auto-serialize parallel generators without ownership contracts (#272 EC4)
@@ -504,7 +446,7 @@ class DAGExecutionEngine:
         finally:
             # M2.0: Stop watchdog
             self._stop_watchdog()
-            self._running_nodes = {}
+            self._watchdog.clear()
             self._running_tasks = {}
             # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
             self._executor.shutdown(wait=False)
@@ -698,7 +640,7 @@ class DAGExecutionEngine:
         )
 
         # M2.0: Register with watchdog
-        self._running_nodes[node_id] = node
+        self._watchdog.register(node_id, node)
         current_task = asyncio.current_task()
         if current_task:
             self._running_tasks[node_id] = current_task
@@ -1065,7 +1007,7 @@ class DAGExecutionEngine:
         finally:
             # M2.0: Unregister from watchdog on completion (unless killed by watchdog)
             if node.health_status != NodeHealth.DEAD:
-                self._running_nodes.pop(node_id, None)
+                self._watchdog.unregister(node_id)
                 self._running_tasks.pop(node_id, None)
 
     async def _execute_with_timeout(

@@ -857,3 +857,130 @@ class TestDedicatedHeartbeatCoroutine:
         # Heartbeats may or may not be recorded (depends on progress_callback usage).
         assert result_dag.nodes["n1"].heartbeat_count >= 1
 
+
+# ---------------------------------------------------------------------------
+# TestWatchdogService — unit tests for extracted WatchdogService (#177 PR4)
+# ---------------------------------------------------------------------------
+
+
+class TestWatchdogServiceUnit:
+    """Unit tests for core/watchdog.py WatchdogService class."""
+
+    def test_default_settings(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService()
+        assert svc._interval_sec == 30.0
+        assert svc._miss_threshold == 12
+        assert svc._enabled is True
+
+    def test_custom_settings(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService(
+            heartbeat_interval_sec=10.0,
+            heartbeat_miss_threshold=5,
+            enabled=False,
+        )
+        assert svc._interval_sec == 10.0
+        assert svc._miss_threshold == 5
+        assert svc._enabled is False
+
+    def test_register_unregister(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService()
+        node = DAGNode(id="n1", agent_type="generator", task_description="test")
+        svc.register("n1", node)
+        assert "n1" in svc._running_nodes
+        svc.unregister("n1")
+        assert "n1" not in svc._running_nodes
+
+    def test_clear(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService()
+        node1 = DAGNode(id="n1", agent_type="generator", task_description="test")
+        node2 = DAGNode(id="n2", agent_type="evaluator", task_description="test")
+        svc.register("n1", node1)
+        svc.register("n2", node2)
+        assert len(svc._running_nodes) == 2
+        svc.clear()
+        assert len(svc._running_nodes) == 0
+
+    def test_get_heartbeat_settings_default(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService(heartbeat_interval_sec=30.0, heartbeat_miss_threshold=12)
+        interval, threshold = svc.get_heartbeat_settings("generator")
+        assert interval == 30.0
+        assert threshold == 12
+
+    def test_get_heartbeat_settings_override(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService(
+            heartbeat_interval_sec=30.0,
+            heartbeat_miss_threshold=12,
+            watchdog_overrides={"generator": (90.0, 20)},
+        )
+        interval, threshold = svc.get_heartbeat_settings("generator")
+        assert interval == 90.0
+        assert threshold == 20
+
+    def test_get_alert_threshold_default(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService()
+        assert svc.get_alert_threshold("generator") == 2
+
+    def test_get_alert_threshold_override(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService(alert_thresholds={"generator": 10})
+        assert svc.get_alert_threshold("generator") == 10
+
+    def test_start_stop_disabled(self):
+        """Disabled watchdog should not start."""
+        from core.watchdog import WatchdogService
+        svc = WatchdogService(enabled=False)
+        svc.start()
+        assert svc._task is None
+
+    def test_running_nodes_property_returns_copy(self):
+        from core.watchdog import WatchdogService
+        svc = WatchdogService()
+        node = DAGNode(id="n1", agent_type="generator", task_description="test")
+        svc.register("n1", node)
+        nodes = svc.running_nodes
+        assert "n1" in nodes
+        # Modifying the copy should not affect the service
+        nodes.clear()
+        assert "n1" in svc._running_nodes
+
+    @pytest.mark.asyncio
+    async def test_emit_called_on_unhealthy(self):
+        """WatchdogService emits event when node becomes unhealthy."""
+        from core.watchdog import WatchdogService
+        emitted_events: list[ExecutionEvent] = []
+
+        async def mock_emit(event: ExecutionEvent) -> None:
+            emitted_events.append(event)
+
+        svc = WatchdogService(
+            heartbeat_interval_sec=0.01,
+            heartbeat_miss_threshold=1,
+            emit_func=mock_emit,
+        )
+        # Create a node that will be immediately unhealthy
+        # (started long ago, no heartbeats)
+        node = DAGNode(id="n1", agent_type="test", task_description="test")
+        node.status = NodeStatus.RUNNING
+        # Set started_at far in the past so check_health returns UNHEALTHY
+        node.started_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        # Ensure last_heartbeat_at is also old
+        node.last_heartbeat_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        node.missed_heartbeats = 5  # Already past threshold
+        svc.register("n1", node)
+
+        svc.start()
+        await asyncio.sleep(0.1)  # Let the watchdog loop run
+        svc.stop()
+
+        assert any(
+            e.event_type == "health_alert" and e.node_id == "n1"
+            for e in emitted_events
+        )
+
