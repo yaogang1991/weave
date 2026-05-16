@@ -110,10 +110,20 @@ class TestSilentExitPrevention:
 
     @pytest.mark.asyncio
     async def test_parallel_node_failure_doesnt_kill_sibling(self, engine):
-        """Parallel nodes: one fails, sibling succeeds (#304 robustness)."""
+        """Parallel nodes with ownership contracts: one fails, sibling succeeds.
+
+        Standalone generators without ownership contracts get auto-serialized
+        (#272), so we must provide owned_files to keep them parallel.
+        """
         nodes = {
-            "a": DAGNode(id="a", agent_type="generator", task_description="A", status=NodeStatus.PENDING),
-            "b": DAGNode(id="b", agent_type="generator", task_description="B", status=NodeStatus.PENDING),
+            "a": DAGNode(
+                id="a", agent_type="generator", task_description="A",
+                status=NodeStatus.PENDING, owned_files=["a_module.py"],
+            ),
+            "b": DAGNode(
+                id="b", agent_type="generator", task_description="B",
+                status=NodeStatus.PENDING, owned_files=["b_module.py"],
+            ),
         }
         dag = DAG(nodes=nodes, edges=[])
 

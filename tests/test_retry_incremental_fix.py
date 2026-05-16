@@ -65,7 +65,7 @@ def test_retry_includes_incremental_fix_rules():
 
     agent._run_with_tools = mock_run
 
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         agent._execute_inner(
             task="Fix the failing tests",
             input_artifacts=artifacts,
@@ -100,7 +100,7 @@ def test_no_retry_instruction_without_eval_feedback():
 
     agent._run_with_tools = mock_run
 
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         agent._execute_inner(
             task="Write tests",
             input_artifacts=[],
@@ -141,7 +141,7 @@ def test_retry_instruction_mentions_edit_tool():
 
     agent._run_with_tools = mock_run
 
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         agent._execute_inner(
             task="Fix tests",
             input_artifacts=artifacts,

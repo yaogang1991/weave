@@ -80,7 +80,7 @@ class TestRetryContextInjection:
             svc._running_tasks = {}
 
             import asyncio
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 svc._execute_plan_and_run(
                     job=job,
                     session_id="sess-test",
@@ -131,7 +131,7 @@ class TestRetryContextInjection:
             svc._running_tasks = {}
 
             import asyncio
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 svc._execute_plan_and_run(
                     job=job,
                     session_id="sess-test",
@@ -176,7 +176,7 @@ class TestRetryContextInPrompt:
         orchestrator._prompt_registry.load.return_value = "System prompt: {agent_descriptions}"
 
         import asyncio
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orchestrator.plan(
                 requirement="Build API",
                 project_context={
@@ -222,7 +222,7 @@ class TestRetryContextInPrompt:
         orchestrator._prompt_registry.load.return_value = "System prompt: {agent_descriptions}"
 
         import asyncio
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orchestrator.plan(
                 requirement="Build API",
                 project_context={"project_path": "/tmp/test"},

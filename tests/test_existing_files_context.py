@@ -137,7 +137,7 @@ def test_plan_receives_existing_files_in_prompt(tmp_path):
             {"path": "tests/test_core.py", "type": "test"},
         ],
     }
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         orchestrator.plan("test requirement", project_context=project_context)
     )
 
@@ -184,7 +184,7 @@ def test_plan_no_existing_files_section_when_empty():
     orchestrator._prompt_registry.load.return_value = "Template {agent_descriptions}"
 
     import asyncio
-    asyncio.get_event_loop().run_until_complete(
+    asyncio.run(
         orchestrator.plan("test requirement",
                           project_context={"project_path": "/fake"})
     )
