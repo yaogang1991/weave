@@ -40,10 +40,10 @@ class TestTimeoutConfiguration:
             call_args = mock_openai.call_args
             timeout = call_args.kwargs.get("timeout")
             assert isinstance(timeout, httpx.Timeout)
-            assert timeout.connect == 10.0
+            assert timeout.connect == 30.0
             assert timeout.read == 60
             assert timeout.write == 30.0
-            assert timeout.pool == 10.0
+            assert timeout.pool == 30.0
 
     def test_anthropic_client_uses_httpx_timeout(self):
         """Anthropic client should also use httpx.Timeout."""
@@ -136,7 +136,7 @@ class TestHardTimeout:
                 except (TimeoutError, RuntimeError):
                     pass
 
-        assert thread_timeout == 32  # 2s config + 30s buffer
+        assert thread_timeout == 34  # 2s config * 2 + 30s buffer
 
     def test_semaphore_released_on_hard_timeout(self):
         """Semaphore permit must be released even when hard timeout fires (#367 review)."""
