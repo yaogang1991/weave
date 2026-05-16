@@ -841,6 +841,7 @@ class DAGExecutionEngine:
                         node_id, node_id, node.success_criteria, self.artifact_path,
                         work_dir=eval_work_dir,
                         output_artifacts=node.output_artifacts or None,
+                        owned_files=node.owned_files or None,
                     ),
                 )
 
