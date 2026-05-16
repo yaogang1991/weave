@@ -126,7 +126,7 @@ class IntelligentOrchestrator:
     async def plan(self, requirement: str, project_context: dict | None = None) -> DAG:
         """
         Generate an execution DAG from user requirements.
-        
+
         This is the core planning method. It:
         1. Discovers available agents from registry
         2. Builds a dynamic planning prompt
@@ -140,6 +140,14 @@ class IntelligentOrchestrator:
         planning_template = self._prompt_registry.load("planning")
         system_prompt = planning_template.format(
             agent_descriptions=agent_descriptions
+        )
+
+        # Pre-flight token estimation (#417): truncate requirement if the
+        # combined prompt is likely to exceed the model's context window.
+        # We use a conservative 3.5 chars-per-token estimate and reserve
+        # 50% of the window for the model's response.
+        requirement = self._truncate_requirement_if_needed(
+            requirement, system_prompt, project_context,
         )
 
         user_prompt = f"User requirement: {requirement}"
@@ -210,9 +218,18 @@ class IntelligentOrchestrator:
             if plan_data is not None:
                 break
             if attempt < max_retries:
+                # Truncate the failed response to prevent context balloon
+                # on retry (#417). Keep first 2000 chars — enough for the
+                # model to understand what it generated wrong.
+                failed_content = response.get("content", "")
+                if len(failed_content) > 2000:
+                    failed_content = (
+                        failed_content[:2000]
+                        + "\n... (truncated for token limit)"
+                    )
                 messages.append({
                     "role": "assistant",
-                    "content": response.get("content", ""),
+                    "content": failed_content,
                 })
                 messages.append({
                     "role": "user",
@@ -493,6 +510,102 @@ class IntelligentOrchestrator:
                 else:
                     updated.append(crit)
             node.success_criteria = updated
+
+    # -- Token limit protection (#417) ----------------------------------------
+
+    # Known model context windows (in tokens).  Used for pre-flight
+    # estimation so we don't send requests that are guaranteed to fail.
+    _MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+        "claude-sonnet-4-6": 200_000,
+        "claude-opus-4-6": 200_000,
+        "claude-haiku-4-5": 200_000,
+        "gpt-4o": 128_000,
+        "gpt-4-turbo": 128_000,
+        "o1": 200_000,
+        "o3": 200_000,
+        "o4-mini": 200_000,
+    }
+    _DEFAULT_CONTEXT_WINDOW = 200_000
+    # Conservative chars-per-token estimate (English + code mix).
+    _CHARS_PER_TOKEN = 3.5
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimate: chars / 3.5."""
+        return int(len(text) / self._CHARS_PER_TOKEN)
+
+    def _get_context_window(self) -> int:
+        """Get the context window for the configured model."""
+        model = self.llm_config.model
+        for key, window in self._MODEL_CONTEXT_WINDOWS.items():
+            if key in model:
+                return window
+        return self._DEFAULT_CONTEXT_WINDOW
+
+    def _truncate_requirement_if_needed(
+        self,
+        requirement: str,
+        system_prompt: str,
+        project_context: dict | None,
+    ) -> str:
+        """Truncate requirement if the combined prompt is likely to exceed
+        the model's context window (#417).
+
+        Reserves 50% of the window for the model's response.
+        Returns the (possibly truncated) requirement.
+        """
+        system_tokens = self._estimate_tokens(system_prompt)
+
+        # Estimate context overhead (project_context JSON, existing_files, etc.)
+        context_text = ""
+        if project_context:
+            context_text = json.dumps(project_context, default=str)
+        context_tokens = self._estimate_tokens(context_text)
+
+        requirement_tokens = self._estimate_tokens(requirement)
+
+        total_estimated = system_tokens + context_tokens + requirement_tokens
+        context_window = self._get_context_window()
+
+        # Reserve 50% for the model's response
+        max_input_tokens = context_window // 2
+
+        if total_estimated <= max_input_tokens:
+            return requirement
+
+        # Need to truncate — calculate how many tokens we can afford
+        overhead_tokens = system_tokens + context_tokens
+        remaining_tokens = max_input_tokens - overhead_tokens
+
+        if remaining_tokens <= 0:
+            logger.warning(
+                "System prompt + context (%d tokens) already exceeds "
+                "half the context window (%d tokens). Sending requirement "
+                "as-is — token limit error is likely.",
+                overhead_tokens, max_input_tokens,
+            )
+            return requirement
+
+        # Convert remaining token budget to chars
+        max_chars = int(remaining_tokens * self._CHARS_PER_TOKEN)
+        logger.warning(
+            "Requirement too long (%d chars, ~%d tokens). "
+            "Truncating to %d chars to fit context window (%d tokens).",
+            len(requirement), requirement_tokens, max_chars, context_window,
+        )
+
+        truncated = requirement[:max_chars]
+        # Try to cut at a reasonable boundary (double newline)
+        last_boundary = truncated.rfind("\n\n")
+        if last_boundary > max_chars // 2:
+            truncated = truncated[:last_boundary]
+
+        truncated += (
+            "\n\n[NOTE: The original requirement was truncated from "
+            f"{len(requirement)} to {len(truncated)} chars to fit the "
+            f"model's context window. Focus on the most critical parts "
+            f"and produce a minimal viable plan.]"
+        )
+        return truncated
 
     def _extract_json(self, text: str) -> dict | None:
         """
