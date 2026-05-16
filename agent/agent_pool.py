@@ -652,11 +652,15 @@ class AgentPool:
             )
         )
 
-    def create_worker(self, agent_type: str) -> WorkerAgent:
+    def create_worker(self, agent_type: str, tool_registry: Any | None = None) -> WorkerAgent:
         """Create a fresh WorkerAgent instance for the given type.
 
         Always creates a new instance to prevent concurrent context pollution
         when multiple nodes of the same agent_type execute in parallel.
+
+        Args:
+            tool_registry: Override tool registry for per-node workspace
+                isolation (#176 PR2). When None, uses the pool's shared registry.
         """
         capability = self.agent_registry.get(agent_type)
         if not capability:
@@ -672,7 +676,7 @@ class AgentPool:
             capability=capability,
             llm_config=llm_config,
             session_store=self.session_store,
-            tool_registry=self.tool_registry,
+            tool_registry=tool_registry or self.tool_registry,
             guardrails=self.guardrails,
             max_iterations=self.max_iterations,
             timeout=self.timeout,
@@ -701,18 +705,33 @@ class AgentPool:
             artifacts: list[HandoffArtifact],
             cancel_event: Any | None = None,
             progress_callback: Any | None = None,
+            workspace_path: str | None = None,
         ) -> dict:
             worker = self.create_worker(node.agent_type)
 
+            # Per-node workspace isolation: create ToolRegistry with node's
+            # workspace as base_cwd so tools operate in the isolated directory (#176 PR2).
+            node_tool_registry = self.tool_registry
+            if workspace_path:
+                from tools.registry import ToolRegistry as _TR
+                node_tool_registry = _TR(
+                    base_cwd=workspace_path,
+                    sandbox_runner=self.tool_registry.sandbox_runner,
+                )
+                worker = self.create_worker(
+                    node.agent_type,
+                    tool_registry=node_tool_registry,
+                )
+
             # Set ownership context on tool registry before execution (#272)
             if node.owned_files:
-                self.tool_registry.set_ownership_context({
+                node_tool_registry.set_ownership_context({
                     "owned": node.owned_files,
                     "forbidden": getattr(node, '_forbidden_files', []),
                     "shared": getattr(node, '_shared_files', []),
                 })
             else:
-                self.tool_registry.set_ownership_context(None)
+                node_tool_registry.set_ownership_context(None)
 
             try:
                 task = _inject_file_path_constraints(node)

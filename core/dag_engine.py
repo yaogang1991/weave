@@ -85,6 +85,9 @@ class DAGExecutionEngine:
         node_timeout_config: Any | None = None,
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         backend_manager: Any | None = None,
+        # Job/run identifiers for workspace isolation (#176 PR2)
+        job_id: str = "",
+        run_id: str = "",
     ):
         self.agent_executor = agent_executor
         self.failure_handler = failure_handler
@@ -122,6 +125,9 @@ class DAGExecutionEngine:
         self._retry_policy = RetryPolicyEngine()
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
+        # Job/run identifiers for per-node workspace isolation (#176 PR2)
+        self._job_id = job_id
+        self._run_id = run_id
 
     @property
     def _best_attempts(self) -> dict[str, dict]:
@@ -709,8 +715,35 @@ class DAGExecutionEngine:
             details={"agent_type": node.agent_type, "task": node.task_description[:100]},
         ))
 
+        # Per-node workspace isolation (#176 PR2).
+        # When backend_manager is available and node uses a non-SHARED strategy,
+        # allocate an isolated workspace for this node's execution.
+        from core.models import NodeWorkspaceStrategy
+        node_workspace = None
+        workspace_path: str | None = None
+        if (
+            self.backend_manager
+            and node.workspace_strategy != NodeWorkspaceStrategy.SHARED
+        ):
+            try:
+                node_workspace = self.backend_manager.setup_node(
+                    job_id=self._job_id,
+                    run_id=self._run_id,
+                    node_id=node_id,
+                    strategy=node.workspace_strategy.value,
+                )
+                workspace_path = node_workspace.workspace_path
+            except Exception as exc:
+                logger.warning(
+                    "Node %s: setup_node failed (%s), using shared workspace",
+                    node_id, exc,
+                )
+
         try:
-            result = await self._execute_with_timeout(node, input_artifacts)
+            result = await self._execute_with_timeout(
+                node, input_artifacts,
+                workspace_path=workspace_path,
+            )
 
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
@@ -833,7 +866,7 @@ class DAGExecutionEngine:
                         details={"reason": "no_work_dir"},
                     ))
                     return
-                eval_work_dir = self.work_dir
+                eval_work_dir = workspace_path or self.work_dir
                 eval_result = await asyncio.get_running_loop().run_in_executor(
                     self._executor,
                     functools.partial(
@@ -1067,11 +1100,22 @@ class DAGExecutionEngine:
             if node.health_status != NodeHealth.DEAD:
                 self._running_nodes.pop(node_id, None)
                 self._running_tasks.pop(node_id, None)
+            # Clean up per-node workspace (#176 PR2)
+            if node_workspace and self.backend_manager:
+                try:
+                    self.backend_manager.cleanup_node(
+                        self._job_id, self._run_id, node_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Node %s: cleanup_node failed: %s", node_id, exc,
+                    )
 
     async def _execute_with_timeout(
         self,
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
+        workspace_path: str | None = None,
     ) -> dict[str, Any]:
         """Execute a node with unified wall-clock timeout (#360 PR3).
 
@@ -1102,6 +1146,7 @@ class DAGExecutionEngine:
                 n, arts,
                 cancel_event=cancel_event,
                 progress_callback=_on_progress,
+                workspace_path=workspace_path,
             )
 
         task = asyncio.create_task(_run_with_cancel(node, input_artifacts))

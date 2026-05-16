@@ -320,6 +320,9 @@ class RunService:
                     dag, failed_id, job.requirement,
                 ),
                 work_dir=work_dir,
+                backend_manager=backend_manager,
+                job_id=job.id,
+                run_id=run.id,
             )
             summary = engine.get_execution_summary(result_dag)
 
@@ -822,6 +825,7 @@ class RunService:
             job_id=job.id,
             approval_repo=self.approval_repo,
             run_id=run_id,
+            backend_manager=backend_manager,
         )
         result_dag = await engine.execute(dag)
 
@@ -886,6 +890,7 @@ class RunService:
         job_id: str = "",
         approval_repo: Any | None = None,
         run_id: str | None = None,
+        backend_manager: Any | None = None,
     ) -> DAGExecutionEngine:
         """Build a DAGExecutionEngine with agent pool, failure handler, and optional replan handler."""
         registry = AgentRegistry()
@@ -973,6 +978,9 @@ class RunService:
                 for agent_type in self.watchdog_config.agent_overrides
             },
             node_timeout_config=_cfg.node_timeout,
+            backend_manager=backend_manager,
+            job_id=job_id,
+            run_id=run_id or "",
         )
 
         async def _session_event_handler(event):
