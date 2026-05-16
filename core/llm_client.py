@@ -74,6 +74,22 @@ class LLMClient:
         self.max_retries = max_retries
         self._client = self._create_client()
 
+    @staticmethod
+    def _parse_tool_arguments(raw: str | None) -> dict:
+        """Safely parse tool call arguments from LLM response (#381).
+
+        Handles GLM/other backends that return empty strings, None,
+        or malformed JSON as arguments.
+        """
+        if raw is None or not raw.strip():
+            return {}
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("Malformed tool arguments, defaulting to {}: %s", raw[:200])
+            return {}
+
     def _create_client(self):
         if self.config.provider == "anthropic":
             return anthropic.Anthropic(
@@ -287,7 +303,7 @@ class LLMClient:
                 tool_calls.append({
                     "id": block.id,
                     "name": block.name,
-                    "arguments": block.input,
+                    "arguments": block.input if isinstance(block.input, dict) else {},
                 })
 
         if tool_calls:
@@ -317,7 +333,7 @@ class LLMClient:
                 {
                     "id": tc.id,
                     "name": tc.function.name,
-                    "arguments": json.loads(tc.function.arguments),
+                    "arguments": LLMClient._parse_tool_arguments(tc.function.arguments),
                 }
                 for tc in choice.message.tool_calls
             ]
