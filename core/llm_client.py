@@ -132,6 +132,7 @@ class LLMClient:
         tools: list[dict] | None = None,
         max_retries: int | None = None,
         agent_timeout: float | None = None,
+        tool_choice: dict | None = None,
     ) -> dict:
         """
         Call the configured LLM with automatic retry for transient errors.
@@ -161,7 +162,7 @@ class LLMClient:
 
         for attempt in range(retries + 1):
             try:
-                return self._call_once(messages, tools)
+                return self._call_once(messages, tools, tool_choice)
             except Exception as e:
                 if attempt == retries:
                     # Rate-limit exhausted all retries → RateLimitError (#360).
@@ -218,7 +219,8 @@ class LLMClient:
                 cumulative_sleep += backoff
 
     def _call_once(
-        self, messages: list[dict], tools: list[dict] | None = None
+        self, messages: list[dict], tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
     ) -> dict:
         """Single LLM call with hard wall-clock timeout (#401, #367).
 
@@ -236,7 +238,7 @@ class LLMClient:
         def _target():
             nonlocal result, exc
             try:
-                result = self._do_call(messages, tools)
+                result = self._do_call(messages, tools, tool_choice)
             except Exception as e:
                 exc = e
 
@@ -271,13 +273,14 @@ class LLMClient:
         return result
 
     def _do_call(
-        self, messages: list[dict], tools: list[dict] | None = None
+        self, messages: list[dict], tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
     ) -> dict:
         """Dispatch to provider-specific call."""
         if self.config.provider == "anthropic":
-            return self._call_anthropic(messages, tools or [])
+            return self._call_anthropic(messages, tools or [], tool_choice)
         else:
-            return self._call_openai(messages, tools or [])
+            return self._call_openai(messages, tools or [], tool_choice)
 
     @staticmethod
     def _parse_rate_limit_wait(error_msg: str) -> float | None:
@@ -321,7 +324,10 @@ class LLMClient:
 
     # -- Anthropic --------------------------------------------------------
 
-    def _call_anthropic(self, messages: list[dict], tools: list[dict]) -> dict:
+    def _call_anthropic(
+        self, messages: list[dict], tools: list[dict],
+        tool_choice: dict | None = None,
+    ) -> dict:
         """Call Anthropic API with proper message format conversion."""
         system_prompt = None
         anthropic_messages = []
@@ -382,6 +388,8 @@ class LLMClient:
             kwargs["system"] = system_prompt
         if tools:
             kwargs["tools"] = tools
+        if tool_choice:
+            kwargs["tool_choice"] = tool_choice
 
         response = self._client.messages.create(**kwargs)
 
@@ -405,11 +413,15 @@ class LLMClient:
 
     # -- OpenAI -----------------------------------------------------------
 
-    def _call_openai(self, messages: list[dict], tools: list[dict]) -> dict:
+    def _call_openai(
+        self, messages: list[dict], tools: list[dict],
+        tool_choice: dict | None = None,
+    ) -> dict:
         response = self._client.chat.completions.create(
             model=self.config.model,
             messages=messages,
             tools=tools if tools else None,
+            tool_choice=tool_choice if tool_choice else ("auto" if tools else None),
             max_tokens=self.config.max_tokens,
             temperature=self.config.temperature,
         )
