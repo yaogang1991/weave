@@ -876,10 +876,14 @@ class DAGExecutionEngine:
 
             node.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
 
-            # RateLimitError: do NOT consume node retry budget (#360).
-            # The error will propagate to service.py which also skips the
-            # job-level retry budget for rate_limit errors.
-            if isinstance(e, RateLimitError):
+            # RateLimitError / NodeTimeoutError: do NOT consume retry budget.
+            # These are system-level failures (API throttling, LLM latency),
+            # not agent logic errors (#360, #432).
+            if isinstance(e, (RateLimitError, NodeTimeoutError)):
+                reason = (
+                    "rate_limit" if isinstance(e, RateLimitError)
+                    else "timeout"
+                )
                 node.status = NodeStatus.FAILED
                 node.completed_at = datetime.now(timezone.utc)
                 node.auto_eval_result = None
@@ -888,7 +892,7 @@ class DAGExecutionEngine:
                     event_type="failed",
                     details={
                         "error": str(e),
-                        "reason": "rate_limit",
+                        "reason": reason,
                         "retry_budget_preserved": True,
                     },
                 ))
