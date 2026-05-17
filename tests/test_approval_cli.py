@@ -37,6 +37,8 @@ sys.modules["openai"] = _mock_openai
 
 # Now safe to import main
 import main as main_module
+import cli.approval as approval_module
+import cli.utils as utils_module
 from control_plane.approval import ApprovalRepository, ApprovalTicket, TicketStatus
 
 
@@ -52,7 +54,7 @@ def _make_namespace(**kwargs) -> argparse.Namespace:
 def tmp_approval_repo(tmp_path: Path, monkeypatch) -> ApprovalRepository:
     """ApprovalRepository backed by a temp directory, patched into main module."""
     repo = ApprovalRepository(str(tmp_path / "approvals"))
-    monkeypatch.setattr(main_module, "ApprovalRepository", lambda: repo)
+    monkeypatch.setattr(approval_module, "ApprovalRepository", lambda: repo)
     return repo
 
 
@@ -402,7 +404,7 @@ class TestCmdReject:
             async def abort_after_rejection(self, job_id: str, ticket_id: str, reason: str = "") -> None:
                 raise ValueError(f"Job {job_id} not found")
 
-        monkeypatch.setattr(main_module, "_make_run_service", lambda *args, **kwargs: _RunServiceStub())
+        monkeypatch.setattr(utils_module, "_make_run_service", lambda *args, **kwargs: _RunServiceStub())
         args = _make_namespace(ticket_id=sample_ticket.id, reason="Clear pending ticket only")
         await main_module.cmd_reject(args)
         captured = capsys.readouterr()
