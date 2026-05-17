@@ -7,7 +7,6 @@ import uuid
 from unittest.mock import MagicMock, patch  # noqa: F401
 
 
-
 class TestToolCallIdDefense:
     """Verify tool_call_id is always a non-empty string."""
 

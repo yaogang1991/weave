@@ -117,7 +117,10 @@ class TestTimeoutMechanisms:
     """Task 07: asyncio.wait_for timeout at job level."""
 
     @pytest.mark.asyncio
-    async def test_job_execution_times_out(self, tmp_repo: JobRepository, run_service: RunService, tmp_path):
+    async def test_job_execution_times_out(
+        self, tmp_repo: JobRepository,
+        run_service: RunService, tmp_path
+    ):
         """A job that exceeds its timeout is marked TIMED_OUT."""
         job = await run_service.submit_job(
             requirement="Build something slow",
@@ -142,7 +145,10 @@ class TestTimeoutMechanisms:
         mock_bls.load_project_hooks.return_value = {}
         mock_bls.run_hook = AsyncMock()
 
-        with patch("control_plane.backend_lifecycle.BackendLifecycleService", return_value=mock_bls):
+        with patch(
+            "control_plane.backend_lifecycle.BackendLifecycleService",
+            return_value=mock_bls
+        ):
             _prepare_job_for_run(tmp_repo, job.id)
             run = await run_service.run_job(job.id)
 
@@ -158,7 +164,9 @@ class TestTimeoutMechanisms:
         assert job_after.attempt == 1
 
     @pytest.mark.asyncio
-    async def test_fast_job_completes_before_timeout(self, tmp_repo: JobRepository, run_service: RunService):
+    async def test_fast_job_completes_before_timeout(
+        self, tmp_repo: JobRepository, run_service: RunService
+    ):
         """A job that finishes within timeout succeeds."""
         job = await run_service.submit_job(
             requirement="Build something fast",
@@ -250,7 +258,9 @@ class TestRetryBackoff:
         assert engine._compute_backoff(10) == 60.0  # capped at 60s
 
     @pytest.mark.asyncio
-    async def test_handle_job_failure_queues_for_retry(self, tmp_repo: JobRepository, run_service: RunService):
+    async def test_handle_job_failure_queues_for_retry(
+        self, tmp_repo: JobRepository, run_service: RunService
+    ):
         """FAILED job with attempts remaining -> QUEUED for retry."""
         job = tmp_repo.create_job(
             requirement="Retry me",
@@ -279,7 +289,9 @@ class TestRetryBackoff:
         assert result.last_error == ""  # cleared on retry
 
     @pytest.mark.asyncio
-    async def test_handle_job_failure_dead_letter(self, tmp_repo: JobRepository, run_service: RunService):
+    async def test_handle_job_failure_dead_letter(
+        self, tmp_repo: JobRepository, run_service: RunService
+    ):
         """FAILED job with no attempts remaining -> DEAD_LETTER."""
         job = tmp_repo.create_job(
             requirement="Dead letter test",
@@ -414,11 +426,11 @@ class TestReplanClosedLoop:
         b_should_fail = True
 
         async def exec_fn(node, artifacts, **kwargs):
-            nonlocal b_should_fail
             execution_log.append(node.id)
             if node.id == "b" and b_should_fail:
                 raise RuntimeError("b fails first time")
-            return {"status": "completed", "summary": f"{node.id} done", "artifacts": []}
+            return {"status": "completed", "summary": f"{node.id} done",
+                    "artifacts": []}
 
         async def fail_once_on_b(dag_ref, node_id, error):
             return FailureDecision(action="replan", reasoning="first time failure")
@@ -579,7 +591,9 @@ class TestRunServiceFailureHandling:
     """Integration tests for RunService with retry/dead-letter."""
 
     @pytest.mark.asyncio
-    async def test_failed_run_goes_to_dead_letter(self, tmp_repo: JobRepository, run_service: RunService):
+    async def test_failed_run_goes_to_dead_letter(
+        self, tmp_repo: JobRepository, run_service: RunService
+    ):
         """A failed run with max_attempts=1 goes directly to DEAD_LETTER."""
         job = await run_service.submit_job(
             requirement="Build API",
@@ -645,7 +659,10 @@ class TestRunServiceFailureHandling:
         assert job_after_3.error_category == "unknown"
 
     @pytest.mark.asyncio
-    async def test_timeout_run_is_retryable(self, tmp_repo: JobRepository, run_service: RunService, tmp_path):
+    async def test_timeout_run_is_retryable(
+        self, tmp_repo: JobRepository,
+        run_service: RunService, tmp_path
+    ):
         """A timed-out run can be retried."""
         job = await run_service.submit_job(
             requirement="Slow task",
@@ -667,7 +684,10 @@ class TestRunServiceFailureHandling:
         mock_bls.load_project_hooks.return_value = {}
         mock_bls.run_hook = AsyncMock()
 
-        with patch("control_plane.backend_lifecycle.BackendLifecycleService", return_value=mock_bls):
+        with patch(
+            "control_plane.backend_lifecycle.BackendLifecycleService",
+            return_value=mock_bls
+        ):
             _prepare_job_for_run(tmp_repo, job.id)
             run = await run_service.run_job(job.id)
         assert run.status == RunStatus.TIMED_OUT

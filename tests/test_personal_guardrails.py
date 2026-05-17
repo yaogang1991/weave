@@ -246,7 +246,10 @@ class TestCriticalAlwaysRequiresConfirmation:
     def test_critical_action_blocked(self, guardrails):
         """CRITICAL actions are never auto-approved."""
         # Simulate a CRITICAL tool by overriding RISK_MAP temporarily
-        with patch.object(guardrails, 'RISK_MAP', {**guardrails.RISK_MAP, "destroy": RiskLevel.CRITICAL}):
+        with patch.object(
+            guardrails, 'RISK_MAP',
+            {**guardrails.RISK_MAP, "destroy": RiskLevel.CRITICAL}
+        ):
             allowed, reason = guardrails.evaluate("destroy", {"target": "database"})
         assert allowed is False
         assert "CRITICAL" in reason
@@ -413,7 +416,8 @@ class TestServiceIntegration:
     """
 
     def test_guardrails_type_with_personal_policy(self, mock_tool_registry):
-        """When RunService is given a PersonalGuardrailPolicy, it should create PersonalGuardrails."""
+        """When RunService is given a PersonalGuardrailPolicy,
+        it should create PersonalGuardrails."""
         with patch.dict(
             "sys.modules",
             {

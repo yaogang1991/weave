@@ -135,7 +135,10 @@ class TestEvaluatorIntegration:
         mock_eval.evaluate_stage = MagicMock(return_value=EvaluationResult(
             passed=True, score=10.0, feedback="OK",
         ))
-        engine = DAGExecutionEngine(exec_with_artifacts, _noop_failure_handler, evaluator=mock_eval, work_dir="/tmp/test_workdir")
+        engine = DAGExecutionEngine(
+            exec_with_artifacts, _noop_failure_handler,
+            evaluator=mock_eval, work_dir="/tmp/test_workdir"
+        )
         result = await engine.execute(dag)
         assert result.nodes["a"].status == NodeStatus.SUCCESS
         mock_eval.evaluate_stage.assert_called_once()
@@ -157,7 +160,10 @@ class TestEvaluatorIntegration:
         async def retry_handler(dag, node_id, error):
             return FailureDecision(action="retry", reasoning="retry")
 
-        engine = DAGExecutionEngine(exec_fn, retry_handler, evaluator=mock_eval, work_dir="/tmp/test_workdir")
+        engine = DAGExecutionEngine(
+            exec_fn, retry_handler,
+            evaluator=mock_eval, work_dir="/tmp/test_workdir"
+        )
         result = await engine.execute(dag)
         # First attempt fails eval -> RETRYING, then retry also fails eval -> FAILED
         assert result.nodes["a"].status == NodeStatus.FAILED
@@ -198,7 +204,11 @@ class TestHandoffArtifacts:
         async def capturing_executor(node, artifacts, **kwargs):
             if node.id == "b":
                 received_artifacts.extend(artifacts)
-            return {"status": "completed", "summary": f"{node.id} done", "artifacts": [f"{node.id}_file.py"]}
+            return {
+                "status": "completed",
+                "summary": f"{node.id} done",
+                "artifacts": [f"{node.id}_file.py"],
+            }
 
         engine = DAGExecutionEngine(capturing_executor, _noop_failure_handler)
         await engine.execute(dag)  # noqa: F841

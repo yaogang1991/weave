@@ -190,6 +190,7 @@ class TestRetryContextTruncation:
         })
 
         call_count = 0
+
         def mock_call(messages, tools=None):
             nonlocal call_count
             call_count += 1

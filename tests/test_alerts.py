@@ -12,7 +12,8 @@ Coverage:
 from __future__ import annotations
 
 import itertools
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest

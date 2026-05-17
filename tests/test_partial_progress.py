@@ -87,11 +87,17 @@ class TestPartialProgress:
 
         eval1 = MagicMock(
             passed=False, score=7.5, feedback="issues",
-            metadata={"lint_new_issues": ["E501 line 10", "F401 import os"], "lint_all_issues": ["E501 line 10", "F401 import os"]},
+            metadata={
+                "lint_new_issues": ["E501 line 10", "F401 import os"],
+                "lint_all_issues": ["E501 line 10", "F401 import os"],
+            },
         )
         eval2 = MagicMock(
             passed=False, score=7.5, feedback="fewer issues",
-            metadata={"lint_new_issues": ["E501 line 10"], "lint_all_issues": ["E501 line 10"]},
+            metadata={
+                "lint_new_issues": ["E501 line 10"],
+                "lint_all_issues": ["E501 line 10"],
+            },
         )
 
         engine = _make_engine(tmp_path, [eval1, eval2])
@@ -119,7 +125,10 @@ class TestPartialProgress:
         )
         eval2 = MagicMock(
             passed=False, score=5.0, feedback="much worse",
-            metadata={"lint_new_issues": ["import error", "syntax error"], "lint_all_issues": ["import error", "syntax error"]},
+            metadata={
+                "lint_new_issues": ["import error", "syntax error"],
+                "lint_all_issues": ["import error", "syntax error"],
+            },
         )
 
         engine = _make_engine(tmp_path, [eval1, eval2])
@@ -143,11 +152,17 @@ class TestPartialProgress:
 
         eval1 = MagicMock(
             passed=False, score=7.5, feedback="lint",
-            metadata={"lint_new_issues": ["W291 trailing whitespace"], "lint_all_issues": ["W291 trailing whitespace"]},
+            metadata={
+                "lint_new_issues": ["W291 trailing whitespace"],
+                "lint_all_issues": ["W291 trailing whitespace"],
+            },
         )
         eval2 = MagicMock(
             passed=False, score=7.5, feedback="lint",
-            metadata={"lint_new_issues": ["W291 whitespace line 5"], "lint_all_issues": ["W291 whitespace line 5"]},
+            metadata={
+                "lint_new_issues": ["W291 whitespace line 5"],
+                "lint_all_issues": ["W291 whitespace line 5"],
+            },
         )
 
         engine = _make_engine(tmp_path, [eval1, eval2])

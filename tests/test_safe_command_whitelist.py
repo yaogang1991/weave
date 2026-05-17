@@ -51,7 +51,10 @@ class TestSafeCommandWhitelist:
     def test_safe_commands_allowed(self, guardrails, cmd):
         """Safe commands should be allowed without approval."""
         result = guardrails.evaluate("bash", {"command": cmd})
-        assert result.decision == "allowed", f"Command '{cmd}' should be allowed but got {result.decision}"
+        assert result.decision == "allowed", (
+            f"Command '{cmd}' should be allowed "
+            f"but got {result.decision}"
+        )
 
     @pytest.mark.parametrize("cmd", [
         "rm -rf /",

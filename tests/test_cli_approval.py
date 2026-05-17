@@ -6,7 +6,6 @@ PendingApprovalError message is informative.
 from unittest.mock import patch
 
 
-
 class TestCLIApprovalWiring:
     """Verify approval_repo is created in cmd_execute."""
 

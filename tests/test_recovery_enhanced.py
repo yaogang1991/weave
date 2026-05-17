@@ -74,7 +74,11 @@ def worker(tmp_repo: JobRepository, mock_run_service: MagicMock) -> TaskWorker:
 
 
 @pytest.fixture
-def real_run_service(tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository, llm_config: Any) -> RunService:
+def real_run_service(
+    tmp_repo: JobRepository,
+    tmp_approval_repo: ApprovalRepository,
+    llm_config: Any
+) -> RunService:
     """A real RunService with real repositories (for resume/abort tests)."""
     from core.config import LLMConfig
     return RunService(
@@ -206,7 +210,11 @@ class TestExpiredTicketRecovery:
     """Tests for _recover_pending_tickets — Step 1: expire timed-out tickets."""
 
     @pytest.mark.asyncio
-    async def test_expires_pending_ticket_on_startup(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_expires_pending_ticket_on_startup(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """A pending ticket past its expiry is marked EXPIRED on worker start."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         # Create a ticket that expired 10 seconds ago
@@ -224,7 +232,11 @@ class TestExpiredTicketRecovery:
         assert updated.decided_by == "timeout"
 
     @pytest.mark.asyncio
-    async def test_non_expired_ticket_left_alone(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_non_expired_ticket_left_alone(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """A pending ticket that has NOT expired is left untouched."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         future_time = datetime.now(timezone.utc) + timedelta(seconds=300)
@@ -254,7 +266,11 @@ class TestExpiredTicketPushesJobToFailure:
     """Tests that expired tickets trigger failure handling for their jobs."""
 
     @pytest.mark.asyncio
-    async def test_expired_ticket_running_job_queued_for_retry(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_expired_ticket_running_job_queued_for_retry(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """An expired ticket for a RUNNING job causes it to be queued for retry."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=10)
@@ -270,7 +286,11 @@ class TestExpiredTicketPushesJobToFailure:
         assert updated_job.attempt == 1
 
     @pytest.mark.asyncio
-    async def test_expired_ticket_running_job_with_lease_queued_for_retry(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_expired_ticket_running_job_with_lease_queued_for_retry(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """An expired ticket for a RUNNING job causes it to be queued for retry."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=10)
@@ -285,7 +305,11 @@ class TestExpiredTicketPushesJobToFailure:
         assert updated_job.attempt == 1
 
     @pytest.mark.asyncio
-    async def test_expired_ticket_exhausted_attempts_goes_dead_letter(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_expired_ticket_exhausted_attempts_goes_dead_letter(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """When max_attempts exhausted, expired ticket sends job to DEAD_LETTER."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         # Set attempt to max_attempts so retry is exhausted
@@ -311,7 +335,11 @@ class TestOrphanTicketRecovery:
     """Tests for _recover_pending_tickets — Step 2: orphan ticket cleanup."""
 
     @pytest.mark.asyncio
-    async def test_orphan_ticket_job_succeeded(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_orphan_ticket_job_succeeded(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """A pending ticket for a SUCCEEDED job is marked expired."""
         job = _create_job(tmp_repo, JobStatus.SUCCEEDED)
         future_time = datetime.now(timezone.utc) + timedelta(seconds=300)
@@ -326,7 +354,11 @@ class TestOrphanTicketRecovery:
         assert updated_ticket.decided_by == "auto"
 
     @pytest.mark.asyncio
-    async def test_orphan_ticket_job_failed(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_orphan_ticket_job_failed(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """A pending ticket for a FAILED job is marked expired (job stays FAILED)."""
         # Create job, transition properly: QUEUED -> FAILED
         job = tmp_repo.create_job(requirement="Test job")
@@ -351,7 +383,11 @@ class TestOrphanTicketRecovery:
         assert updated_job.status == JobStatus.FAILED
 
     @pytest.mark.asyncio
-    async def test_orphan_ticket_job_not_running_is_recovered(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_orphan_ticket_job_not_running_is_recovered(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """A pending ticket for a job that was never started (QUEUED) is treated as orphan."""
         # Create job, start it RUNNING, then simulate it going back to QUEUED
         # (e.g., after a previous failure retry) while ticket remains
@@ -380,7 +416,11 @@ class TestOrphanTicketRecovery:
         assert updated_job.status == JobStatus.QUEUED
 
     @pytest.mark.asyncio
-    async def test_running_job_with_pending_ticket_left_alone(self, worker: TaskWorker, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_running_job_with_pending_ticket_left_alone(
+        self, worker: TaskWorker,
+        tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """A pending ticket for a genuinely RUNNING job is NOT touched."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         future_time = datetime.now(timezone.utc) + timedelta(seconds=300)
@@ -404,7 +444,10 @@ class TestResumeAfterApproval:
     """Tests for RunService.resume_after_approval."""
 
     @pytest.mark.asyncio
-    async def test_resume_returns_latest_active_run(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_resume_returns_latest_active_run(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """resume_after_approval returns the latest RUNNING run for the job."""
         from core.config import LLMConfig
         service = RunService(
@@ -424,7 +467,10 @@ class TestResumeAfterApproval:
         assert result.job_id == job.id
 
     @pytest.mark.asyncio
-    async def test_resume_no_active_run_returns_none(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_resume_no_active_run_returns_none(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """resume_after_approval returns None when no active RUNNING run exists."""
         from core.config import LLMConfig
         service = RunService(
@@ -442,7 +488,10 @@ class TestResumeAfterApproval:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_resume_missing_job_returns_none(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_resume_missing_job_returns_none(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """resume_after_approval returns None for a non-existent job."""
         from core.config import LLMConfig
         service = RunService(
@@ -465,7 +514,10 @@ class TestAbortAfterRejection:
     """Tests for RunService.abort_after_rejection."""
 
     @pytest.mark.asyncio
-    async def test_abort_queues_for_retry(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_abort_queues_for_retry(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """abort_after_rejection queues the job for retry when attempts remain."""
         from core.config import LLMConfig
         service = RunService(
@@ -487,7 +539,10 @@ class TestAbortAfterRejection:
         assert result.attempt == original_attempt + 1
 
     @pytest.mark.asyncio
-    async def test_abort_exhausted_goes_dead_letter(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_abort_exhausted_goes_dead_letter(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """abort_after_rejection sends job to DEAD_LETTER when attempts exhausted."""
         from core.config import LLMConfig
         service = RunService(
@@ -506,7 +561,10 @@ class TestAbortAfterRejection:
         assert result.status == JobStatus.DEAD_LETTER
 
     @pytest.mark.asyncio
-    async def test_abort_missing_job_raises(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_abort_missing_job_raises(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """abort_after_rejection raises ValueError for a non-existent job."""
         from core.config import LLMConfig
         service = RunService(
@@ -519,7 +577,10 @@ class TestAbortAfterRejection:
             await service.abort_after_rejection("nonexistent_job", "ticket_000")
 
     @pytest.mark.asyncio
-    async def test_abort_with_reason_in_message(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_abort_with_reason_in_message(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """abort_after_rejection includes the reason in the error message.
 
         Note: The error message is set during the FAILED-> transition but
@@ -538,7 +599,10 @@ class TestAbortAfterRejection:
         job = tmp_repo.get_job(job.id)
         original_attempt = job.attempt
 
-        result = await service.abort_after_rejection(job.id, "ticket_abc", reason="security policy violation")
+        result = await service.abort_after_rejection(
+            job.id, "ticket_abc",
+            reason="security policy violation"
+        )
 
         # FAILED -> QUEUED (retry) — verify retry was triggered
         assert result.status == JobStatus.QUEUED
@@ -711,7 +775,11 @@ class TestEmitEvent:
     """Tests for RunService._emit_event output format."""
 
     @pytest.mark.asyncio
-    async def test_emit_event_structure(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository, capsys: pytest.CaptureFixture):
+    async def test_emit_event_structure(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository,
+        capsys: pytest.CaptureFixture
+    ):
         """_emit_event prints a valid JSON line with expected fields."""
         from core.config import LLMConfig
         service = RunService(
@@ -805,7 +873,10 @@ class TestWorkerStartIntegration:
     """Integration tests for worker startup recovery sequence."""
 
     @pytest.mark.asyncio
-    async def test_start_calls_both_recovery_methods(self, tmp_repo: JobRepository, tmp_approval_repo: ApprovalRepository):
+    async def test_start_calls_both_recovery_methods(
+        self, tmp_repo: JobRepository,
+        tmp_approval_repo: ApprovalRepository
+    ):
         """Worker.start() calls both _recover_orphan_jobs and _recover_pending_tickets."""
         mock_service = MagicMock(spec=RunService)
         mock_service.approval_repo = tmp_approval_repo

@@ -72,7 +72,8 @@ class TestArtifactVerification:
             output_artifacts=["serializer.py"],  # Doesn't exist
         )
         assert not result.passed
-        assert "phantom" in result.feedback.lower() or "not found on disk" in result.feedback.lower()
+        assert ("phantom" in result.feedback.lower() or
+                "not found on disk" in result.feedback.lower())
 
     def test_all_artifacts_present_passes(self, tmp_path):
         """If all output_artifacts exist on disk, evaluation passes."""

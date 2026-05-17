@@ -47,10 +47,13 @@ class TestDAGNodeCriteriaNormalization:
         assert node.success_criteria[0] == "tests pass"
 
     def test_dict_criteria_become_success_criterion(self):
-        node = DAGNode(id="n2", agent_type="generator", task_description="t",
-                       success_criteria=[
-                           {"type": "file_exists", "path": "src/foo.py", "description": "foo exists"},
-                       ])
+        node = DAGNode(
+            id="n2", agent_type="generator",
+            task_description="t",
+            success_criteria=[
+                {"type": "file_exists", "path": "src/foo.py",
+                 "description": "foo exists"},
+            ])
         assert len(node.success_criteria) == 1
         assert isinstance(node.success_criteria[0], SuccessCriterion)
         assert node.success_criteria[0].type == CriterionType.FILE_EXISTS
@@ -135,7 +138,8 @@ class TestEvaluatorNormalizeCriteria:
 
 class TestCommandRejection:
     def test_command_dict_becomes_custom_uncheckable(self, evaluator, work_dir):
-        """A dict with type=command should be downgraded to CUSTOM (uncheckable, but passes with warning)."""
+        """A dict with type=command should be downgraded to CUSTOM
+        (uncheckable, but passes with warning)."""
         node = DAGNode(id="s1", agent_type="g", task_description="t",
                        success_criteria=[
                            {"type": "command", "command": "rm -rf /", "description": "danger"},
@@ -150,7 +154,8 @@ class TestCommandRejection:
         assert "cannot auto-verify" in result.feedback.lower()
 
     def test_command_json_string_becomes_custom(self, evaluator, work_dir):
-        """Previously serialized command JSON string should also be uncheckable (passes with warning)."""
+        """Previously serialized command JSON string should also be
+        uncheckable (passes with warning)."""
         json_str = json.dumps({"type": "command", "command": "rm -rf /"})
         result = evaluator.evaluate_stage(
             "s2", "stage2", [json_str],

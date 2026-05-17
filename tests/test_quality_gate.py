@@ -25,7 +25,8 @@ class TestEvalStatusMapping:
         assert QualityGate.eval_status_to_node_status(EvalStatus.CLEAN_PASS) == NodeStatus.SUCCESS
 
     def test_partial_pass_maps_correctly(self):
-        assert QualityGate.eval_status_to_node_status(EvalStatus.PARTIAL_PASS) == NodeStatus.PARTIAL_PASS
+        assert QualityGate.eval_status_to_node_status(
+            EvalStatus.PARTIAL_PASS) == NodeStatus.PARTIAL_PASS
 
     def test_warned_maps_correctly(self):
         assert QualityGate.eval_status_to_node_status(EvalStatus.WARNED) == NodeStatus.WARNED

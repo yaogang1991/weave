@@ -321,7 +321,10 @@ class TestEvaluateThreeState_DONT_ASK:
         assert "Pre-approved" in result.reason
 
     def test_not_allowed_tool_blocked(self, dont_ask_guardrails):
-        result = dont_ask_guardrails.evaluate("edit", {"file_path": "/tmp/a.txt", "old_string": "a", "new_string": "b"})
+        result = dont_ask_guardrails.evaluate(
+            "edit",
+            {"file_path": "/tmp/a.txt", "old_string": "a", "new_string": "b"}
+        )
         assert result.decision == "blocked"
         assert "not in allowed list" in result.reason
 
@@ -340,7 +343,10 @@ class TestEvaluateThreeState_ACCEPT_EDITS:
         assert result.decision == "allowed"
 
     def test_medium_allowed(self, accept_edits_guardrails):
-        result = accept_edits_guardrails.evaluate("write", {"file_path": "/tmp/a.txt", "content": "x"})
+        result = accept_edits_guardrails.evaluate(
+            "write",
+            {"file_path": "/tmp/a.txt", "content": "x"}
+        )
         assert result.decision == "allowed"
 
     def test_high_pending(self, accept_edits_guardrails):
@@ -580,7 +586,8 @@ class TestPersonalEvaluate_Critical:
 
     def test_critical_always_pending(self, personal_guardrails):
         with patch.object(
-            personal_guardrails, "RISK_MAP", {**personal_guardrails.RISK_MAP, "destroy": RiskLevel.CRITICAL}
+            personal_guardrails, "RISK_MAP",
+            {**personal_guardrails.RISK_MAP, "destroy": RiskLevel.CRITICAL}
         ):
             result = personal_guardrails.evaluate("destroy", {"target": "database"})
         assert result.decision == "pending_approval"
@@ -677,7 +684,9 @@ class TestLegacyGuardedExecute:
         assert "Blocked by guardrails:" in result.error
         mock_tool_registry.execute.assert_not_called()
 
-    def test_pending_approval_returns_error_tool_result(self, default_guardrails, mock_tool_registry):
+    def test_pending_approval_returns_error_tool_result(
+        self, default_guardrails, mock_tool_registry
+    ):
         """guarded_execute maps pending_approval to an error ToolResult (legacy)."""
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

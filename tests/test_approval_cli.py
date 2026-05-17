@@ -205,7 +205,10 @@ class TestCmdTickets:
 
         assert output["tickets"] == []
         assert output["count"] == 0
-        assert output["stats"] == {"pending": 0, "approved": 0, "consumed": 0, "rejected": 0, "expired": 0}
+        assert output["stats"] == {
+            "pending": 0, "approved": 0,
+            "consumed": 0, "rejected": 0, "expired": 0,
+        }
 
 
 # ------------------------------------------------------------------------------
@@ -398,13 +401,21 @@ class TestCmdReject:
         assert before <= decided <= after
 
     @pytest.mark.asyncio
-    async def test_reject_succeeds_when_job_missing(self, tmp_approval_repo, sample_ticket, capsys, monkeypatch):
+    async def test_reject_succeeds_when_job_missing(
+        self, tmp_approval_repo, sample_ticket, capsys, monkeypatch
+    ):
         """Ticket rejection should succeed even if abort path reports missing job."""
         class _RunServiceStub:
-            async def abort_after_rejection(self, job_id: str, ticket_id: str, reason: str = "") -> None:
+            async def abort_after_rejection(
+                self, job_id: str, ticket_id: str,
+                reason: str = ""
+            ) -> None:
                 raise ValueError(f"Job {job_id} not found")
 
-        monkeypatch.setattr(utils_module, "_make_run_service", lambda *args, **kwargs: _RunServiceStub())
+        monkeypatch.setattr(
+            utils_module, "_make_run_service",
+            lambda *args, **kwargs: _RunServiceStub()
+        )
         args = _make_namespace(ticket_id=sample_ticket.id, reason="Clear pending ticket only")
         await main_module.cmd_reject(args)
         captured = capsys.readouterr()

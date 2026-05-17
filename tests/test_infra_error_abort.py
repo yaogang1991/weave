@@ -73,7 +73,9 @@ class TestInfrastructureErrorDetection:
 
     def test_no_such_file_not_infra(self):
         """FileNotFoundError is often a code issue, not infra."""
-        assert not _is_infrastructure_error("FileNotFoundError: No such file or directory: reporter/report.py")
+        assert not _is_infrastructure_error(
+            "FileNotFoundError: No such file or directory: reporter/report.py"
+        )
 
     def test_permission_denied(self):
         assert _is_infrastructure_error("Permission denied: /root/secret")

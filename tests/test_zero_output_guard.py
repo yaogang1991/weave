@@ -38,7 +38,8 @@ class TestFileExistsZeroOutput:
         checker = FileExistsChecker()
         result = checker.check(crit, ctx)
         assert not result.passed
-        assert "no output files" in result.message.lower() or "did not create" in result.message.lower()
+        assert ("no output files" in result.message.lower() or
+                "did not create" in result.message.lower())
 
     def test_passes_with_none_artifacts_vacuous(self, tmp_path):
         """FILE_EXISTS with None artifacts and no crit.path → vacuous PASS (#372).

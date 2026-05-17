@@ -29,15 +29,23 @@ class TestBackwardCompatImports:
         assert ToolCall is not None
 
     def test_eval_domain(self):
-        from core.models import EvalStatus, EvaluationResult, CriterionType, SuccessCriterion  # noqa: F401
+        from core.models import (  # noqa: F401
+            EvalStatus, EvaluationResult,
+            CriterionType, SuccessCriterion
+        )
         assert SuccessCriterion is not None
 
     def test_event_domain(self):
-        from core.models import EventType, Event, SessionMetrics, SessionState  # noqa: F401
+        from core.models import (  # noqa: F401
+            EventType, Event, SessionMetrics, SessionState
+        )
         assert SessionState is not None
 
     def test_guardrail_domain(self):
-        from core.models import RiskLevel, PermissionMode, GuardrailPolicy, PersonalGuardrailPolicy  # noqa: F401
+        from core.models import (  # noqa: F401
+            RiskLevel, PermissionMode,
+            GuardrailPolicy, PersonalGuardrailPolicy
+        )
         assert PersonalGuardrailPolicy is not None
 
     def test_memory_domain(self):
@@ -60,7 +68,10 @@ class TestDirectDomainImports:
     """Domain modules must be independently importable."""
 
     def test_eval_models(self):
-        from core.eval_models import EvalStatus, EvaluationResult, CriterionType, SuccessCriterion  # noqa: F401
+        from core.eval_models import (  # noqa: F401
+            EvalStatus, EvaluationResult,
+            CriterionType, SuccessCriterion
+        )
         assert EvalStatus.CLEAN_PASS is not None
 
     def test_tool_models(self):

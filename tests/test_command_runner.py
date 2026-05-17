@@ -75,6 +75,7 @@ class TestSyncSandboxAdapter:
 
         def slow_command(*args, **kwargs):
             import asyncio
+
             async def _slow():
                 await asyncio.sleep(10)
                 return CommandResult(success=True, exit_code=0)

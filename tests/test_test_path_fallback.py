@@ -112,7 +112,9 @@ class TestFileExistsWithFallback:
             crit, str(tmp_path),
         )
         assert passed
-        assert "fallback" in msg.lower() or "alternative" in msg.lower() or "verified" in msg.lower()
+        assert ("fallback" in msg.lower() or
+                "alternative" in msg.lower() or
+                "verified" in msg.lower())
 
     def test_source_file_still_requires_exact_match(self, evaluator, tmp_path):
         """Non-test source files must still match exactly (no fallback)."""

@@ -408,12 +408,12 @@ class TestRecoveryFlow:
     def test_list_active_jobs(self, tmp_repo: JobRepository):
         """list_active_jobs should return queued, leased, and running jobs."""
         q = tmp_repo.create_job(requirement="Queued")
-        l = tmp_repo.create_job(requirement="Leased")
+        leased = tmp_repo.create_job(requirement="Leased")
         r = tmp_repo.create_job(requirement="Running")
         _ = tmp_repo.create_job(requirement="Succeeded")
 
         # Set up statuses
-        tmp_repo.acquire_lease(l.id, "owner", 60)
+        tmp_repo.acquire_lease(leased.id, "owner", 60)
         tmp_repo.acquire_lease(r.id, "owner", 60)
         tmp_repo.transition_job_status(r.id, JobStatus.RUNNING)
 
@@ -427,7 +427,7 @@ class TestRecoveryFlow:
         active_ids = {j.id for j in active}
 
         assert q.id in active_ids
-        assert l.id in active_ids
+        assert leased.id in active_ids
         assert r.id in active_ids
         assert s.id not in active_ids  # SUCCEEDED is not active
 

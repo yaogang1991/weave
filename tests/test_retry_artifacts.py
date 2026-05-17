@@ -74,4 +74,6 @@ class TestCoverageScope:
             crit, str(work_dir), output_artifacts=["reporter/report.py"],
         )
         # Should try to scope coverage to reporter/
-        assert "reporter" in msg or "could not be parsed" in msg.lower() or "coverage" in msg.lower()
+        assert ("reporter" in msg or
+                "could not be parsed" in msg.lower() or
+                "coverage" in msg.lower())

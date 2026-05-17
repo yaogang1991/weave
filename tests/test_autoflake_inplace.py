@@ -86,7 +86,7 @@ class TestAutoFixUnused:
         code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
 
         with patch("evaluator.runner.subprocess.run",
-                    side_effect=subprocess.TimeoutExpired("autoflake", 30)):
+                   side_effect=subprocess.TimeoutExpired("autoflake", 30)):
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert changed == []

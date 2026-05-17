@@ -40,7 +40,9 @@ class TestErrorClassification:
 
     def test_runtime_error(self):
         assert _classify_error("RuntimeError: machine not started") == "runtime_error"
-        assert _classify_error("AttributeError: 'NoneType' has no attribute 'name'") == "runtime_error"
+        assert _classify_error(
+            "AttributeError: 'NoneType' has no attribute 'name'"
+        ) == "runtime_error"
         assert _classify_error("KeyError: 'missing_key'") == "runtime_error"
 
     def test_eval_failed(self):

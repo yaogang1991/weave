@@ -86,7 +86,11 @@ class TestBuildRuntimeContext:
         # actually running the LLM loop.
         captured_prompt: dict[str, str] = {}
 
-        async def _fake_run(prompt, session_id, context=None, node_id="", cancel_event=None, progress_callback=None):
+        async def _fake_run(
+            prompt, session_id, context=None,
+            node_id="", cancel_event=None,
+            progress_callback=None
+        ):
             captured_prompt["value"] = prompt
             return {"status": "completed", "summary": "", "artifacts": [], "output": ""}
 

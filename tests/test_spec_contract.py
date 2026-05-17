@@ -43,7 +43,7 @@ import main as main_module
 
 class TestCLISubcommands:
     """验证 CLI 子命令存在（对应 spec Part 3）。
-    
+
     使用 argparse introspection 而非 subprocess，因为子进程
     无法继承当前进程中的 anthropic mock。
     """
@@ -56,7 +56,7 @@ class TestCLISubcommands:
 
     def _get_parser(self) -> argparse.ArgumentParser:
         """Introspect the main module's argument parser.
-        
+
         main.main() builds the parser inline; we replicate that construction
         by extracting the parser-building logic into a helper we can call
         directly in the test process (where anthropic is mocked).
@@ -66,16 +66,16 @@ class TestCLISubcommands:
         # object built inside main().
         import io
         import contextlib
-        
+
         # Capture parser from main() by interceptting parser.parse_args()
         captured_parser = []
         original_parse_args = argparse.ArgumentParser.parse_args
-        
+
         def capture_parse_args(self, args=None, namespace=None):
             captured_parser.append(self)
             # Don't actually parse; just return a namespace that won't run
             return argparse.Namespace(command=None)
-        
+
         argparse.ArgumentParser.parse_args = capture_parse_args  # type: ignore[method-assign]
         try:
             with contextlib.redirect_stdout(io.StringIO()), \
@@ -86,7 +86,7 @@ class TestCLISubcommands:
                     pass
         finally:
             argparse.ArgumentParser.parse_args = original_parse_args  # type: ignore[method-assign]
-        
+
         assert captured_parser, "Failed to capture parser from main()"
         return captured_parser[0]
 
@@ -192,7 +192,10 @@ class TestJobStatusEnum:
 class TestRunStatusEnum:
     """验证 RunStatus 枚举完整。"""
 
-    REQUIRED_STATUSES = ["running", "pending_approval", "succeeded", "failed", "aborted", "timed_out"]
+    REQUIRED_STATUSES = [
+        "running", "pending_approval",
+        "succeeded", "failed", "aborted", "timed_out"
+    ]
 
     def test_all_statuses_exist(self):
         actual = [s.value for s in RunStatus]

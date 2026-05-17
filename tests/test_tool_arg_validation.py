@@ -142,7 +142,8 @@ class TestEmptyToolCallValidation:
         tool_result_msg = [m for m in captured_messages[1] if m.get("role") == "tool"]
         assert len(tool_result_msg) == 1
         assert "command" in tool_result_msg[0]["content"]
-        assert "empty" in tool_result_msg[0]["content"].lower() or "blank" in tool_result_msg[0]["content"].lower()
+        assert ("empty" in tool_result_msg[0]["content"].lower() or
+                "blank" in tool_result_msg[0]["content"].lower())
         tool_executor.execute.assert_not_called()
 
     def test_valid_tool_call_passes_through(self, worker, tmp_path):

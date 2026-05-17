@@ -143,7 +143,7 @@ class TestE2EApprovalRecovery:
         orphan_tickets = [
             t for t in pending_tickets
             if job_repo.get_job(t.job_id).status not in
-               (JobStatus.RUNNING, JobStatus.LEASED)
+            (JobStatus.RUNNING, JobStatus.LEASED)
         ]
 
         # 4. 修复孤儿 ticket
@@ -202,7 +202,7 @@ class TestE2EApprovalRecovery:
         orphans = [
             t for t in pending
             if job_repo.get_job(t.job_id).status not in
-               (JobStatus.RUNNING, JobStatus.LEASED)
+            (JobStatus.RUNNING, JobStatus.LEASED)
         ]
         for t in orphans:
             t.status = TicketStatus.EXPIRED

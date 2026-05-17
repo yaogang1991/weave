@@ -139,7 +139,9 @@ class TestLegitimatePackageProtection:
         email_dir = tmp_path / "email"
         email_dir.mkdir()
         (email_dir / "__init__.py").write_text(
-            "# Our custom email module\nfrom .sender import send_email\nfrom .parser import parse\n",
+            "# Our custom email module\n"
+            "from .sender import send_email\n"
+            "from .parser import parse\n",
             encoding="utf-8",
         )
         (email_dir / "sender.py").write_text("def send_email(): pass", encoding="utf-8")
