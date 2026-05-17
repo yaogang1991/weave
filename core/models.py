@@ -1,825 +1,127 @@
 """
 Core Models for Intelligent Multi-Agent Orchestration.
 
-Single source of truth for all data models.
+This module re-exports all models from domain-specific sub-modules.
+All ``from core.models import X`` statements continue to work unchanged.
 
-Key design principles:
-- DAG-based execution: Agent tasks are nodes in a directed acyclic graph
-- Capability registry: Orchestrator discovers agents through registration, not hardcoding
-- Dynamic planning: Orchestrator Agent generates DAGs at runtime via LLM
-- Context isolation: Each agent has independent context, handoff via artifacts
-- Event-sourced: append-only event log for session state recovery
-- Artifact-centric: all state is serializable via Pydantic
+Domain modules:
+    core.eval_models      -- Evaluation criteria and results
+    core.tool_models      -- Tool calls, results, agent messages
+    core.dag_models       -- DAG nodes, edges, graphs, orchestration
+    core.event_models     -- Events, session state, session metrics
+    core.guardrail_models -- Guardrail policies and permissions
+    core.memory_models    -- Memory entries and learning insights
+    core.analysis_models  -- DAG templates and impact analysis
+    core.mcp_models       -- MCP server and skill definitions
 """
 
-from __future__ import annotations
-
-import uuid
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Literal
-
-from pydantic import BaseModel, Field, field_validator
-
-
-class AgentCapability(BaseModel):
-    """
-    Description of a Worker Agent's capabilities.
-    Registered in AgentRegistry, consumed by IntelligentOrchestrator.
-    """
-    id: str
-    name: str
-    description: str
-    skills: list[str] = Field(default_factory=list)
-    input_schema: list[str] = Field(default_factory=list)
-    output_schema: list[str] = Field(default_factory=list)
-    constraints: list[str] = Field(default_factory=list)
-    system_prompt: str = ""  # Optional custom system prompt for this agent
-
-
-class NodeStatus(str, Enum):
-    """Execution status of a DAG node."""
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCESS = "success"
-    PARTIAL_PASS = "partial_pass"  # Passed via threshold (soft failures overridden)
-    WARNED = "warned"              # Passed but has uncheckable/warned criteria
-    FAILED = "failed"
-    SKIPPED = "skipped"
-    RETRYING = "retrying"
-    PENDING_APPROVAL = "pending_approval"
-
-
-class NodeHealth(str, Enum):
-    """Health status of a running DAG node — M2.0 heartbeat protocol."""
-    HEALTHY = "healthy"       # Heartbeat within threshold
-    MISSED = "missed"         # Last heartbeat > threshold but < kill_threshold
-    UNHEALTHY = "unhealthy"   # Confirmed unhealthy (miss_threshold exceeded)
-    DEAD = "dead"             # Killed by watchdog, final state
-
-
-# ---------------------------------------------------------------------------
-# Workspace isolation models (#176)
-# ---------------------------------------------------------------------------
-
-class NodeWorkspaceStrategy(str, Enum):
-    """Workspace isolation strategy for a DAG node."""
-    SHARED = "shared"       # Share the run's work_dir (default, current behavior)
-    WORKTREE = "worktree"   # Git worktree per node
-    COPY = "copy"           # File copy per node (non-git fallback)
-
-
-class NodeWorkspace(BaseModel):
-    """Workspace information for a DAG node.
-
-    Created by BackendManager.setup_node(), consumed by DAGExecutionEngine
-    and evaluator to route file operations to the correct directory.
-    """
-    node_id: str
-    strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
-    base_path: str = ""             # The run's shared work_dir
-    workspace_path: str = ""        # This node's isolated workspace (same as base_path if SHARED)
-    baseline_commit: str = ""       # Git commit SHA at workspace creation time (for delta lint)
-
-
-class NodeWorkspaceResult(BaseModel):
-    """Result of node execution in its workspace.
-
-    Collected by BackendManager after node completes, used for merging
-    node outputs back into the shared workspace.
-    """
-    node_id: str
-    changed_files: list[str] = Field(default_factory=list)
-    patch_content: str = ""         # Unified diff patch of node's changes
-    merge_status: Literal["pending", "merged", "conflict"] = "pending"
-    conflicts: list[str] = Field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# File ownership contract models (#272)
-# ---------------------------------------------------------------------------
-
-class FileAccessPolicy(str, Enum):
-    """File access classification for ownership contracts."""
-    OWNED = "owned"          # This node exclusively creates/writes this file
-    FORBIDDEN = "forbidden"  # Another node owns this file; read-only for this node
-    SHARED = "shared"        # Multiple nodes may coordinate (requires merge node or serialization)
-
-
-class ConflictResolution(str, Enum):
-    """How to resolve a parallel write conflict."""
-    SERIALIZE = "serialize"     # Add implicit edge to serialize the conflicting nodes
-    MERGE_NODE = "merge_node"   # Insert a merge node that reconciles outputs
-    ERROR = "error"             # Raise PlanValidationError — manual fix required
-    REASSIGN = "reassign"       # Reassign file ownership to a single node
-
-
-class FileOwnershipContract(BaseModel):
-    """Declares which files a DAG node intends to create or modify.
-
-    Populated by the planner in each node's task definition, validated
-    by PlanValidator for conflicts, and enforced at execution time by
-    the DAG engine and tool registry.
-    """
-    node_id: str
-    owned_files: list[str] = Field(default_factory=list)
-    forbidden_files: list[str] = Field(default_factory=list)
-    shared_files: list[str] = Field(default_factory=list)
-    access_policy: dict[str, FileAccessPolicy] = Field(default_factory=dict)
-
-
-class EvalStatus(str, Enum):
-    """Evaluation result status — maps to NodeStatus in DAG engine."""
-    CLEAN_PASS = "clean_pass"      # All criteria passed
-    PARTIAL_PASS = "partial_pass"  # Passed via threshold (soft failures)
-    WARNED = "warned"              # Passed with uncheckable/warned criteria
-    FAILED = "failed"              # Did not pass
-
-
-class EvaluationResult(BaseModel):
-    """Result of an evaluation pass."""
-    passed: bool
-    score: float = 0.0
-    criteria_results: dict[str, bool] = Field(default_factory=dict)
-    feedback: str = ""
-    suggestions: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    eval_status: EvalStatus = EvalStatus.CLEAN_PASS
-
-
-class CriterionType(str, Enum):
-    """Structured criterion types for evaluator dispatch."""
-    TESTS_PASS = "tests_pass"
-    LINT = "lint"
-    FILE_EXISTS = "file_exists"
-    FILE_PATTERN = "file_pattern"
-    COVERAGE = "coverage"
-    NO_CRITICAL = "no_critical"
-    FILE_CHANGED = "file_changed"
-    PATTERN_ABSENT = "pattern_absent"
-    PATTERN_PRESENT = "pattern_present"
-    TEST_FILE_EXISTS = "test_file_exists"
-    CUSTOM = "custom"
-
-
-class SuccessCriterion(BaseModel):
-    """Structured success criterion for evaluation."""
-    type: CriterionType = CriterionType.CUSTOM
-    test_path: str = ""
-    path: str = ""
-    pattern: str = ""
-    target: float | None = None
-    description: str = ""
-
-
-class DAGNode(BaseModel):
-    """
-    A single node in the execution DAG = one agent task.
-    """
-    id: str
-    agent_type: str           # References AgentCapability.id
-    task_description: str
-    status: NodeStatus = NodeStatus.PENDING
-    result: dict[str, Any] = Field(default_factory=dict)
-    error: str = ""
-    output_artifacts: list[str] = Field(default_factory=list)
-    success_criteria: list[str | SuccessCriterion] = Field(default_factory=list)
-    eval_feedback: str = ""  # Evaluator feedback, passed back on retry
-    auto_eval_result: dict[str, Any] | None = None  # Auto-eval result for downstream evaluator agents (#145)
-    max_retries: int = 3
-    retry_count: int = 0
-    workspace_strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
-    owned_files: list[str] = Field(default_factory=list)  # Files this node exclusively creates (#272)
-    started_at: datetime | None = None
-    completed_at: datetime | None = None
-
-    @field_validator("success_criteria", mode="before")
-    @classmethod
-    def _normalize_criteria(cls, v: list) -> list:
-        """Accept list[str], list[dict], or list[SuccessCriterion].
-
-        Dicts with a recognized 'type' key are parsed into SuccessCriterion.
-        Unrecognized types (e.g. legacy "command") are downgraded to CUSTOM.
-        JSON strings that look like structured criteria are also parsed
-        for backward compatibility with previously serialized data.
-        """
-        result: list[str | SuccessCriterion] = []
-        for item in v:
-            if isinstance(item, SuccessCriterion):
-                result.append(item)
-            elif isinstance(item, dict) and "type" in item:
-                result.append(cls._safe_parse_criterion(item))
-            elif isinstance(item, str):
-                if item.startswith("{"):
-                    try:
-                        import json as _json
-                        data = _json.loads(item)
-                        if isinstance(data, dict) and "type" in data:
-                            result.append(cls._safe_parse_criterion(data))
-                            continue
-                    except (_json.JSONDecodeError, Exception):
-                        pass
-                result.append(item)
-            elif isinstance(item, dict):
-                result.append(str(item))
-            else:
-                result.append(str(item))
-        return result
-
-    @staticmethod
-    def _safe_parse_criterion(data: dict) -> SuccessCriterion:
-        """Parse dict into SuccessCriterion, downgrading unknown types to CUSTOM."""
-        try:
-            return SuccessCriterion(**data)
-        except Exception:
-            safe = {k: v for k, v in data.items() if k in ("description", "path", "target", "test_path")}
-            safe["type"] = "custom"
-            return SuccessCriterion(**safe)
-
-    # M2.0: Heartbeat fields
-    health_status: NodeHealth = NodeHealth.HEALTHY  # Current health
-    last_heartbeat_at: datetime | None = None       # Last heartbeat timestamp
-    heartbeat_count: int = 0                         # Total heartbeats received
-    missed_heartbeats: int = 0                       # Consecutive missed beats
-
-    def record_heartbeat(self) -> None:
-        """Record a heartbeat from the executing agent."""
-        self.last_heartbeat_at = datetime.now(timezone.utc)
-        self.heartbeat_count += 1
-        if self.missed_heartbeats > 0:
-            self.missed_heartbeats = 0  # Reset on successful heartbeat
-        if self.health_status in (NodeHealth.MISSED, NodeHealth.UNHEALTHY):
-            self.health_status = NodeHealth.HEALTHY  # Recovery
-
-    def check_health(self, heartbeat_interval_sec: float = 5.0,
-                     miss_threshold: int = 3) -> NodeHealth:
-        """
-        Check current health based on last heartbeat.
-
-        Returns:
-            HEALTHY: Last heartbeat within interval
-            MISSED: 1+ missed beats but below threshold
-            UNHEALTHY: miss_threshold exceeded → should be killed
-        """
-        if self.status != NodeStatus.RUNNING:
-            return self.health_status  # Only check running nodes
-
-        if self.last_heartbeat_at is None:
-            # Never sent heartbeat since starting
-            if self.started_at is None:
-                return self.health_status
-            elapsed = (datetime.now(timezone.utc) - self.started_at).total_seconds()
-        else:
-            elapsed = (datetime.now(timezone.utc) - self.last_heartbeat_at).total_seconds()
-
-        missed = int(elapsed / heartbeat_interval_sec)
-        self.missed_heartbeats = max(self.missed_heartbeats, missed)
-
-        if missed >= miss_threshold:
-            self.health_status = NodeHealth.UNHEALTHY
-        elif missed >= 1:
-            self.health_status = NodeHealth.MISSED
-        else:
-            self.health_status = NodeHealth.HEALTHY
-
-        return self.health_status
-
-    def model_post_init(self, __context: Any) -> None:
-        if not self.id:
-            self.id = f"node_{uuid.uuid4().hex[:8]}"
-
-
-class DependencyType(str, Enum):
-    """Dependency semantics for DAG edges (#271)."""
-    HARD = "hard"  # upstream FAILED → downstream SKIP
-    SOFT = "soft"  # upstream FAILED → downstream continues with warning
-
-
-class DAGEdge(BaseModel):
-    """A directed edge from one node to another."""
-    from_node: str
-    to_node: str
-    dependency_type: DependencyType = DependencyType.HARD
-
-
-class DAG(BaseModel):
-    """
-    Directed Acyclic Graph = execution plan.
-    Generated by IntelligentOrchestrator, executed by DAGExecutionEngine.
-    """
-    nodes: dict[str, DAGNode] = Field(default_factory=dict)
-    edges: list[DAGEdge] = Field(default_factory=list)
-    reasoning: str = ""  # Orchestrator's reasoning for this plan
-
-    def add_node(self, node: DAGNode) -> None:
-        self.nodes[node.id] = node
-
-    def add_edge(self, from_id: str, to_id: str,
-                 dependency_type: DependencyType = DependencyType.HARD) -> None:
-        self.edges.append(DAGEdge(
-            from_node=from_id, to_node=to_id,
-            dependency_type=dependency_type,
-        ))
-
-    def get_dependencies(self, node_id: str) -> list[str]:
-        """Get all predecessor nodes."""
-        return [e.from_node for e in self.edges if e.to_node == node_id]
-
-    def get_hard_dependencies(self, node_id: str) -> list[str]:
-        """Get predecessor nodes connected by HARD edges only (#271)."""
-        return [
-            e.from_node for e in self.edges
-            if e.to_node == node_id and e.dependency_type == DependencyType.HARD
-        ]
-
-    def get_soft_dependencies(self, node_id: str) -> list[str]:
-        """Get predecessor nodes connected by SOFT edges only (#271)."""
-        return [
-            e.from_node for e in self.edges
-            if e.to_node == node_id and e.dependency_type == DependencyType.SOFT
-        ]
-
-    def get_dependents(self, node_id: str) -> list[str]:
-        """Get all successor nodes."""
-        return [e.to_node for e in self.edges if e.from_node == node_id]
-
-    def topological_levels(self) -> list[list[str]]:
-        """
-        Return topological sort as levels.
-        Nodes in the same level have no dependencies between each other
-        and can be executed in parallel.
-        """
-        in_degree = {nid: 0 for nid in self.nodes}
-        adj = {nid: [] for nid in self.nodes}
-
-        for edge in self.edges:
-            adj[edge.from_node].append(edge.to_node)
-            in_degree[edge.to_node] += 1
-
-        levels = []
-        remaining = set(self.nodes.keys())
-
-        while remaining:
-            # Find all nodes with in-degree 0
-            current_level = [
-                nid for nid in remaining
-                if in_degree[nid] == 0
-            ]
-            if not current_level:
-                raise ValueError("Cycle detected in DAG")
-
-            levels.append(current_level)
-            remaining -= set(current_level)
-
-            # Remove current level from graph
-            for nid in current_level:
-                for dependent in adj[nid]:
-                    in_degree[dependent] -= 1
-
-        return levels
-
-    # Terminal states: the node has finished (success or failure).
-    _TERMINAL_STATES = frozenset({
-        NodeStatus.SUCCESS,
-        NodeStatus.PARTIAL_PASS,
-        NodeStatus.WARNED,
-        NodeStatus.FAILED,
-        NodeStatus.SKIPPED,
-    })
-
-    _TERMINAL_SUCCESS_STATES = frozenset({
-        NodeStatus.SUCCESS,
-        NodeStatus.PARTIAL_PASS,
-        NodeStatus.WARNED,
-    })
-
-    def get_ready_nodes(self) -> list[str]:
-        """Get nodes ready to execute.
-
-        Hard deps must be terminal success (SUCCESS/PARTIAL_PASS/WARNED).
-        Soft deps must be terminal (any finished state) so upstream isn't
-        still running when downstream starts (#271).
-        """
-        ready = []
-        for nid, node in self.nodes.items():
-            if node.status != NodeStatus.PENDING:
-                continue
-            hard_deps = self.get_hard_dependencies(nid)
-            hard_ok = all(
-                self.nodes[d].status in self._TERMINAL_SUCCESS_STATES
-                for d in hard_deps
-            )
-            if not hard_ok:
-                continue
-            soft_deps = self.get_soft_dependencies(nid)
-            soft_done = all(
-                self.nodes[d].status in self._TERMINAL_STATES
-                for d in soft_deps
-            )
-            if soft_done:
-                ready.append(nid)
-        return ready
-
-
-class ExecutionEvent(BaseModel):
-    """An event during DAG execution."""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    node_id: str
-    event_type: Literal[
-        "started", "completed", "failed", "retrying", "skipped",
-        "heartbeat", "heartbeat_missed", "unhealthy_killed", "health_recovered",
-        "health_alert", "failure_decision", "upstream_retry",
-    ]
-    details: dict[str, Any] = Field(default_factory=dict)
-
-
-class FailureDecision(BaseModel):
-    """Orchestrator's decision on how to handle a failed node."""
-    action: Literal["retry", "skip", "abort", "replan"]
-    reasoning: str = ""
-    # For replan: new DAG or modifications
-    modifications: dict[str, Any] = Field(default_factory=dict)
-
-
-class OrchestratorPlan(BaseModel):
-    """Output of the orchestrator agent's planning phase."""
-    reasoning: str
-    nodes: list[dict[str, Any]]
-    edges: list[dict[str, str]]
-
-
-class HandoffArtifact(BaseModel):
-    """
-    Structured handoff between agents.
-    Each agent's output becomes the next agent's input.
-    """
-    from_agent: str
-    to_agent: str
-    content: str = ""                    # Human-readable summary
-    file_paths: list[str] = Field(default_factory=list)  # Generated files
-    metadata: dict[str, Any] = Field(default_factory=dict)  # Structured data
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-
-# =============================================================================
-# =============================================================================
-# Foundational models
-# =============================================================================
-# =============================================================================
-
-
-class EventType(str, Enum):
-    """Event types following {domain}.{action} convention."""
-    # User events
-    USER_MESSAGE = "user.message"
-    USER_COMMAND = "user.command"
-
-    # Agent events
-    AGENT_MESSAGE = "agent.message"
-    AGENT_TOOL_USE = "agent.tool_use"
-    AGENT_TOOL_RESULT = "agent.tool_result"
-    AGENT_ERROR = "agent.error"
-
-    # Session events
-    SESSION_START = "session.status_start"
-    SESSION_DAG = "session.dag"
-    SESSION_IDLE = "session.status_idle"
-    SESSION_RUNNING = "session.status_running"
-    SESSION_ERROR = "session.status_error"
-    SESSION_END = "session.status_end"
-
-    # Workflow events
-    WORKFLOW_STAGE_START = "workflow.stage_start"
-    WORKFLOW_STAGE_END = "workflow.stage_end"
-    WORKFLOW_STAGE_ERROR = "workflow.stage_error"
-
-    # Tool events
-    TOOL_EXEC_START = "tool.exec_start"
-    TOOL_EXEC_END = "tool.exec_end"
-    TOOL_EXEC_ERROR = "tool.exec_error"
-
-    # Evaluation events
-    EVAL_START = "eval.start"
-    EVAL_RESULT = "eval.result"
-    EVAL_CONTRACT_CHECK = "eval.contract_check"
-    EVAL_AUTOFIX_APPLIED = "eval.autofix_applied"
-
-    # Checkpoint events
-    CHECKPOINT_CREATED = "checkpoint.created"
-    CHECKPOINT_RESTORED = "checkpoint.restored"
-
-    # Memory events (M3.2)
-    MEMORY_STORED = "memory.stored"
-    MEMORY_ACCESSED = "memory.accessed"
-    MEMORY_SHARED = "memory.shared"
-    MEMORY_EXPIRED = "memory.expired"
-    MEMORY_PRUNED = "memory.pruned"
-
-    # Learning events (M3.3)
-    LEARNING_ANALYSIS_START = "learning.analysis_start"
-    LEARNING_INSIGHT_GENERATED = "learning.insight_generated"
-    LEARNING_OPTIMIZATION_APPLIED = "learning.optimization_applied"
-
-    # Impact analysis events (M3.5)
-    IMPACT_PREDICTED = "impact.predicted"
-    IMPACT_VERIFIED = "impact.verified"
-    IMPACT_MISMATCH = "impact.mismatch"
-    IMPACT_LEARNED = "impact.learned"
-
-    # MCP events (M3.6)
-    MCP_SERVER_CONNECTED = "mcp.server_connected"
-    MCP_SERVER_DISCONNECTED = "mcp.server_disconnected"
-    MCP_SERVER_ERROR = "mcp.server_error"
-    MCP_TOOL_DISCOVERED = "mcp.tool_discovered"
-
-
-class Event(BaseModel):
-    """Immutable event in the session log."""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    type: EventType
-    session_id: str
-    payload: dict[str, Any] = Field(default_factory=dict)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-class ToolCall(BaseModel):
-    """A tool call from the agent."""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    arguments: dict[str, Any] = Field(default_factory=dict)
-
-
-class ToolResult(BaseModel):
-    """Result of a tool execution."""
-    tool_call_id: str
-    success: bool
-    output: str = ""
-    error: str = ""
-    duration_ms: int = 0
-
-
-class AgentMessage(BaseModel):
-    """Message from/to the agent."""
-    role: Literal["system", "user", "assistant", "tool"]
-    content: str
-    tool_calls: list[ToolCall] = Field(default_factory=list)
-    tool_call_id: str | None = None
-
-
-class SessionMetrics(BaseModel):
-    """Runtime metrics for a session."""
-    total_events: int = 0
-    total_tool_calls: int = 0
-    total_tokens_input: int = 0
-    total_tokens_output: int = 0
-    total_duration_ms: int = 0
-    stage_durations: dict[str, int] = Field(default_factory=dict)
-    errors: list[str] = Field(default_factory=list)
-
-
-class SessionState(BaseModel):
-    """Recoverable session state derived from event log."""
-    session_id: str
-    created_at: datetime
-    status: Literal["created", "running", "idle", "error", "completed"] = "created"
-    current_stage: str | None = None
-    stages_completed: list[str] = Field(default_factory=list)
-    artifacts: dict[str, str] = Field(default_factory=dict)
-    context_window: list[AgentMessage] = Field(default_factory=list)
-    metrics: SessionMetrics = Field(default_factory=SessionMetrics)
-
-
-class RiskLevel(int, Enum):
-    """Risk classification for operations."""
-    LOW = 1       # Read-only, safe
-    MEDIUM = 2    # File edits, reversible
-    HIGH = 3      # Bash commands, network access
-    CRITICAL = 4  # Irreversible, production impact
-
-
-class PermissionMode(str, Enum):
-    """Permission modes."""
-    PLAN = "plan"                    # Read-only
-    DEFAULT = "default"              # Ask for every action
-    ACCEPT_EDITS = "accept_edits"    # Auto-approve file edits
-    AUTO = "auto"                    # Classifier-based approval
-    DONT_ASK = "dont_ask"            # Only pre-approved tools
-
-
-class GuardrailPolicy(BaseModel):
-    """Policy configuration for guardrails."""
-    mode: PermissionMode = PermissionMode.DEFAULT
-    allowed_tools: list[str] = Field(default_factory=list)
-    denied_tools: list[str] = Field(default_factory=list)
-    allowed_commands: list[str] = Field(default_factory=list)
-    denied_commands: list[str] = Field(default_factory=list)
-    max_bash_duration: int = 120
-    max_iterations: int = 50
-    auto_approve_read: bool = True
-    require_human_on_error: bool = True
-
-
-class PersonalGuardrailPolicy(GuardrailPolicy):
-    """个人模式专用护栏策略。
-
-    LOW/MEDIUM: 自动通过
-    HIGH: 需要确认（或命中白名单自动通过）
-    CRITICAL: 始终需要确认
-    """
-    # 白名单：命令前缀或正则列表
-    whitelist_patterns: list[str] = Field(default_factory=list)
-    # 自动确认的白名单命令（#380: safe read-only / mkdir commands that
-    # should not require approval even in default interactive mode)
-    whitelist_commands: list[str] = Field(default_factory=lambda: [
-        "mkdir",     # create directories
-        "ls",        # list files
-        "cat",       # view files
-        "touch",     # create empty files
-        "pwd",       # print working directory
-        "which",     # locate commands
-        "echo",      # print text
-        "head",      # view file beginning
-        "tail",      # view file end
-        "wc",        # count lines/words
-        "find",      # find files
-        "python -m pytest",  # run tests
-        "python3 -m pytest", # run tests (alt)
-        "pytest",    # run tests (direct)
-    ])
-    # HIGH 风险是否自动通过（个人模式下不推荐，但可配置）
-    auto_approve_high: bool = False
-    # 交互式确认超时（秒），超时则拒绝
-    confirmation_timeout_sec: int = 300
-
-
-# =============================================================================
-# M3.2: Agent Memory models
-# =============================================================================
-
-
-class MemoryScope(str, Enum):
-    """Visibility scope of a memory entry."""
-    PRIVATE = "private"      # Per-agent, only the owning agent sees it
-    SESSION = "session"      # Shared among agents within one session
-    GLOBAL = "global"        # Cross-session, cross-agent, persistent
-
-
-class MemoryType(str, Enum):
-    """Classification of memory content."""
-    FACT = "fact"            # Learned knowledge (e.g., "project uses pytest")
-    EXPERIENCE = "experience"  # Task outcome (e.g., "planner succeeded with linear DAG")
-    PREFERENCE = "preference"  # User preference (e.g., "user prefers type hints")
-    CONTEXT = "context"      # Project context (e.g., "entry point is main.py")
-
-
-class MemoryEntry(BaseModel):
-    """A single memory record persisted across agent executions."""
-    id: str = Field(default_factory=lambda: f"mem_{uuid.uuid4().hex[:12]}")
-    agent_type: str           # Owning agent (planner/generator/evaluator or "shared")
-    scope: MemoryScope = MemoryScope.PRIVATE
-    memory_type: MemoryType = MemoryType.FACT
-    content: str
-    keywords: list[str] = Field(default_factory=list)
-    session_id: str | None = None
-    source_node_id: str | None = None
-    access_count: int = 0
-    relevance_score: float = 1.0
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    last_accessed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    expires_at: datetime | None = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-# =============================================================================
-# M3.3: Self-Learning models
-# =============================================================================
-
-
-class LearningCategory(str, Enum):
-    """Category of a learning insight."""
-    PLANNING = "planning"
-    EXECUTION = "execution"
-    EVALUATION = "evaluation"
-    AGENT_SELECTION = "agent_selection"
-
-
-class InsightType(str, Enum):
-    """Type of learning insight."""
-    PATTERN = "pattern"              # Positive pattern to replicate
-    RECOMMENDATION = "recommendation"  # Suggested improvement
-    ANTI_PATTERN = "anti_pattern"     # Negative pattern to avoid
-
-
-class LearningInsight(BaseModel):
-    """A learning insight extracted from execution history analysis."""
-    id: str = Field(default_factory=lambda: f"ins_{uuid.uuid4().hex[:12]}")
-    category: LearningCategory
-    insight_type: InsightType
-    description: str
-    evidence: dict[str, Any] = Field(default_factory=dict)
-    confidence: float = 1.0          # 0.0 to 1.0
-    impact: Literal["low", "medium", "high"] = "medium"
-    applies_to: list[str] = Field(default_factory=list)  # Agent types
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
-# -- M3.4: DAG Templates --
-
-
-class DAGTemplate(BaseModel):
-    """A reusable DAG template with variable substitution."""
-    name: str
-    description: str
-    version: str = "1.0"
-    category: str = "general"
-    variables: dict[str, str] = Field(default_factory=dict)
-    nodes: list[dict[str, Any]]
-    edges: list[dict[str, Any]] = Field(default_factory=list)
-    reasoning_template: str = ""
-
-
-# -- M3.5: Impact Analysis --
-
-
-class ImpactRiskLevel(str, Enum):
-    """Risk level of predicted impact scope."""
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
-
-
-class ImpactScope(BaseModel):
-    """Predicted impact of a requirement on a project's file structure."""
-    id: str = Field(default_factory=lambda: f"imp_{uuid.uuid4().hex[:12]}")
-    requirement: str
-    predicted_files: list[str] = Field(default_factory=list)
-    predicted_modules: list[str] = Field(default_factory=list)
-    risk_level: ImpactRiskLevel = ImpactRiskLevel.MEDIUM
-    confidence: float = 0.0
-    reasoning: str = ""
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-class VerificationResult(BaseModel):
-    """Result of comparing predicted impact to actual changes."""
-    impact_scope_id: str
-    expected_files: list[str] = Field(default_factory=list)
-    actual_changed_files: list[str] = Field(default_factory=list)
-    covered_files: list[str] = Field(default_factory=list)
-    unexpected_files: list[str] = Field(default_factory=list)
-    missed_files: list[str] = Field(default_factory=list)
-    coverage: float = 0.0
-    prediction_accuracy: float = 0.0
-    passes: bool = False
-    notes: str = ""
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-# =============================================================================
-# M3.6: MCP Client Integration models
-# =============================================================================
-
-
-class MCPServerStatus(str, Enum):
-    """Lifecycle status of an MCP server connection."""
-    DISCONNECTED = "disconnected"
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
-    ERROR = "error"
-
-
-class MCPToolInfo(BaseModel):
-    """Metadata about a tool discovered from an MCP server."""
-    prefixed_name: str          # e.g. "mcp__github__create_issue"
-    original_name: str          # e.g. "create_issue"
-    server_name: str            # e.g. "github"
-    description: str = ""
-    input_schema: dict[str, Any] = Field(default_factory=dict)
-
-
-# =============================================================================
-# M3.6: Skills System models
-# =============================================================================
-
-
-class SkillVariable(BaseModel):
-    """A single variable definition in a skill."""
-    default: str = ""
-    description: str = ""
-    required: bool = False
-
-
-class Skill(BaseModel):
-    """A reusable prompt template skill definition."""
-    name: str
-    description: str
-    prompt: str
-    variables: dict[str, SkillVariable] = Field(default_factory=dict)
-    agent_types: list[str] = Field(default_factory=list)  # empty = all agents
-    tool_allowlist: list[str] = Field(default_factory=list)
-    context_files: list[str] = Field(default_factory=list)
-    version: str = "1.0"
+from core.eval_models import (
+    CriterionType,
+    EvalStatus,
+    EvaluationResult,
+    SuccessCriterion,
+)
+from core.tool_models import (
+    AgentMessage,
+    ToolCall,
+    ToolResult,
+)
+from core.dag_models import (
+    AgentCapability,
+    ConflictResolution,
+    DAG,
+    DAGEdge,
+    DAGNode,
+    DependencyType,
+    ExecutionEvent,
+    FailureDecision,
+    FileAccessPolicy,
+    FileOwnershipContract,
+    HandoffArtifact,
+    NodeHealth,
+    NodeStatus,
+    NodeWorkspace,
+    NodeWorkspaceResult,
+    NodeWorkspaceStrategy,
+    OrchestratorPlan,
+)
+from core.event_models import (
+    Event,
+    EventType,
+    SessionMetrics,
+    SessionState,
+)
+from core.guardrail_models import (
+    GuardrailPolicy,
+    PermissionMode,
+    PersonalGuardrailPolicy,
+    RiskLevel,
+)
+from core.memory_models import (
+    InsightType,
+    LearningCategory,
+    LearningInsight,
+    MemoryEntry,
+    MemoryScope,
+    MemoryType,
+)
+from core.analysis_models import (
+    DAGTemplate,
+    ImpactRiskLevel,
+    ImpactScope,
+    VerificationResult,
+)
+from core.mcp_models import (
+    MCPServerStatus,
+    MCPToolInfo,
+    Skill,
+    SkillVariable,
+)
+
+__all__ = [
+    "AgentCapability",
+    "AgentMessage",
+    "ConflictResolution",
+    "CriterionType",
+    "DAG",
+    "DAGEdge",
+    "DAGNode",
+    "DAGTemplate",
+    "DependencyType",
+    "EvalStatus",
+    "EvaluationResult",
+    "Event",
+    "EventType",
+    "ExecutionEvent",
+    "FailureDecision",
+    "FileAccessPolicy",
+    "FileOwnershipContract",
+    "GuardrailPolicy",
+    "HandoffArtifact",
+    "ImpactRiskLevel",
+    "ImpactScope",
+    "InsightType",
+    "LearningCategory",
+    "LearningInsight",
+    "MCPServerStatus",
+    "MCPToolInfo",
+    "MemoryEntry",
+    "MemoryScope",
+    "MemoryType",
+    "NodeHealth",
+    "NodeStatus",
+    "NodeWorkspace",
+    "NodeWorkspaceResult",
+    "NodeWorkspaceStrategy",
+    "OrchestratorPlan",
+    "PermissionMode",
+    "PersonalGuardrailPolicy",
+    "RiskLevel",
+    "SessionMetrics",
+    "SessionState",
+    "Skill",
+    "SkillVariable",
+    "SuccessCriterion",
+    "ToolCall",
+    "ToolResult",
+]
