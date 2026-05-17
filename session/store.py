@@ -7,18 +7,26 @@ Inspired by Anthropic's Session design:
 """
 
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from core.models import Event, EventType, SessionState, AgentMessage
 
+logger = logging.getLogger(__name__)
+
 
 class SessionStore:
     """Append-only JSONL event store."""
 
-    def __init__(self, base_path: str = "./data/events"):
+    def __init__(
+        self,
+        base_path: str = "./data/events",
+        max_ctx: int = 50,
+    ):
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
+        self._max_ctx = max_ctx
 
     def _session_file(self, session_id: str) -> Path:
         return self.base_path / f"{session_id}.jsonl"
@@ -49,8 +57,14 @@ class SessionStore:
             metadata=metadata or {},
         )
         file_path = self._session_file(session_id)
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event.model_dump(mode="json"), default=str) + "\n")
+        try:
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event.model_dump(mode="json"), default=str) + "\n")
+        except OSError as exc:
+            logger.error(
+                "Failed to write event %s to session %s: %s",
+                event_type.value, session_id, exc,
+            )
         return event
 
     def get_events(
@@ -117,9 +131,8 @@ class SessionStore:
             msg = AgentMessage(**event.payload)
             state.context_window.append(msg)
             # Trim context window
-            max_ctx = 50  # configurable
-            if len(state.context_window) > max_ctx:
-                state.context_window = state.context_window[-max_ctx:]
+            if len(state.context_window) > self._max_ctx:
+                state.context_window = state.context_window[-self._max_ctx:]
         elif event.type == EventType.AGENT_TOOL_USE:
             state.metrics.total_tool_calls += 1
         elif event.type == EventType.TOOL_EXEC_END:

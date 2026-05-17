@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 _WORD_RE = re.compile(r"[a-z][a-z0-9_]*", re.IGNORECASE)
 
+_STOP_WORDS = {
+    "the", "a", "an", "and", "or", "to", "for", "in", "on",
+    "of", "with", "is", "are", "be", "been", "was", "were",
+    "that", "this", "it", "from", "by", "at", "as", "but",
+    "not", "add", "build", "create", "make", "new", "set",
+    "get", "do", "can", "will", "should", "would", "could",
+    "have", "has", "had", "use", "using", "need", "needs",
+    "all", "some", "any", "no", "into", "about", "up",
+}
+
 
 class ImpactPredictor:
     """Predict file/module impact from a natural-language requirement."""
@@ -30,6 +40,7 @@ class ImpactPredictor:
         max_predicted_files: int = 50,
         confidence_threshold: float = 0.5,
     ) -> None:
+        # Reserved for future LLM-based refinement (#463 audit).
         self.llm_config = llm_config
         self.memory_manager = memory_manager
         self.max_predicted_files = max_predicted_files
@@ -62,16 +73,7 @@ class ImpactPredictor:
 
         # Extract keywords for confidence computation
         words = set(_WORD_RE.findall(requirement.lower()))
-        stop_words = {
-            "the", "a", "an", "and", "or", "to", "for", "in", "on",
-            "of", "with", "is", "are", "be", "been", "was", "were",
-            "that", "this", "it", "from", "by", "at", "as", "but",
-            "not", "add", "build", "create", "make", "new", "set",
-            "get", "do", "can", "will", "should", "would", "could",
-            "have", "has", "had", "use", "using", "need", "needs",
-            "all", "some", "any", "no", "into", "about", "up",
-        }
-        keywords = words - stop_words
+        keywords = words - _STOP_WORDS
 
         # Keyword match against file names
         matched_files = self._keyword_match_files(requirement, project_path)
@@ -127,16 +129,7 @@ class ImpactPredictor:
         """Match requirement keywords against file/module names."""
         words = set(_WORD_RE.findall(requirement.lower()))
         # Remove common stop words
-        stop_words = {
-            "the", "a", "an", "and", "or", "to", "for", "in", "on",
-            "of", "with", "is", "are", "be", "been", "was", "were",
-            "that", "this", "it", "from", "by", "at", "as", "but",
-            "not", "add", "build", "create", "make", "new", "set",
-            "get", "do", "can", "will", "should", "would", "could",
-            "have", "has", "had", "use", "using", "need", "needs",
-            "all", "some", "any", "no", "into", "about", "up",
-        }
-        keywords = words - stop_words
+        keywords = words - _STOP_WORDS
 
         matches: list[str] = []
         project = Path(project_path).resolve()

@@ -627,10 +627,7 @@ class DAGExecutionEngine:
 
     @property
     def _get_node_timeout(self):
-        """Proxy to NodeExecutor._get_node_timeout for backward compat.
-
-<<<<<<< HEAD
-        """
+        """Proxy to NodeExecutor._get_node_timeout for backward compat."""
         return self._node_executor._get_node_timeout
 
     @_get_node_timeout.setter
