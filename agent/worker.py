@@ -85,6 +85,7 @@ class AgentWorker:
         max_context_tokens: int = 100_000,
         base_cwd: str | None = None,
         memory_manager: MemoryManager | None = None,
+        output_monitor: Any | None = None,
     ):
         self.config = config
         self.session_store = session_store
@@ -93,6 +94,7 @@ class AgentWorker:
         self.artifacts: list[str] = []
         self._base_cwd = Path(base_cwd).resolve() if base_cwd else None
         self._memory_manager = memory_manager
+        self._output_monitor = output_monitor
         self._context_manager = ContextManager(max_tokens=max_context_tokens)
 
     # -- Public interface ---------------------------------------------------
@@ -401,10 +403,32 @@ class AgentWorker:
             # Report progress: tool executed (#360 PR3)
             if progress_callback:
                 progress_callback()
+
+            # Output monitoring: scan tool results for injection (#511 output layer)
+            result_content = (
+                result.output if result.success else f"Error: {result.error}"
+            )
+            if self._output_monitor is not None and result.success:
+                scan = self._output_monitor.scan_tool_output(
+                    tool_name, args, result.output,
+                )
+                if scan.injected:
+                    result_content = scan.sanitized_output
+                    self.session_store.emit_event(
+                        session_id,
+                        EventType.AGENT_ERROR,
+                        {
+                            "error": "output_injection_detected",
+                            "tool": tool_name,
+                            "risk_level": scan.risk_level,
+                            "patterns": scan.patterns_matched,
+                        },
+                    )
+
             tool_results.append({
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": result.output if result.success else f"Error: {result.error}",
+                "content": result_content,
             })
 
             # Track artifacts from successful write/edit calls

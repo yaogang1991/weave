@@ -461,7 +461,7 @@ class TestRiskBasedSandboxSelection:
             workspace=WorkspaceIsolation.LOCAL,
             sandbox=ExecutionSandbox.LOCAL,
         )
-        manager.setup("j1", "r1")
-        assert "r1" in manager._active_sandboxes
-        manager.preserve("j1", "r1", reason="test")
-        assert "r1" not in manager._active_sandboxes
+        manager.setup("j_preserve", "r_preserve")
+        assert "r_preserve" in manager._active_sandboxes
+        manager.preserve("j_preserve", "r_preserve", reason="test")
+        assert "r_preserve" not in manager._active_sandboxes

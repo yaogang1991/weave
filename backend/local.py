@@ -48,6 +48,9 @@ class LocalBackend(ExecutionBackend):
         # Create parent but not the leaf directory to avoid nesting
         preserve_dir.parent.mkdir(parents=True, exist_ok=True)
         if work_dir.exists():
+            # Remove stale preserve target before moving (#553 fix)
+            if preserve_dir.exists():
+                shutil.rmtree(preserve_dir)
             shutil.move(str(work_dir), str(preserve_dir))
         return preserve_dir
 
