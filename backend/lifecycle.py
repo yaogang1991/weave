@@ -6,6 +6,11 @@ Supports two orthogonal dimensions:
 - Workspace isolation (LOCAL / WORKTREE) — how files are managed
 - Execution sandbox (LOCAL / DOCKER) — where processes run
 
+Risk-based sandbox selection (#484): when risk_level is provided during
+setup(), the manager can override the default sandbox. High/critical risk
+operations use DockerSandbox (if available), falling back to LocalSandbox
+with resource limits when Docker is not installed.
+
 Hooks are executed as subprocesses on the host (not through SandboxProvider),
 matching Symphony's design — hooks are operational scripts that need host access.
 """
@@ -13,6 +18,7 @@ matching Symphony's design — hooks are operational scripts that need host acce
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +28,8 @@ from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.sandbox import SandboxProvider, LocalSandbox, DockerSandbox
 from core.models import NodeWorkspace
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -67,6 +75,7 @@ class BackendManager:
         repo_root: str | None = None,
         base_path: str = "./data/backends",
         workspace_by_risk: dict[str, str] | None = None,
+        sandbox_by_risk: dict[str, str] | None = None,
         cleanup_policy: str = "on_success",
         sandbox_config: dict | None = None,
     ):
@@ -80,6 +89,12 @@ class BackendManager:
             "high": "worktree",
             "critical": "worktree",
         }
+        self.sandbox_by_risk = sandbox_by_risk or {
+            "low": "local",
+            "medium": "local",
+            "high": "docker",
+            "critical": "docker",
+        }
         self.cleanup_policy = cleanup_policy
         self._sandbox_config = sandbox_config or {}
         _VALID_POLICIES = ("always", "on_success", "never")
@@ -91,6 +106,7 @@ class BackendManager:
         self._backends: dict[str, ExecutionBackend] = {}
         self._sandbox_provider = self._create_sandbox()
         self._active_runs: dict[str, ExecutionBackend] = {}  # run_id -> backend
+        self._active_sandboxes: dict[str, SandboxProvider] = {}  # run_id -> sandbox (#484)
         self._node_workspaces: dict[str, "NodeWorkspace"] = {}  # "run_id:node_id" -> NodeWorkspace
 
     def _get_workspace_backend(
@@ -125,10 +141,45 @@ class BackendManager:
         else:
             raise ValueError(f"Unknown sandbox type: {self.sandbox_type}")
 
+    def _select_sandbox(self, risk_level: str | None = None) -> SandboxProvider:
+        """Select sandbox provider based on risk level (#484).
+
+        High/critical risk → DockerSandbox (if available).
+        Low/medium risk → LocalSandbox (default).
+        Falls back gracefully to LocalSandbox when Docker is unavailable.
+        """
+        if risk_level is None:
+            return self._sandbox_provider
+
+        target = self.sandbox_by_risk.get(risk_level.lower(), "local")
+
+        if target == "docker":
+            docker = DockerSandbox()
+            if docker.is_available():
+                logger.info(
+                    "Risk-based sandbox selection: risk=%s → docker (#484)",
+                    risk_level,
+                )
+                return docker
+            logger.warning(
+                "Docker requested for risk=%s but unavailable, "
+                "falling back to LocalSandbox (#484)",
+                risk_level,
+            )
+
+        return LocalSandbox()
+
     @property
     def sandbox(self) -> SandboxProvider:
-        """Access the sandbox provider for agent execution."""
+        """Access the default sandbox provider for agent execution."""
         return self._sandbox_provider
+
+    def get_sandbox(self, run_id: str) -> SandboxProvider:
+        """Get the risk-selected sandbox for a specific run (#484).
+
+        Falls back to the default sandbox if no risk-based selection was made.
+        """
+        return self._active_sandboxes.get(run_id, self._sandbox_provider)
 
     def setup(
         self,
@@ -144,7 +195,10 @@ class BackendManager:
             job_id: Task ID
             run_id: Run ID
             workspace_type: Explicitly override workspace isolation (overrides default)
-            risk_level: Risk level (used for auto-selecting workspace isolation)
+            risk_level: Risk level (used for auto-selecting workspace AND sandbox)
+
+        Returns:
+            Path to the workspace directory.
         """
         ws_type = self._resolve_workspace_type(workspace_type, risk_level)
         backend = self._get_workspace_backend(ws_type)
@@ -159,12 +213,10 @@ class BackendManager:
                     f"Workspace backend {ws_type.value} is not available"
                 )
 
-        # Check sandbox availability (fail fast if user requested unavailable sandbox)
-        if not self._sandbox_provider.is_available():
-            raise RuntimeError(
-                f"Execution sandbox {self.sandbox_type.value} is not available. "
-                f"Please install the required dependencies or switch to 'local'."
-            )
+        # Select sandbox based on risk level (#484).
+        # Graceful degradation: if Docker is unavailable, falls back to LocalSandbox.
+        selected_sandbox = self._select_sandbox(risk_level)
+        self._active_sandboxes[run_id] = selected_sandbox
 
         work_dir = backend.setup(job_id, run_id)
         self._active_runs[run_id] = backend
@@ -182,6 +234,7 @@ class BackendManager:
         if self.cleanup_policy == "never":
             self.preserve(job_id, run_id, reason="cleanup_policy=never")
             return
+        self._active_sandboxes.pop(run_id, None)
         backend = self._active_runs.pop(run_id, None)
         if backend:
             backend.cleanup(job_id, run_id)
@@ -191,10 +244,12 @@ class BackendManager:
     ) -> Path | None:
         """Preserve execution scene (on failure)."""
         if self.cleanup_policy == "always":
+            self._active_sandboxes.pop(run_id, None)
             backend = self._active_runs.pop(run_id, None)
             if backend:
                 backend.cleanup(job_id, run_id)
             return None
+        self._active_sandboxes.pop(run_id, None)
         backend = self._active_runs.pop(run_id, None)
         if backend:
             return backend.preserve(job_id, run_id, reason)
