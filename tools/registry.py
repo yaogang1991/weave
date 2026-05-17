@@ -279,17 +279,74 @@ class ToolRegistry:
             )
 
     def _validate_bash_command(self, command: str) -> str | None:
-        """Validate bash command against conservative deny patterns."""
-        denied_patterns = [
-            "rm -rf /",
-            "shutdown",
-            "reboot",
-            "mkfs",
-            ":(){ :|:& };:",
+        """Validate bash command against deny patterns (#493).
+
+        Checks for dangerous operations including destructive filesystem
+        commands, network exfiltration, reverse shells, and privilege
+        escalation. Uses regex for robust matching against obfuscation.
+        """
+        import re
+
+        normalized = command.lower().strip()
+
+        # Remove common obfuscation: quotes, backslashes, $'' syntax
+        cleaned = re.sub(r"[\'\"\\]", "", normalized)
+        # Collapse whitespace
+        cleaned = re.sub(r"\s+", " ", cleaned)
+
+        deny_patterns = [
+            # Destructive filesystem
+            r"rm\s+(-[a-z]*f[a-z]*\s+/|-[a-z]*f[a-z]*\s+/*)",
+            r"rm\s+-[a-z]*[rf][a-z]*\s+/",
+            r"rm\s+(-[rf]\s+)+.*/(etc|usr|var|home|boot|sys|proc)",
+            r"r\s*m\s+.*-[a-z]*r[a-z]*f",  # quoted obfuscation
+            r"chmod\s+-[a-z]*r\s+(777|a+x|u\+s)",
+            r"chown\s+.*:.*\s+/",
+            r"dd\s+.*of=/dev/",
+            r"mkfs",
+            r"shred\s+/",
+            r">\s*/dev/sd",
+            # System control
+            r"\bshutdown\b",
+            r"\breboot\b",
+            r"\binit\s+[06]",
+            r"\b(systemctl|service)\s+(stop|disable|mask)\s+",
+            # Fork bomb
+            r":\(\)\{.*:\|:&",
+            # Reverse shells / network exfiltration
+            r"/dev/tcp/",
+            r"/dev/udp/",
+            r"nc\s+.*-[a-z]*e[a-z]*\s",
+            r"ncat\s+.*-[a-z]*e[a-z]*\s",
+            r"bash\s+-i\s+",
+            r"\b(curl|wget)\s+.*\|\s*(ba)?sh\b",
+            r"\b(curl|wget)\s+.*-d\s+@",
+            r"\b(curl|wget)\s+.*--data\b.*@\.?",
+            # Credential / secret access
+            r"/etc/shadow",
+            r"/etc/passwd",
+            r"\.ssh/id_[rd]sa",
+            r"\.ssh/id_ed25519",
+            r"\.aws/credentials",
+            r"\.aws/config",
+            r"\.env\b",
+            r"\.gitconfig",
+            r"\.netrc",
+            # Environment variable dump
+            r"\b(print)?env\b(?!\s+PATH\b)(?!\s+HOME\b)",
+            r"\bexport\b.*>\s",
+            # Privilege escalation
+            r"\bsudo\s+",
+            r"\bsu\s+",
+            r"\bpkexec\b",
+            # Package installation (supply chain risk)
+            r"\bpip\s+install\s+.*(--user|-e)\b",
+            r"\bnpm\s+install\s+-g\b",
+            r"\bcargo\s+install\b",
         ]
-        normalized = command.lower()
-        for pattern in denied_patterns:
-            if pattern in normalized:
+
+        for pattern in deny_patterns:
+            if re.search(pattern, cleaned):
                 return pattern
         return None
 
