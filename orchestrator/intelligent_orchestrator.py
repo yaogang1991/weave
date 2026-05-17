@@ -25,6 +25,7 @@ from core.models import (
     OrchestratorPlan,
     SuccessCriterion,
 )
+from core.dag_models import DAGOutputModel
 from core.agent_registry import AgentRegistry
 from core.config import LLMConfig
 from core.llm_client import LLMClient
@@ -212,46 +213,15 @@ class IntelligentOrchestrator:
             {"role": "user", "content": user_prompt},
         ]
 
-        max_retries = 2
-        plan_data = None
-        for attempt in range(max_retries + 1):
-            messages = self._prune_messages_for_size(messages)
-            response = self.llm.call(messages, tools=[])
-            plan_data = extract_json(response.get("content", ""))
-            if plan_data is not None:
-                break
-            if attempt < max_retries:
-                failed_content = response.get("content", "")
-                if len(failed_content) > 2000:
-                    failed_content = (
-                        failed_content[:2000]
-                        + "\n... (truncated for token limit)"
-                    )
-                messages.append({
-                    "role": "assistant",
-                    "content": failed_content,
-                })
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Your previous response could not be parsed as valid JSON. "
-                        "Please provide the plan as a valid JSON object."
-                    ),
-                })
+        # -- Structured output via tool_use (#505) --
+        # Use Anthropic's tool_use mode to force structured DAG output.
+        # If the LLM doesn't support it or returns malformed data,
+        # fall back to the original free-text JSON parsing.
+        plan_data = self._plan_structured_output(messages)
 
         if plan_data is None:
-            last_response = response.get("content", "")
-            preview = last_response[:500] if last_response else "(empty response)"
-            logger.error(
-                "Planning response parse failed after %d attempts. "
-                "Last LLM output (first 500 chars):\n%s",
-                max_retries + 1, preview,
-            )
-            raise ValueError(
-                f"Failed to parse planning response after {max_retries + 1} retries. "
-                f"LLM did not return valid JSON.\n"
-                f"Last response preview: {preview}"
-            )
+            # Fallback: free-text JSON parsing with retry
+            plan_data = self._plan_free_text(messages)
 
         plan = OrchestratorPlan(**plan_data)
 
@@ -273,7 +243,7 @@ class IntelligentOrchestrator:
                     "Plan has too many nodes, retrying with constraint: %s",
                     err_msg,
                 )
-                node_resp = response.get("content", "")
+                node_resp = json.dumps(plan_data, default=str)[:2000]
                 if len(node_resp) > 2000:
                     node_resp = (
                         node_resp[:2000]
@@ -322,6 +292,133 @@ class IntelligentOrchestrator:
             self._apply_rename_map(dag, validator.rename_map)
 
         return dag
+
+    # -- Structured output helpers (#505) -----------------------------------
+
+    def _plan_structured_output(
+        self, messages: list[dict],
+    ) -> dict | None:
+        """Attempt DAG generation via structured output (tool_use mode).
+
+        Returns plan_data dict on success, None on failure (triggers fallback).
+        """
+        dag_schema = DAGOutputModel.model_json_schema()
+        structured_tool = {
+            "name": "generate_dag",
+            "description": (
+                "Generate a DAG execution plan from the requirement. "
+                "Return nodes with agent assignments, task descriptions, "
+                "and dependencies."
+            ),
+            "input_schema": dag_schema,
+        }
+
+        try:
+            messages_copy = list(messages)
+            messages_copy = self._prune_messages_for_size(messages_copy)
+            response = self.llm.call(
+                messages_copy,
+                tools=[structured_tool],
+                tool_choice={"type": "tool", "name": "generate_dag"},
+            )
+
+            # Extract tool_use input from response
+            tool_calls = response.get("tool_calls", [])
+            if not tool_calls:
+                logger.debug("Structured output: no tool_calls in response")
+                return None
+
+            dag_call = tool_calls[0]
+            if dag_call.get("name") != "generate_dag":
+                logger.debug(
+                    "Structured output: unexpected tool %s",
+                    dag_call.get("name"),
+                )
+                return None
+
+            input_data = dag_call.get("arguments", {})
+            if not input_data:
+                logger.debug("Structured output: empty tool input")
+                return None
+
+            # Validate via Pydantic
+            dag_model = DAGOutputModel.model_validate(input_data)
+
+            # Convert OrchestratorPlan-compatible dict
+            plan_data = {
+                "nodes": [
+                    {
+                        "id": node.id,
+                        "agent_type": node.agent_type,
+                        "task_description": node.task_description,
+                        "dependencies": node.dependencies,
+                    }
+                    for node in dag_model.nodes
+                ],
+                "reasoning": dag_model.reasoning,
+            }
+            logger.info(
+                "Structured output generated DAG with %d nodes (#505)",
+                len(dag_model.nodes),
+            )
+            return plan_data
+
+        except Exception as exc:
+            logger.debug(
+                "Structured output failed, falling back to free-text: %s",
+                exc,
+            )
+            return None
+
+    def _plan_free_text(self, messages: list[dict]) -> dict:
+        """Fallback: free-text JSON parsing with retry (original behavior).
+
+        Used when structured output is unavailable or fails.
+        """
+        max_retries = 2
+        plan_data = None
+        response = {}
+
+        for attempt in range(max_retries + 1):
+            messages = self._prune_messages_for_size(messages)
+            response = self.llm.call(messages, tools=[])
+            plan_data = extract_json(response.get("content", ""))
+            if plan_data is not None:
+                break
+            if attempt < max_retries:
+                failed_content = response.get("content", "")
+                if len(failed_content) > 2000:
+                    failed_content = (
+                        failed_content[:2000]
+                        + "\n... (truncated for token limit)"
+                    )
+                messages.append({
+                    "role": "assistant",
+                    "content": failed_content,
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response could not be parsed as valid JSON. "
+                        "Please provide the plan as a valid JSON object."
+                    ),
+                })
+
+        if plan_data is None:
+            last_response = response.get("content", "")
+            preview = last_response[:500] if last_response else "(empty response)"
+            logger.error(
+                "Planning response parse failed after %d attempts. "
+                "Last LLM output (first 500 chars):\n%s",
+                max_retries + 1, preview,
+            )
+            raise ValueError(
+                f"Failed to parse planning response after {max_retries + 1} retries. "
+                f"LLM did not return valid JSON.\n"
+                f"Last response preview: {preview}"
+            )
+
+        return plan_data
 
     async def plan_from_template(
         self,

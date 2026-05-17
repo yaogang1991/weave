@@ -23,6 +23,7 @@ import uuid
 from core.models import AgentMessage, ToolCall, EventType
 from core.config import LLMConfig
 from core.llm_client import LLMClient
+from core.context import ContextManager
 from session.store import SessionStore
 
 if TYPE_CHECKING:
@@ -92,6 +93,7 @@ class AgentWorker:
         self.artifacts: list[str] = []
         self._base_cwd = Path(base_cwd).resolve() if base_cwd else None
         self._memory_manager = memory_manager
+        self._context_manager = ContextManager(max_tokens=max_context_tokens)
 
     # -- Public interface ---------------------------------------------------
 
@@ -151,8 +153,11 @@ class AgentWorker:
                 )
                 break
 
-            # Truncate context if exceeding token budget
-            messages = self._truncate_messages(messages, self.max_context_tokens)
+            # Context management: compact if exceeding threshold (#480)
+            if self._context_manager.should_compact(messages):
+                messages = self._context_manager.compact(messages, self.llm)
+            else:
+                messages = self._truncate_messages(messages, self.max_context_tokens)
 
             # Call LLM with auto-retry for empty tool call args (#282).
             # When ALL tool calls have missing/blank args, re-request the LLM

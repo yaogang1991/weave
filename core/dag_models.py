@@ -421,3 +421,31 @@ class HandoffArtifact(BaseModel):
     file_paths: list[str] = Field(default_factory=list)  # Generated files
     metadata: dict[str, Any] = Field(default_factory=dict)  # Structured data
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# -- Structured output models for DAG generation (#505) ----------------------
+
+
+class DAGNodeModel(BaseModel):
+    """Structured output model for a single DAG node from LLM planning.
+
+    Used with Anthropic's tool_use structured output to enforce valid DAG
+    generation, eliminating JSON parse failures.
+    """
+    id: str = Field(description="Unique node identifier (e.g. 'gen_auth')")
+    agent_type: str = Field(description="Agent type: planner, generator, or evaluator")
+    task_description: str = Field(description="What this agent should accomplish")
+    dependencies: list[str] = Field(
+        default_factory=list,
+        description="IDs of nodes this depends on",
+    )
+
+
+class DAGOutputModel(BaseModel):
+    """Structured output model for complete DAG plan from LLM.
+
+    The LLM generates this via tool_use mode, ensuring valid structure
+    without fragile JSON parsing.
+    """
+    nodes: list[DAGNodeModel] = Field(description="List of DAG nodes")
+    reasoning: str = Field(description="Why this plan structure was chosen")
