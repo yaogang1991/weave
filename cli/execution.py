@@ -759,3 +759,114 @@ def _register_weave_tools(server) -> None:
             "memory_enabled": config.memory.enabled,
             "sandbox": config.sandbox.runtime,
         }
+
+    # -- #512 P2: Learning analysis tools --------------------------------------
+
+    @server.tool(
+        "weave.analyze",
+        description="Run learning analysis on execution patterns and return insights",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "min_confidence": {
+                    "type": "number",
+                    "description": "Minimum confidence threshold (0.0-1.0, default 0.5)",
+                },
+            },
+        },
+    )
+    def weave_analyze(min_confidence: float = 0.5) -> dict:
+        try:
+            from core.config import WeaveConfig
+            from learning.analyzer import LearningAnalyzer
+
+            config = WeaveConfig.from_env()
+            if not config.learning.enabled:
+                return {
+                    "insights": [],
+                    "message": "Learning system is disabled",
+                }
+
+            analyzer = LearningAnalyzer(
+                metrics_collector=None,
+                memory_manager=None,
+                config=config.learning,
+            )
+            insights = analyzer.analyze()
+
+            filtered = [
+                i for i in insights
+                if i.confidence >= min_confidence
+            ]
+            return {
+                "insights": [
+                    {
+                        "id": i.id,
+                        "type": i.insight_type.value,
+                        "category": i.category.value,
+                        "description": i.description[:300],
+                        "confidence": i.confidence,
+                        "impact": i.impact,
+                        "applies_to": i.applies_to,
+                    }
+                    for i in filtered
+                ],
+                "total": len(filtered),
+                "total_unfiltered": len(insights),
+            }
+        except Exception as exc:
+            return {"error": str(exc), "insights": []}
+
+    @server.tool(
+        "weave.insights",
+        description="Get planning hints derived from learning analysis",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "requirement": {
+                    "type": "string",
+                    "description": "Task requirement to get hints for (optional)",
+                },
+            },
+        },
+    )
+    def weave_insights(requirement: str = "") -> dict:
+        try:
+            from core.config import WeaveConfig
+            from memory.manager import MemoryManager
+            from core.memory_models import MemoryScope
+
+            config = WeaveConfig.from_env()
+            if not config.memory.enabled:
+                return {
+                    "hints": "",
+                    "message": "Memory system is disabled",
+                }
+
+            mm = MemoryManager(config.memory)
+            query = (
+                f"planning recommendation {requirement}"
+                if requirement else "planning recommendation"
+            )
+            memories = mm.store.search(
+                query=query,
+                scope=MemoryScope.GLOBAL,
+                limit=10,
+            )
+            if not memories:
+                return {
+                    "hints": "",
+                    "total": 0,
+                    "message": "No planning hints available yet",
+                }
+
+            hints_lines = [
+                f"- {m.content[:200]} (confidence: {m.relevance_score:.2f})"
+                for m in memories[:10]
+            ]
+            return {
+                "hints": "\n".join(hints_lines),
+                "total": len(memories),
+            }
+        except Exception as exc:
+            return {"error": str(exc), "hints": ""}
