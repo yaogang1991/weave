@@ -18,9 +18,12 @@ import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from core.models import MemoryEntry, MemoryScope, MemoryType
+
+if TYPE_CHECKING:
+    from memory.embedding import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +293,60 @@ class MemoryStore:
         scored = [(e, s) for e in all_entries if (s := score(e)) > 0]
         scored.sort(key=lambda x: x[1], reverse=True)
         return [e for e, _ in scored[:limit]]
+
+    def semantic_search(
+        self,
+        query: str,
+        embedding_provider: EmbeddingProvider,
+        scope: MemoryScope | None = None,
+        agent_type: str | None = None,
+        session_id: str | None = None,
+        memory_type: MemoryType | None = None,
+        limit: int = 10,
+        min_similarity: float = 0.1,
+    ) -> list[tuple[MemoryEntry, float]]:
+        """Search entries using semantic similarity via embeddings (#508 P1).
+
+        Returns list of (entry, similarity_score) tuples sorted by score.
+        Falls back to keyword search if embedding produces zero vectors.
+        """
+        from memory.embedding import cosine_similarity
+
+        all_entries = self.list_entries(
+            scope=scope,
+            agent_type=agent_type,
+            session_id=session_id,
+            memory_type=memory_type,
+        )
+
+        if not all_entries or not query.strip():
+            return [(e, 0.0) for e in all_entries[:limit]]
+
+        query_vec = embedding_provider.embed(query)
+
+        # Check if query vector is all zeros (empty/degenerate)
+        if all(v == 0.0 for v in query_vec):
+            # Fallback to keyword search
+            results = self.search(
+                query, scope=scope, agent_type=agent_type,
+                session_id=session_id, memory_type=memory_type,
+                limit=limit,
+            )
+            return [(e, 0.0) for e in results]
+
+        # Embed all entries and compute similarity
+        scored: list[tuple[MemoryEntry, float]] = []
+        # Batch embed for efficiency
+        contents = [e.content for e in all_entries]
+        entry_vecs = embedding_provider.embed_batch(contents)
+
+        for entry, vec in zip(all_entries, entry_vecs):
+            sim = cosine_similarity(query_vec, vec)
+            if sim >= min_similarity:
+                scored.append((entry, sim))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:limit]
 
     def get_relevant(
         self,
