@@ -11,3 +11,6 @@ autoflake>=2.0.0
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 mcp>=1.0.0
+# Optional: OpenTelemetry tracing (#509)
+# pip install opentelemetry-api opentelemetry-sdk
+# pip install opentelemetry-exporter-otlp-proto-grpc  # for OTLP export

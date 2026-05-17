@@ -39,6 +39,7 @@ from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.dag_checkpoint import CheckpointManager
 from core.dag_compat import DAGCompatMixin
+from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
@@ -250,6 +251,14 @@ class DAGExecutionEngine(DAGCompatMixin):
         Loads checkpointed node completions on start and skips them.
         Cleans up checkpoint on successful completion.
         """
+        with start_span("dag.execute", {
+            "dag.node_count": len(dag.nodes),
+            "dag.edge_count": len(dag.edges),
+        }) as span:
+            return await self._execute_inner(dag, span)
+
+    async def _execute_inner(self, dag: DAG, span) -> DAG:
+        """Inner execute logic wrapped by OTel span (#509)."""
         try:
             levels = dag.topological_levels()
         except ValueError as e:

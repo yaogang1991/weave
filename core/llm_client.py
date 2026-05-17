@@ -32,6 +32,7 @@ from openai import OpenAI
 
 from core.config import LLMConfig
 from core.exceptions import RateLimitError
+from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
 
 logger = logging.getLogger(__name__)
 
@@ -276,11 +277,22 @@ class LLMClient:
         self, messages: list[dict], tools: list[dict] | None = None,
         tool_choice: dict | None = None,
     ) -> dict:
-        """Dispatch to provider-specific call."""
-        if self.config.provider == "anthropic":
-            return self._call_anthropic(messages, tools or [], tool_choice)
-        else:
-            return self._call_openai(messages, tools or [], tool_choice)
+        """Dispatch to provider-specific call with OTel span (#509)."""
+        with start_span("llm.call", {
+            "gen_ai.system": self.config.provider,
+            "gen_ai.request.model": self.config.model,
+        }) as span:
+            try:
+                if self.config.provider == "anthropic":
+                    result = self._call_anthropic(messages, tools or [], tool_choice)
+                else:
+                    result = self._call_openai(messages, tools or [], tool_choice)
+                span.set_attribute("gen_ai.response.finish_reason", "completed")
+                return result
+            except Exception as e:
+                span.set_attribute("gen_ai.response.finish_reason", "error")
+                span.record_exception(e)
+                raise
 
     @staticmethod
     def _parse_rate_limit_wait(error_msg: str) -> float | None:
