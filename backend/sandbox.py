@@ -83,11 +83,16 @@ class LocalSandbox(SandboxProvider):
         "ANTHROPIC_",
         "OPENAI_",
         "AWS_",
-        "GITHUB_TOKEN",
+    )
+
+    SENSITIVE_ENV_CONTAINS: tuple[str, ...] = (
+        "API_KEY",
+        "API_SECRET",
         "SECRET",
         "PASSWORD",
         "TOKEN",
-        "API_KEY",
+        "PRIVATE_KEY",
+        "GITHUB_TOKEN",
     )
 
     def __init__(
@@ -98,15 +103,23 @@ class LocalSandbox(SandboxProvider):
         self._memory_limit_mb = memory_limit_mb
         self._cpu_limit_sec = cpu_limit_sec
 
-    def _build_safe_env(self) -> dict[str, str]:
-        """Build environment dict with sensitive keys removed."""
+    def _build_safe_env(self, env: dict[str, str] | None = None) -> dict[str, str]:
+        """Build environment dict with sensitive keys removed.
+
+        If caller provides explicit env, return it unchanged (caller controls
+        env). If env is None, build from os.environ with sensitive keys
+        stripped.
+        """
         import os
+
+        if env is not None:
+            return env
 
         return {
             k: v
             for k, v in os.environ.items()
             if not any(k.upper().startswith(p) for p in self.SENSITIVE_ENV_PREFIXES)
-
+            and not any(p in k.upper() for p in self.SENSITIVE_ENV_CONTAINS)
         }
 
     def _make_preexec_fn(self):
