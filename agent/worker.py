@@ -199,6 +199,21 @@ class AgentWorker:
                 if any_tool_executed:
                     break  # At least one valid tool call → proceed normally
 
+                # Early termination for completely empty args (#541).
+                # When ALL tool calls have args={}, retrying is futile — the
+                # LLM produced no arguments at all and error feedback won't help.
+                # Skip remaining retries and go straight to degenerate detection.
+                all_empty_args = all(
+                    tc.get("arguments") == {}
+                    for tc in assistant_message.get("tool_calls", [])
+                )
+                if all_empty_args:
+                    logger.warning(
+                        "All tool calls have empty args {} — skipping "
+                        "remaining retries, entering degenerate detection (#541)",
+                    )
+                    break
+
                 # All tool calls were invalid — retry LLM if attempts remain (#282)
                 if llm_attempt < EMPTY_CALL_MAX_RETRIES:
                     # Log raw tool calls for debugging model-specific issues (#334)
