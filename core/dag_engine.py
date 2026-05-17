@@ -205,7 +205,7 @@ class DAGExecutionEngine(DAGCompatMixin):
         for remaining_level in levels[from_level:]:
             for nid in remaining_level:
                 if dag.nodes[nid].status == NodeStatus.PENDING:
-                    dag.nodes[nid].status = NodeStatus.SKIPPED
+                    dag.update_node(nid, status=NodeStatus.SKIPPED)
 
     def _merge_dag_results(self, old_dag: DAG, new_dag: DAG) -> DAG:
         """
@@ -218,11 +218,14 @@ class DAGExecutionEngine(DAGCompatMixin):
         merged = new_dag
         for node_id, node in old_dag.nodes.items():
             if self._is_terminal_success(node.status) and node_id in merged.nodes:
-                merged.nodes[node_id].status = node.status
-                merged.nodes[node_id].result = node.result
-                merged.nodes[node_id].output_artifacts = node.output_artifacts
-                merged.nodes[node_id].started_at = node.started_at
-                merged.nodes[node_id].completed_at = node.completed_at
+                merged.update_node(
+                    node_id,
+                    status=node.status,
+                    result=node.result,
+                    output_artifacts=node.output_artifacts,
+                    started_at=node.started_at,
+                    completed_at=node.completed_at,
+                )
         return merged
 
     # ------------------------------------------------------------------
@@ -265,9 +268,10 @@ class DAGExecutionEngine(DAGCompatMixin):
             restored_count = 0
             for node_id, result_data in completed_nodes.items():
                 if node_id in dag.nodes:
-                    dag.nodes[node_id].status = NodeStatus.SUCCESS
+                    updates: dict[str, Any] = {"status": NodeStatus.SUCCESS}
                     if result_data:
-                        dag.nodes[node_id].result = result_data
+                        updates["result"] = result_data
+                    dag.update_node(node_id, **updates)
                     restored_count += 1
             if restored_count:
                 logger.info(
@@ -376,8 +380,11 @@ class DAGExecutionEngine(DAGCompatMixin):
                                     gen_node = dag.nodes[target_id]
                                     if gen_node.retry_count >= gen_node.max_retries:
                                         # No budget left; retry evaluator directly
-                                        node.status = NodeStatus.RETRYING
-                                        node.error = ""
+                                        dag.update_node(
+                                            failed_id,
+                                            status=NodeStatus.RETRYING,
+                                            error="",
+                                        )
                                         await self._node_executor.execute_node(dag, failed_id)
                                     else:
                                         await self._emit(ExecutionEvent(
@@ -392,26 +399,38 @@ class DAGExecutionEngine(DAGCompatMixin):
                                         # Retry generator with feedback.
                                         # Cap retry_count so _execute_single_node's
                                         # internal retry loop gives exactly one attempt.
-                                        gen_node.retry_count = gen_node.max_retries - 1
-                                        gen_node.status = NodeStatus.RETRYING
-                                        gen_node.error = ""
-                                        gen_node.eval_feedback = node.eval_feedback
+                                        dag.update_node(
+                                            target_id,
+                                            retry_count=gen_node.max_retries - 1,
+                                            status=NodeStatus.RETRYING,
+                                            error="",
+                                            eval_feedback=node.eval_feedback,
+                                        )
                                         await self._node_executor.execute_node(dag, target_id)
 
                                         if self._is_terminal_success(dag.nodes[target_id].status):
                                             # Re-run evaluator after generator fix
-                                            node.status = NodeStatus.RETRYING
-                                            node.error = ""
+                                            dag.update_node(
+                                                failed_id,
+                                                status=NodeStatus.RETRYING,
+                                                error="",
+                                            )
                                             await self._node_executor.execute_node(dag, failed_id)
                                 else:
                                     # No upstream generator found; retry evaluator directly
-                                    node.status = NodeStatus.RETRYING
-                                    node.error = ""
+                                    dag.update_node(
+                                        failed_id,
+                                        status=NodeStatus.RETRYING,
+                                        error="",
+                                    )
                                     await self._node_executor.execute_node(dag, failed_id)
                             else:
                                 # Normal retry: retry the failed node itself
-                                node.status = NodeStatus.RETRYING
-                                node.error = ""
+                                dag.update_node(
+                                    failed_id,
+                                    status=NodeStatus.RETRYING,
+                                    error="",
+                                )
                                 await self._node_executor.execute_node(dag, failed_id)
 
                             # #455: Persist retried node if it succeeded
@@ -430,12 +449,15 @@ class DAGExecutionEngine(DAGCompatMixin):
                                 pass
 
                         elif decision.action == "skip":
-                            dag.nodes[failed_id].status = NodeStatus.SKIPPED
+                            dag.update_node(failed_id, status=NodeStatus.SKIPPED)
 
                         elif decision.action == "replan":
                             if replan_count >= self.max_replans:
-                                dag.nodes[failed_id].error = (
-                                    f"Max replans ({self.max_replans}) reached"
+                                dag.update_node(
+                                    failed_id,
+                                    error=(
+                                        f"Max replans ({self.max_replans}) reached"
+                                    ),
                                 )
                                 self._skip_remaining(dag, levels, level_idx + 1)
                                 return dag

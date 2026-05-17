@@ -265,6 +265,17 @@ class DAG(BaseModel):
     def add_node(self, node: DAGNode) -> None:
         self.nodes[node.id] = node
 
+    def update_node(self, node_id: str, **updates) -> DAGNode:
+        """Create a new DAGNode with updated fields and replace in nodes dict.
+
+        Uses model_copy for immutability — original node is not modified (#486).
+        Returns the new node for convenience.
+        """
+        old_node = self.nodes[node_id]
+        new_node = old_node.model_copy(update=updates)
+        self.nodes[node_id] = new_node
+        return new_node
+
     def add_edge(self, from_id: str, to_id: str,
                  dependency_type: DependencyType = DependencyType.HARD) -> None:
         self.edges.append(DAGEdge(

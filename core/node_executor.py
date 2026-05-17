@@ -113,10 +113,13 @@ class NodeExecutor:
             if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
         ]
         if failed_hard:
-            node.status = NodeStatus.SKIPPED
-            node.error = (
-                f"Skipped: hard dependencies {failed_hard} "
-                f"failed/were skipped"
+            node = dag.update_node(
+                node_id,
+                status=NodeStatus.SKIPPED,
+                error=(
+                    f"Skipped: hard dependencies {failed_hard} "
+                    f"failed/were skipped"
+                ),
             )
             logger.info(
                 "Node %s skipped due to failed hard dependencies: %s",
@@ -139,9 +142,12 @@ class NodeExecutor:
             dag, node_id, failed_soft=failed_soft,
         )
 
-        node.status = NodeStatus.RUNNING
-        node.started_at = datetime.now(timezone.utc)
-        node.health_status = NodeHealth.HEALTHY
+        node = dag.update_node(
+            node_id,
+            status=NodeStatus.RUNNING,
+            started_at=datetime.now(timezone.utc),
+            health_status=NodeHealth.HEALTHY,
+        )
         node.record_heartbeat()  # M2.0: Initial heartbeat
 
         logger.info(
@@ -206,7 +212,7 @@ class NodeExecutor:
                     "Node %s: retry produced no new artifacts, preserving %d from previous attempt",
                     node_id, len(previous_artifacts),
                 )
-            node.output_artifacts = reported_artifacts
+            node = dag.update_node(node_id, output_artifacts=reported_artifacts)
             logger.debug(
                 "Node %s (%s) produced artifacts: %s",
                 node_id, node.agent_type, node.output_artifacts,
@@ -217,15 +223,18 @@ class NodeExecutor:
                 not node.output_artifacts
                 and self._requires_output_artifacts(node)
             ):
-                node.error = (
-                    f"Node produced zero output artifacts. "
-                    f"Agent type: {node.agent_type}, task: {node.task_description[:200]}. "
-                    f"This typically indicates the agent exhausted its iteration "
-                    f"budget without writing any files."
+                node = dag.update_node(
+                    node_id,
+                    error=(
+                        f"Node produced zero output artifacts. "
+                        f"Agent type: {node.agent_type}, task: {node.task_description[:200]}. "
+                        f"This typically indicates the agent exhausted its iteration "
+                        f"budget without writing any files."
+                    ),
+                    status=NodeStatus.FAILED,
+                    completed_at=datetime.now(timezone.utc),
+                    retry_count=node.retry_count + 1,
                 )
-                node.status = NodeStatus.FAILED
-                node.completed_at = datetime.now(timezone.utc)
-                node.retry_count += 1
                 logger.warning(
                     "Node %s (%s) fast-failed: zero output artifacts",
                     node_id, node.agent_type,
@@ -245,10 +254,13 @@ class NodeExecutor:
                 node, node_id,
             )
             if test_check is not None:
-                node.eval_feedback = test_check.eval_feedback
-                node.error = test_check.error
-                node.status = test_check.node_status
-                node.completed_at = datetime.now(timezone.utc)
+                node = dag.update_node(
+                    node_id,
+                    eval_feedback=test_check.eval_feedback,
+                    error=test_check.error,
+                    status=test_check.node_status,
+                    completed_at=datetime.now(timezone.utc),
+                )
                 await self._emit(ExecutionEvent(
                     node_id=node_id,
                     event_type=test_check.event_type,
@@ -263,12 +275,15 @@ class NodeExecutor:
                         "Aborting evaluation to prevent incorrect results.",
                         node_id,
                     )
-                    node.status = NodeStatus.FAILED
-                    node.error = (
-                        "Evaluation skipped: work_dir not configured. "
-                        "Pass --project to set the working directory."
+                    node = dag.update_node(
+                        node_id,
+                        status=NodeStatus.FAILED,
+                        error=(
+                            "Evaluation skipped: work_dir not configured. "
+                            "Pass --project to set the working directory."
+                        ),
+                        completed_at=datetime.now(timezone.utc),
                     )
-                    node.completed_at = datetime.now(timezone.utc)
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
                         event_type="failed",
@@ -292,22 +307,26 @@ class NodeExecutor:
                     eval_result, node, node_id, eval_work_dir,
                 )
 
-                node.auto_eval_result = outcome.auto_eval_result
+                node = dag.update_node(
+                    node_id, auto_eval_result=outcome.auto_eval_result,
+                )
 
                 if not outcome.passed:
-                    node.retry_count += outcome.retry_count_increment
-                    node.eval_feedback = outcome.eval_feedback
-                    node.error = outcome.error
-                    node.status = outcome.node_status
-                    node.completed_at = datetime.now(timezone.utc)
-
+                    new_retry_count = node.retry_count + outcome.retry_count_increment
+                    updates: dict[str, Any] = {
+                        "retry_count": new_retry_count,
+                        "eval_feedback": outcome.eval_feedback,
+                        "error": outcome.error,
+                        "status": outcome.node_status,
+                        "completed_at": datetime.now(timezone.utc),
+                    }
                     # Update artifacts from regression restoration
                     if outcome.restored_artifacts is not None:
-                        node.output_artifacts = outcome.restored_artifacts
-
+                        updates["output_artifacts"] = outcome.restored_artifacts
                     # If node exhausted retries, clear auto_eval_result
-                    if node.retry_count >= node.max_retries:
-                        node.auto_eval_result = None
+                    if new_retry_count >= node.max_retries:
+                        updates["auto_eval_result"] = None
+                    node = dag.update_node(node_id, **updates)
 
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
@@ -322,12 +341,16 @@ class NodeExecutor:
 
             # Map evaluator result to node status (#270).
             if self.evaluator and node.success_criteria and node.agent_type == "generator":
-                node.status = QualityGate.eval_status_to_node_status(eval_result.eval_status)
+                final_status = QualityGate.eval_status_to_node_status(eval_result.eval_status)
             else:
-                node.status = NodeStatus.SUCCESS
-            node.completed_at = datetime.now(timezone.utc)
-            node.result = result
-            node.output_artifacts = result.get("artifacts", [])
+                final_status = NodeStatus.SUCCESS
+            node = dag.update_node(
+                node_id,
+                status=final_status,
+                completed_at=datetime.now(timezone.utc),
+                result=result,
+                output_artifacts=result.get("artifacts", []),
+            )
 
             # R3: Cleanup leftover artifacts after node success (#240)
             if self.backend_manager and node.owned_files and node.started_at:
@@ -363,8 +386,11 @@ class NodeExecutor:
             # Agent hit a high-risk tool requiring human approval.
             # Do NOT retry, do NOT mark as failed — just pause and re-raise
             # so the Worker can enter its PENDING_APPROVAL poll loop.
-            node.status = NodeStatus.PENDING_APPROVAL
-            node.completed_at = datetime.now(timezone.utc)
+            dag.update_node(
+                node_id,
+                status=NodeStatus.PENDING_APPROVAL,
+                completed_at=datetime.now(timezone.utc),
+            )
             raise
 
         except Exception as e:
@@ -373,7 +399,10 @@ class NodeExecutor:
                 # Node was killed by watchdog; do not retry
                 return
 
-            node.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            node = dag.update_node(
+                node_id,
+                error=f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}",
+            )
 
             # RateLimitError / NodeTimeoutError: do NOT consume retry budget.
             # These are system-level failures (API throttling, LLM latency),
@@ -383,9 +412,12 @@ class NodeExecutor:
                     "rate_limit" if isinstance(e, RateLimitError)
                     else "timeout"
                 )
-                node.status = NodeStatus.FAILED
-                node.completed_at = datetime.now(timezone.utc)
-                node.auto_eval_result = None
+                node = dag.update_node(
+                    node_id,
+                    status=NodeStatus.FAILED,
+                    completed_at=datetime.now(timezone.utc),
+                    auto_eval_result=None,
+                )
                 await self._emit(ExecutionEvent(
                     node_id=node_id,
                     event_type="failed",
@@ -397,7 +429,9 @@ class NodeExecutor:
                 ))
                 return
 
-            node.retry_count += 1
+            node = dag.update_node(
+                node_id, retry_count=node.retry_count + 1,
+            )
 
             if node.retry_count < node.max_retries:
                 # Clean up workspace before retry so setup_node gets a clean
@@ -414,7 +448,7 @@ class NodeExecutor:
                             "Node %s: pre-retry cleanup failed: %s",
                             node_id, cleanup_exc,
                         )
-                node.status = NodeStatus.RETRYING
+                dag.update_node(node_id, status=NodeStatus.RETRYING)
                 await self._emit(ExecutionEvent(
                     node_id=node_id,
                     event_type="retrying",
@@ -424,10 +458,12 @@ class NodeExecutor:
                 await asyncio.sleep(backoff)
                 await self.execute_node(dag, node_id)
             else:
-                node.status = NodeStatus.FAILED
-                node.completed_at = datetime.now(timezone.utc)
-                # Clear stale auto_eval_result on terminal failure (#145).
-                node.auto_eval_result = None
+                dag.update_node(
+                    node_id,
+                    status=NodeStatus.FAILED,
+                    completed_at=datetime.now(timezone.utc),
+                    auto_eval_result=None,
+                )
 
                 await self._emit(ExecutionEvent(
                     node_id=node_id,
