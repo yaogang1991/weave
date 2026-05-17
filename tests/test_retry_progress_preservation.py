@@ -61,17 +61,18 @@ class TestRetryContextInjection:
             svc = RunService.__new__(RunService)
             svc.repository = MagicMock()
             svc.repository.update_job = MagicMock()
-            svc._create_orchestrator = MagicMock()
+            mock_factory = MagicMock()
             orchestrator = MagicMock()
             orchestrator.plan = fake_plan
             orchestrator.replan = AsyncMock(return_value=MagicMock(nodes={}, edges=[]))
-            svc._create_orchestrator.return_value = orchestrator
+            mock_factory.create_orchestrator.return_value = orchestrator
+            svc._execution_factory = mock_factory
             svc._run_before_hooks = AsyncMock()
             svc._run_after_hooks = AsyncMock()
 
             engine = MagicMock()
             engine.execute = AsyncMock(return_value=MagicMock(nodes={}, edges=[]))
-            svc._create_execution_engine = MagicMock(return_value=engine)
+            mock_factory.create_execution_engine.return_value = engine
             svc.artifact_path = tmp_path
             svc.llm_config = MagicMock()
             svc.approval_repo = None
@@ -112,17 +113,18 @@ class TestRetryContextInjection:
             svc = RunService.__new__(RunService)
             svc.repository = MagicMock()
             svc.repository.update_job = MagicMock()
-            svc._create_orchestrator = MagicMock()
+            mock_factory = MagicMock()
             orchestrator = MagicMock()
             orchestrator.plan = fake_plan
             orchestrator.replan = AsyncMock(return_value=MagicMock(nodes={}, edges=[]))
-            svc._create_orchestrator.return_value = orchestrator
+            mock_factory.create_orchestrator.return_value = orchestrator
+            svc._execution_factory = mock_factory
             svc._run_before_hooks = AsyncMock()
             svc._run_after_hooks = AsyncMock()
 
             engine = MagicMock()
             engine.execute = AsyncMock(return_value=MagicMock(nodes={}, edges=[]))
-            svc._create_execution_engine = MagicMock(return_value=engine)
+            mock_factory.create_execution_engine.return_value = engine
             svc.artifact_path = tmp_path
             svc.llm_config = MagicMock()
             svc.approval_repo = None

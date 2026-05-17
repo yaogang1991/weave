@@ -167,14 +167,16 @@ class TestOrchestratorOptimizerWiring:
         learning_hook._scheduler = None
         learning_hook._repository = None
 
-        service._hooks = [MemoryHook(), learning_hook, ImpactHook()]
+        hooks = [MemoryHook(), learning_hook, ImpactHook()]
+        service._hooks = hooks
+        service._execution_factory._hooks = hooks
 
         store = MagicMock(spec=["append", "replay"])
         with patch(
-            "control_plane.service.IntelligentOrchestrator"
+            "control_plane.execution_factory.IntelligentOrchestrator"
         ) as MockOrch:
             MockOrch.return_value = MagicMock()
-            service._create_orchestrator(store)
+            service._execution_factory.create_orchestrator(store)
 
         # IntelligentOrchestrator should have been constructed with learning_optimizer
         _, kwargs = MockOrch.call_args
@@ -183,14 +185,16 @@ class TestOrchestratorOptimizerWiring:
     def test_orchestrator_with_no_optimizer(self):
         """When no hook exposes optimizer, orchestrator gets None."""
         service = _make_service()
-        service._hooks = [MemoryHook(), ImpactHook()]
+        hooks = [MemoryHook(), ImpactHook()]
+        service._hooks = hooks
+        service._execution_factory._hooks = hooks
 
         store = MagicMock(spec=["append", "replay"])
         with patch(
-            "control_plane.service.IntelligentOrchestrator"
+            "control_plane.execution_factory.IntelligentOrchestrator"
         ) as MockOrch:
             MockOrch.return_value = MagicMock()
-            service._create_orchestrator(store)
+            service._execution_factory.create_orchestrator(store)
 
         _, kwargs = MockOrch.call_args
         assert kwargs.get("learning_optimizer") is None
