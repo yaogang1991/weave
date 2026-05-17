@@ -59,6 +59,10 @@ from cli.learning import (  # noqa: E402
 )
 from cli.skills import cmd_skills, cmd_skill, cmd_templates  # noqa: E402
 from cli.impact import cmd_impact_predict, cmd_impact_graph, cmd_impact_history  # noqa: E402
+from cli.args import (  # noqa: E402
+    add_project_arg, add_display_args, add_template_args,
+    add_execution_args, add_self_modify_arg, add_requirement_arg,
+)
 
 
 def main():
@@ -106,111 +110,28 @@ Examples:
 
     # plan command
     plan_parser = subparsers.add_parser("plan", help="Generate execution plan")
-    plan_parser.add_argument(
-        "--project", default=argparse.SUPPRESS,
-        help="Path to project directory (overrides top-level --project)",
-    )
-    plan_parser.add_argument(
-        "--file", "-f", default=None,
-        help="Read requirement from file (avoids shell escaping issues)",
-    )
-    plan_parser.add_argument("requirement", nargs="?", default=None, help="User requirement")
-    plan_parser.add_argument(
-        "--template",
-        help="Use a named DAG template instead of LLM planning",
-    )
-    plan_parser.add_argument(
-        "--var", action="append", default=[], metavar="KEY=VALUE",
-        help="Template variable substitution (repeatable)",
-    )
+    add_project_arg(plan_parser)
+    add_requirement_arg(plan_parser)
+    add_template_args(plan_parser)
     plan_parser.set_defaults(func=cmd_plan)
 
     # execute command
     exec_parser = subparsers.add_parser("execute", help="Execute a saved plan")
-    exec_parser.add_argument(
-        "--project", default=argparse.SUPPRESS,
-        help="Path to project directory (overrides top-level --project)",
-    )
+    add_project_arg(exec_parser)
     exec_parser.add_argument("plan_file", help="Path to plan JSON file")
-    exec_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
-    exec_parser.add_argument(
-        "--visualize", action="store_true",
-        help="Enable visualization and auto-open browser",
-    )
-    exec_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
-    exec_parser.add_argument(
-        "--allow-self-modify", action="store_true",
-        help="Allow agents to modify the weave source tree (NOT recommended)",
-    )
-    exec_parser.add_argument(
-        "--max-parallel", type=int, default=3,
-        help="Max parallel agent executions (default: 3)",
-    )
-    exec_parser.add_argument(
-        "--max-iterations", type=int, default=50,
-        help="Max iterations per agent loop (default: 50)",
-    )
-    exec_parser.add_argument(
-        "--non-interactive", action="store_true",
-        help="Auto-approve all tool calls (no human approval needed)",
-    )
-    exec_parser.add_argument(
-        "--pass-threshold", type=float, default=None,
-        help=(
-            "Evaluation pass threshold >0-10 "
-            "(default: 7.0 from config; lint-only failures downgrade to WARN)"
-        ),
-    )
+    add_display_args(exec_parser)
+    add_self_modify_arg(exec_parser)
+    add_execution_args(exec_parser)
     exec_parser.set_defaults(func=cmd_execute)
 
     # run command (plan + execute)
     run_parser = subparsers.add_parser("run", help="Plan and execute in one step")
-    run_parser.add_argument(
-        "--project", default=argparse.SUPPRESS,
-        help="Path to project directory (overrides top-level --project)",
-    )
-    run_parser.add_argument(
-        "--file", "-f", default=None,
-        help="Read requirement from file (avoids shell escaping issues)",
-    )
-    run_parser.add_argument("requirement", nargs="?", default=None, help="User requirement")
-    run_parser.add_argument(
-        "--template",
-        help="Use a named DAG template instead of LLM planning",
-    )
-    run_parser.add_argument(
-        "--var", action="append", default=[], metavar="KEY=VALUE",
-        help="Template variable substitution (repeatable)",
-    )
-    run_parser.add_argument("--viz", action="store_true",
-                            help="Enable CLI + Web visualization")
-    run_parser.add_argument(
-        "--visualize", action="store_true",
-        help="Enable visualization and auto-open browser")
-    run_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
-    run_parser.add_argument(
-        "--allow-self-modify", action="store_true",
-        help="Allow agents to modify the weave source tree (NOT recommended)",
-    )
-    run_parser.add_argument(
-        "--max-parallel", type=int, default=3,
-        help="Max parallel agent executions (default: 3)",
-    )
-    run_parser.add_argument(
-        "--max-iterations", type=int, default=50,
-        help="Max iterations per agent loop (default: 50)",
-    )
-    run_parser.add_argument(
-        "--pass-threshold", type=float, default=None,
-        help=(
-            "Evaluation pass threshold >0-10 "
-            "(default: 7.0 from config; lint-only failures downgrade to WARN)"
-        ),
-    )
-    run_parser.add_argument(
-        "--non-interactive", action="store_true",
-        help="Auto-approve all tool calls (no human approval needed)",
-    )
+    add_project_arg(run_parser)
+    add_requirement_arg(run_parser)
+    add_template_args(run_parser)
+    add_display_args(run_parser)
+    add_self_modify_arg(run_parser)
+    add_execution_args(run_parser)
     run_parser.add_argument(
         "--timeout", type=int, default=None,
         help="Per-run wall-clock timeout in seconds (default: 1800 from config)",
