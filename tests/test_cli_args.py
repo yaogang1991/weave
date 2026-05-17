@@ -2,12 +2,12 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
+from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
-from cli.args import (
+from cli.args import (  # noqa: E402
     add_project_arg,
     add_display_args,
     add_template_args,

@@ -8,15 +8,15 @@ class TestWeaveMemoryStoreTool:
     def test_memory_store_tool_registered(self):
         """weave.memory_store tool is registered on the MCP server."""
         server = MCPServer("test")
-        from cli.execution import _register_weave_tools
-        _register_weave_tools(server)
+        from cli.mcp_tools import register_weave_tools
+        register_weave_tools(server)
         assert "weave.memory_store" in server._tools
 
     def test_memory_store_handler_returns_dict(self):
         """weave.memory_store handler returns a dict."""
         server = MCPServer("test")
-        from cli.execution import _register_weave_tools
-        _register_weave_tools(server)
+        from cli.mcp_tools import register_weave_tools
+        register_weave_tools(server)
         tool = server._tools["weave.memory_store"]
         result = tool.handler(content="test memory entry")
         assert isinstance(result, dict)
@@ -25,8 +25,8 @@ class TestWeaveMemoryStoreTool:
     def test_memory_store_tool_has_schema(self):
         """weave.memory_store tool has input schema with required content."""
         server = MCPServer("test")
-        from cli.execution import _register_weave_tools
-        _register_weave_tools(server)
+        from cli.mcp_tools import register_weave_tools
+        register_weave_tools(server)
         tool = server._tools["weave.memory_store"]
         assert tool.input_schema is not None
         assert "content" in tool.input_schema.get("properties", {})
@@ -35,8 +35,8 @@ class TestWeaveMemoryStoreTool:
     def test_memory_store_tool_has_optional_params(self):
         """weave.memory_store tool has optional agent_type and scope."""
         server = MCPServer("test")
-        from cli.execution import _register_weave_tools
-        _register_weave_tools(server)
+        from cli.mcp_tools import register_weave_tools
+        register_weave_tools(server)
         tool = server._tools["weave.memory_store"]
         props = tool.input_schema.get("properties", {})
         assert "agent_type" in props
@@ -49,8 +49,8 @@ class TestAllWeaveToolsWithMemoryStore:
     def test_expected_tools_registered(self):
         """All expected Weave tools are registered."""
         server = MCPServer("test")
-        from cli.execution import _register_weave_tools
-        _register_weave_tools(server)
+        from cli.mcp_tools import register_weave_tools
+        register_weave_tools(server)
         expected = {
             "weave.plan",
             "weave.run",

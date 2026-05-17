@@ -2,7 +2,6 @@
 
 Verify that model_copy pattern creates new nodes rather than mutating originals.
 """
-import pytest
 
 from core.models import DAG, DAGNode, NodeStatus
 
