@@ -4,6 +4,7 @@ Inspired by Anthropic's Session design:
 - Session ≠ Context Window
 - Events are durable, context is ephemeral
 - getEvents() provides positional slicing
+- Snapshot + incremental replay avoids full JSONL replay (#454)
 """
 
 import json
@@ -11,9 +12,18 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from core.models import Event, EventType, SessionState, AgentMessage
 
 logger = logging.getLogger(__name__)
+
+
+class SessionSnapshot(BaseModel):
+    """Serialized session state at a point in time (#454)."""
+    state: SessionState
+    event_index: int
+    timestamp: datetime
 
 
 class SessionStore:
@@ -30,6 +40,9 @@ class SessionStore:
 
     def _session_file(self, session_id: str) -> Path:
         return self.base_path / f"{session_id}.jsonl"
+
+    def _snapshot_file(self, session_id: str) -> Path:
+        return self.base_path / f"{session_id}.snapshot.json"
 
     def create_session(self, session_id: str, workflow_name: str) -> SessionState:
         state = SessionState(
@@ -92,16 +105,24 @@ class SessionStore:
         return events
 
     def restore_state(self, session_id: str) -> SessionState:
-        """Replay events to reconstruct session state."""
-        events = self.get_events(session_id)
-        if not events:
-            raise ValueError(f"Session {session_id} not found")
+        """Replay events to reconstruct session state.
 
-        state = SessionState(
-            session_id=session_id,
-            created_at=events[0].timestamp,
-            status="created",
-        )
+        If a snapshot exists, loads it and only replays events after
+        the snapshot point. Otherwise, replays the full event log (#454).
+        """
+        snapshot = self._load_snapshot(session_id)
+        if snapshot is not None:
+            state = snapshot.state
+            events = self.get_events(session_id, start=snapshot.event_index)
+        else:
+            events = self.get_events(session_id)
+            if not events:
+                raise ValueError(f"Session {session_id} not found")
+            state = SessionState(
+                session_id=session_id,
+                created_at=events[0].timestamp,
+                status="created",
+            )
 
         for event in events:
             self._apply_event(state, event)
@@ -222,12 +243,67 @@ class SessionStore:
 
         return result
 
-    def checkpoint(self, session_id: str, label: str) -> None:
-        """Create a named checkpoint by copying current event log."""
-        src = self._session_file(session_id)
-        if src.exists():
-            checkpoint_dir = self.base_path / "checkpoints" / session_id
-            checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            dst = checkpoint_dir / f"{label}.jsonl"
-            import shutil
-            shutil.copy(src, dst)
+    def checkpoint(self, session_id: str, label: str = "") -> None:
+        """Create a snapshot of current state and optionally truncate log.
+
+        Writes a SessionSnapshot file, then truncates the event log up to
+        the snapshot point to control file size (#454).
+
+        Args:
+            session_id: Session to checkpoint.
+            label: Optional label for the checkpoint (used for log message).
+        """
+        state = self.restore_state(session_id)
+        events = self.get_events(session_id)
+        snapshot = SessionSnapshot(
+            state=state,
+            event_index=len(events),
+            timestamp=datetime.now(timezone.utc),
+        )
+        self._save_snapshot(session_id, snapshot)
+        self._truncate_log(session_id, snapshot.event_index)
+        logger.info(
+            "Session %s checkpointed at event %d%s",
+            session_id, snapshot.event_index,
+            f" (label: {label})" if label else "",
+        )
+
+    # -- Snapshot helpers (#454) --
+
+    def _save_snapshot(self, session_id: str, snapshot: SessionSnapshot) -> None:
+        """Write snapshot to disk."""
+        path = self._snapshot_file(session_id)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps(snapshot.model_dump(mode="json"), indent=2, default=str))
+        except OSError as exc:
+            logger.error("Failed to save snapshot for session %s: %s", session_id, exc)
+
+    def _load_snapshot(self, session_id: str) -> SessionSnapshot | None:
+        """Load snapshot from disk, or None if not found."""
+        path = self._snapshot_file(session_id)
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return SessionSnapshot.model_validate(data)
+        except Exception as exc:
+            logger.warning("Failed to load snapshot for session %s: %s", session_id, exc)
+            return None
+
+    def _truncate_log(self, session_id: str, event_index: int) -> None:
+        """Remove events up to event_index from the JSONL log."""
+        path = self._session_file(session_id)
+        if not path.exists():
+            return
+
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+            remaining = lines[event_index:]
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(remaining)
+        except OSError as exc:
+            logger.error(
+                "Failed to truncate log for session %s at %d: %s",
+                session_id, event_index, exc,
+            )
