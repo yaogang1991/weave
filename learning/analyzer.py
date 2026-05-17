@@ -49,8 +49,6 @@ class LearningAnalyzer:
 
         insights: list[LearningInsight] = []
 
-
-
         insights.extend(self._analyze_failure_patterns(metrics))
         insights.extend(self._analyze_success_patterns(metrics, experiences))
         insights.extend(self._analyze_agent_performance(experiences))

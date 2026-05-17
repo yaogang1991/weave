@@ -85,7 +85,9 @@ class MCPServerConfig(BaseModel):
     """Configuration for a single MCP server connection."""
     name: str
     command: str                                      # e.g. "npx", "python"
-    args: list[str] = Field(default_factory=list)     # e.g. ["-y", "@modelcontextprotocol/server-github"]
+    args: list[str] = Field(
+        default_factory=list,
+    )  # e.g. ["-y", "@modelcontextprotocol/server-github"]
     env: dict[str, str] = Field(default_factory=dict)
     enabled: bool = True
     default_risk_level: str = "medium"                # LOW, MEDIUM, HIGH, CRITICAL
@@ -160,6 +162,7 @@ class WatchdogConfig(BaseModel):
         """Minimum missed_count to emit heartbeat_missed event."""
         _, threshold = self.settings_for(agent_type)
         return max(2, int(threshold * self.alert_threshold_fraction))
+
     @classmethod
     def from_env(cls) -> WatchdogConfig:
         """Create from HARNESS_WATCHDOG_* environment variables."""
@@ -493,7 +496,10 @@ class HarnessConfig(BaseModel):
                 ),
                 model=os.getenv(
                     "HARNESS_MODEL",
-                    os.getenv("ANTHROPIC_DEFAULT_SONNET_MODEL", _CLAUDE_ENV.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6")),
+                    os.getenv(
+                        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+                        _CLAUDE_ENV.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6"),
+                    ),
                 ),
                 base_url=os.getenv("ANTHROPIC_BASE_URL", _CLAUDE_ENV.get("ANTHROPIC_BASE_URL", "")),
             ),
@@ -545,8 +551,10 @@ class HarnessConfig(BaseModel):
             ),
             watchdog=WatchdogConfig.from_env(),
             mcp=MCPConfig(
-                auto_discover=os.getenv("HARNESS_MCP_AUTO_DISCOVER", "false").lower()
-                    in ("true", "1", "yes"),
+                auto_discover=(
+                    os.getenv("HARNESS_MCP_AUTO_DISCOVER", "false").lower()
+                    in ("true", "1", "yes")
+                ),
                 connection_timeout=int(os.getenv("HARNESS_MCP_CONNECTION_TIMEOUT", "30")),
             ),
         )

@@ -254,7 +254,9 @@ async def recover_pending_tickets(
 
     for ticket in pending_tickets:
         job = await asyncio.to_thread(repository.get_job, ticket.job_id)
-        if job and job.status not in (JobStatus.RUNNING, JobStatus.LEASED, JobStatus.PENDING_APPROVAL):
+        if job and job.status not in (
+            JobStatus.RUNNING, JobStatus.LEASED, JobStatus.PENDING_APPROVAL,
+        ):
             # Job no longer active but ticket still pending — mark expired
             ticket.status = TicketStatus.EXPIRED
             ticket.decided_by = "auto"

@@ -646,7 +646,6 @@ class DAGExecutionEngine:
         """Proxy to NodeExecutor._collect_input_artifacts for backward compat."""
         return self._node_executor._collect_input_artifacts(dag, node_id, failed_soft)
 
-
     def get_execution_summary(self, dag: DAG) -> dict[str, Any]:
         """Generate a summary of DAG execution results."""
         total = len(dag.nodes)

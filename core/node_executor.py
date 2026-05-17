@@ -207,7 +207,10 @@ class NodeExecutor:
                     node_id, len(previous_artifacts),
                 )
             node.output_artifacts = reported_artifacts
-            logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
+            logger.debug(
+                "Node %s (%s) produced artifacts: %s",
+                node_id, node.agent_type, node.output_artifacts,
+            )
 
             # -- Zero-output fast-fail (#229) --
             if (

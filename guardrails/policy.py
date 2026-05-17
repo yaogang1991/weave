@@ -354,7 +354,10 @@ class Guardrails:
                 return ToolResult(
                     tool_call_id="",
                     success=False,
-                    error=f"Blocked by guardrails: Pending approval required: {result.reason}{ticket}",
+                    error=(
+                        f"Blocked by guardrails: Pending approval required: "
+                        f"{result.reason}{ticket}"
+                    ),
                 )
             return ToolResult(
                 tool_call_id="",

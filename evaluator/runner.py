@@ -195,7 +195,10 @@ def run_lint(
         elif Path(t).is_file() and Path(t).suffix == ".py":
             resolved.append(str(Path(t)))
     if not resolved:
-        return True, "No targets to lint", autofixed_files, auto_formatted_files, lint_new_issues, lint_all_issues
+        return (
+            True, "No targets to lint", autofixed_files,
+            auto_formatted_files, lint_new_issues, lint_all_issues,
+        )
 
     # Auto-fix unused imports/variables via autoflake --in-place (#283).
     autofixed_files = auto_fix_unused(resolved, work_dir)
@@ -347,7 +350,10 @@ def run_lint(
             f"\n{msg}"
         )
 
-    return len(new_issues) == 0, msg, autofixed_files, auto_formatted_files, lint_new_issues, lint_all_issues
+    return (
+        len(new_issues) == 0, msg, autofixed_files,
+        auto_formatted_files, lint_new_issues, lint_all_issues,
+    )
 
 
 def auto_fix_unused(resolved: list[str], work_dir: Path) -> list[str]:
@@ -487,7 +493,7 @@ def import_smoke_test(
         # Convert file path to module path: a/b/c.py -> a.b.c
         rel = p if not p.is_absolute() else p.relative_to(eval_dir)
         module = str(rel.with_suffix("")).replace("/", ".").replace(
-            "\\",".",
+            "\\", ".",
         )
         try:
             result = subprocess.run(

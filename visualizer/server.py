@@ -54,6 +54,7 @@ class MemoryAddRequest(PydanticModel):
     agent_type: str = "shared"
     keywords: list[str] = []
 
+
 # Static files
 static_path = Path(__file__).parent / "static"
 if static_path.exists():
@@ -146,8 +147,13 @@ def _list_sessions() -> list[dict]:
 
         sessions.append({
             "session_id": session_id,
-            "created_at": start_event.timestamp.isoformat() if start_event.timestamp else None,
-            "updated_at": end_event.timestamp.isoformat() if end_event and end_event.timestamp else None,
+            "created_at": (
+                start_event.timestamp.isoformat() if start_event.timestamp else None
+            ),
+            "updated_at": (
+                end_event.timestamp.isoformat()
+                if end_event and end_event.timestamp else None
+            ),
             "event_count": len(events),
             "tool_calls": tool_calls,
             "workflow_stages": len(node_events),

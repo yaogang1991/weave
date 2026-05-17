@@ -138,7 +138,11 @@ def scope_artifacts_to_criteria(
                 pass
         # Match against expected files (prefix match for directories)
         for expected in expected_files:
-            if art_rel == expected or art_rel.endswith("/" + expected) or expected.endswith("/" + art_rel):
+            if (
+                art_rel == expected
+                or art_rel.endswith("/" + expected)
+                or expected.endswith("/" + art_rel)
+            ):
                 scoped.append(art)
                 break
         else:

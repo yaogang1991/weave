@@ -338,7 +338,9 @@ class IntelligentOrchestrator:
                 )
         return dag
 
-    async def adapt_to_failure(self, dag: DAG, failed_node_id: str, error: str = "") -> FailureDecision:
+    async def adapt_to_failure(
+        self, dag: DAG, failed_node_id: str, error: str = "",
+    ) -> FailureDecision:
         """Handle a failed node by asking the orchestrator LLM to decide."""
         failed_node = dag.nodes[failed_node_id]
 

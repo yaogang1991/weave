@@ -168,7 +168,11 @@ class LLMClient:
                     # This signals upstream layers that the failure was due to
                     # rate-limiting, so retry budgets should NOT be consumed.
                     error_lower = str(e).lower()
-                    if "429" in error_lower or "rate_limit" in error_lower or "ratelimit" in error_lower:
+                    if (
+                        "429" in error_lower
+                        or "rate_limit" in error_lower
+                        or "ratelimit" in error_lower
+                    ):
                         raise RateLimitError(
                             provider=self.config.provider,
                             model=self.config.model,
@@ -187,7 +191,11 @@ class LLMClient:
                     raise
 
                 # For 429 / rate-limit: parse reset time and wait
-                if "429" in error_lower or "rate_limit" in error_lower or "ratelimit" in error_lower:
+                if (
+                    "429" in error_lower
+                    or "rate_limit" in error_lower
+                    or "ratelimit" in error_lower
+                ):
                     # #432: Bail early if cumulative sleep already ate
                     # more than 50% of the agent timeout budget.
                     if sleep_budget is not None and cumulative_sleep >= sleep_budget:

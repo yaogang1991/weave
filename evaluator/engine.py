@@ -146,7 +146,11 @@ class EvaluatorEngine:
         self.session_store.emit_event(
             session_id,
             EventType.EVAL_START,
-            {"stage": stage_name, "criteria": [str(c) for c in criteria], "artifact": artifact_path},
+            {
+                "stage": stage_name,
+                "criteria": [str(c) for c in criteria],
+                "artifact": artifact_path,
+            },
         )
 
         structured = normalize_criteria(criteria)
@@ -189,7 +193,7 @@ class EvaluatorEngine:
             if failed_hard:
                 overall_passed = False
             elif score >= self.pass_threshold:
-                soft_failed = [l for l in failed_auto if l not in hard_labels]
+                soft_failed = [label for label in failed_auto if label not in hard_labels]
                 feedback_parts_new: list[str] = []
                 for part in feedback_parts:
                     for label in soft_failed:
@@ -400,7 +404,9 @@ class EvaluatorEngine:
     def _find_test_files(self, output_artifacts: list[str], work_dir: Path) -> list[str]:
         return find_test_files(output_artifacts, work_dir)
 
-    def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None, eval_id: str = "") -> tuple[bool, str]:
+    def _run_tests(
+        self, work_dir: Path, test_path: str | list[str] | None = None, eval_id: str = "",
+    ) -> tuple[bool, str]:
         return run_tests(work_dir, test_path, eval_id)
 
     @staticmethod
@@ -429,10 +435,15 @@ class EvaluatorEngine:
     def _check_files_exist_loose(self, patterns: list[str], base: Path) -> tuple[bool, str]:
         return check_files_exist_loose(patterns, base)
 
-    def _check_coverage(self, work_dir: Path, target: int, output_artifacts: list[str] | None = None, eval_id: str = "") -> tuple[bool, str, bool]:
+    def _check_coverage(
+        self, work_dir: Path, target: int,
+        output_artifacts: list[str] | None = None, eval_id: str = "",
+    ) -> tuple[bool, str, bool]:
         return check_coverage(work_dir, target, output_artifacts, eval_id)
 
-    def _check_no_critical(self, path: Path, artifacts: list[str] | None = None) -> tuple[bool, str]:
+    def _check_no_critical(
+        self, path: Path, artifacts: list[str] | None = None,
+    ) -> tuple[bool, str]:
         return check_no_critical(path, artifacts)
 
     def _extract_percentage(self, text: str) -> int | None:

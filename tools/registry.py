@@ -46,12 +46,14 @@ class ToolRegistry:
     MCP tools: dynamically loaded from MCP servers
     """
 
-    def __init__(self, sandbox_runner: ToolCommandRunner | None = None, base_cwd: str | None = None):
+    def __init__(
+        self, sandbox_runner: ToolCommandRunner | None = None, base_cwd: str | None = None,
+    ):
         self._tools: dict[str, Callable] = {}
         self._schemas: dict[str, dict] = {}
         self.sandbox_runner: ToolCommandRunner | None = sandbox_runner
         self.base_cwd = Path(base_cwd).resolve() if base_cwd else None
-        self._ownership_context: dict[str, list[str]] | None = None  # {"owned": [...], "forbidden": [...], "shared": [...]}
+        self._ownership_context: dict[str, list[str]] | None = None  # owned/forbidden/shared
         self._register_builtin_tools()
 
     def _resolve_path(self, file_path: str) -> Path:
@@ -158,7 +160,10 @@ class ToolRegistry:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Command to execute (runs in PROJECT_ROOT)"},
+                    "command": {
+                        "type": "string",
+                        "description": "Command to execute (runs in PROJECT_ROOT)",
+                    },
                     "timeout": {"type": "integer", "default": 120},
                     "cwd": {
                         "type": "string",
@@ -533,7 +538,10 @@ class ToolRegistry:
                         f"L{i}:{n}c" for i, n in long_lines[:5]
                     )
                     suffix = f" (+{len(long_lines) - 5} more)" if len(long_lines) > 5 else ""
-                    msg += f"\nWARNING: {len(long_lines)} line(s) over 100 chars ({preview}{suffix}). Fix before finishing."
+                    msg += (
+                        f"\nWARNING: {len(long_lines)} line(s) over 100 chars "
+                        f"({preview}{suffix}). Fix before finishing."
+                    )
 
             return ToolResult(tool_call_id="", success=True, output=msg)
         except Exception as e:
@@ -552,12 +560,18 @@ class ToolRegistry:
                 return ToolResult(tool_call_id="", success=False, error=write_error)
             path = self._resolve_path(file_path)
             if not path.exists():
-                return ToolResult(tool_call_id="", success=False, error=f"File not found: {file_path}")
+                return ToolResult(
+                    tool_call_id="", success=False,
+                    error=f"File not found: {file_path}",
+                )
 
             content = path.read_text(encoding="utf-8", errors="replace")
             idx = content.find(old_string)
             if idx == -1:
-                return ToolResult(tool_call_id="", success=False, error="old_string not found in file")
+                return ToolResult(
+                    tool_call_id="", success=False,
+                    error="old_string not found in file",
+                )
 
             line_num = content[:idx].count("\n") + 1
             content = content[:idx] + new_string + content[idx + len(old_string):]
@@ -636,11 +650,17 @@ class ToolRegistry:
                 error=stderr if returncode != 0 else "",
             )
         except subprocess.TimeoutExpired:
-            return ToolResult(tool_call_id="", success=False, error=f"Command timed out after {timeout}s")
+            return ToolResult(
+                tool_call_id="", success=False,
+                error=f"Command timed out after {timeout}s",
+            )
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
 
-    def _tool_glob(self, pattern: str, path: str = ".", max_results: int = _MAX_GLOB_RESULTS) -> ToolResult:
+    def _tool_glob(
+        self, pattern: str, path: str = ".",
+        max_results: int = _MAX_GLOB_RESULTS,
+    ) -> ToolResult:
         try:
             base = self._resolve_path(path)
             matches: list[Path] = []
@@ -658,7 +678,10 @@ class ToolRegistry:
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
 
-    def _tool_grep(self, pattern: str, path: str = ".", file_pattern: str = "*", max_results: int = _MAX_GREP_MATCH_LINES) -> ToolResult:
+    def _tool_grep(
+        self, pattern: str, path: str = ".", file_pattern: str = "*",
+        max_results: int = _MAX_GREP_MATCH_LINES,
+    ) -> ToolResult:
         try:
             base = self._resolve_path(path)
             matches = []

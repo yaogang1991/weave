@@ -227,7 +227,10 @@ class TaskWorker:
             if self._stop_event.is_set():
                 break
 
-            if job.lease_expires_at is not None and datetime.now(timezone.utc) < job.lease_expires_at:
+            if (
+                job.lease_expires_at is not None
+                and datetime.now(timezone.utc) < job.lease_expires_at
+            ):
                 continue
 
             leased_job = await asyncio.to_thread(
@@ -392,7 +395,9 @@ class TaskWorker:
             self.repository, self.run_service, job_id, error, error_category,
         )
 
-    def _finalize_pending_approval_run(self, job_id: str, run_final_status: str, detail_msg: str) -> None:
+    def _finalize_pending_approval_run(
+        self, job_id: str, run_final_status: str, detail_msg: str,
+    ) -> None:
         finalize_pending_approval_run(self.repository, job_id, run_final_status, detail_msg)
 
     async def _poll_for_approval(self, job_id: str, ticket_id: str) -> JobStatus:

@@ -169,7 +169,10 @@ async def execute_job_core(
             )
             _json_log(
                 "INFO",
-                f"Job finished with status {current_job.status.value if current_job else 'unknown'}",
+                (
+                    f"Job finished with status "
+                    f"{current_job.status.value if current_job else 'unknown'}"
+                ),
                 job_id=job_id,
                 status=current_job.status.value if current_job else "unknown",
             )
@@ -263,7 +266,10 @@ async def execute_job_core(
                 except PendingApprovalError as pa_exc:
                     _json_log(
                         "INFO",
-                        f"Post-approval execution requires another approval (ticket: {pa_exc.ticket_id})",
+                        (
+                            f"Post-approval execution requires another approval "
+                            f"(ticket: {pa_exc.ticket_id})"
+                        ),
                         job_id=job_id,
                         status=JobStatus.PENDING_APPROVAL.value,
                         extra={"ticket_id": pa_exc.ticket_id},

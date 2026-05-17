@@ -65,7 +65,9 @@ def _classify_error(error: str) -> str:
         return "timeout"
     if "timeout" in lowered or "timed out" in lowered:
         return "timeout"
-    if "coverage" in lowered and ("below target" in lowered or "could not be verified" in lowered or "not verified" in lowered):
+    if "coverage" in lowered and (
+        "below target" in lowered or "could not be verified" in lowered or "not verified" in lowered
+    ):
         return "coverage_low"
     if "evaluation failed" in lowered or "eval_" in lowered:
         return "eval_failed"
@@ -322,7 +324,9 @@ class RunService:
 
             # --- Core execution (with task-level timeout) ---
             result_dag = await asyncio.wait_for(
-                self._execute_plan_and_run(job, session_id, store, work_dir, run.id, backend_manager),
+                self._execute_plan_and_run(
+                    job, session_id, store, work_dir, run.id, backend_manager,
+                ),
                 timeout=timeout,
             )
 
@@ -375,8 +379,6 @@ class RunService:
                     ]
                     error_msg = "; ".join(errors)
                     error_cat = _classify_error(error_msg)
-
-
 
                 # Must transition RUNNING -> FAILED before handle_job_failure
                 self.repository.transition_job_status(
@@ -659,4 +661,3 @@ class RunService:
             self.repository.update_job(job)
 
         return result_dag
-

@@ -403,7 +403,10 @@ class JobRepository:
     def list_active_jobs(self) -> list[Job]:
         """Return jobs that are queued, leased, running, or pending approval."""
         active: list[Job] = []
-        for status in (JobStatus.QUEUED, JobStatus.LEASED, JobStatus.RUNNING, JobStatus.PENDING_APPROVAL):
+        for status in (
+            JobStatus.QUEUED, JobStatus.LEASED,
+            JobStatus.RUNNING, JobStatus.PENDING_APPROVAL,
+        ):
             active.extend(self.list_jobs(status=status))
         active.sort(key=lambda j: j.created_at)
         return active

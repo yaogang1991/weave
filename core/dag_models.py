@@ -131,11 +131,13 @@ class DAGNode(BaseModel):
     output_artifacts: list[str] = Field(default_factory=list)
     success_criteria: list[str | SuccessCriterion] = Field(default_factory=list)
     eval_feedback: str = ""  # Evaluator feedback, passed back on retry
-    auto_eval_result: dict[str, Any] | None = None  # Auto-eval result for downstream evaluator agents (#145)
+    auto_eval_result: dict[str, Any] | None = None  # Auto-eval result for downstream agents (#145)
     max_retries: int = 3
     retry_count: int = 0
     workspace_strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
-    owned_files: list[str] = Field(default_factory=list)  # Files this node exclusively creates (#272)
+    owned_files: list[str] = Field(
+        default_factory=list,
+    )  # Files this node exclusively creates (#272)
     started_at: datetime | None = None
     completed_at: datetime | None = None
 
@@ -178,7 +180,10 @@ class DAGNode(BaseModel):
         try:
             return SuccessCriterion(**data)
         except Exception:
-            safe = {k: v for k, v in data.items() if k in ("description", "path", "target", "test_path")}
+            safe = {
+                k: v for k, v in data.items()
+                if k in ("description", "path", "target", "test_path")
+            }
             safe["type"] = "custom"
             return SuccessCriterion(**safe)
 

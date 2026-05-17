@@ -76,9 +76,14 @@ class CLIDAGRenderer:
     def render_dag(self, dag: DAG) -> None:
         """Print the DAG structure before execution."""
         print()
-        print(f"{self.BOLD}╔══════════════════════════════════════════════════════════════╗{self.RESET}")
-        print(f"{self.BOLD}║                 DAG Execution Plan                          ║{self.RESET}")
-        print(f"{self.BOLD}╚══════════════════════════════════════════════════════════════╝{self.RESET}")
+        hline = "══════════════════════════════════════════════════════════════"
+        print(f"{self.BOLD}╔{hline}╗{self.RESET}")
+        print(
+            f"{self.BOLD}"
+            f"║                 DAG Execution Plan                          ║"
+            f"{self.RESET}"
+        )
+        print(f"{self.BOLD}╚{hline}╝{self.RESET}")
         print()
 
         levels = dag.topological_levels()
@@ -127,14 +132,20 @@ class CLIDAGRenderer:
         skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
 
         print()
-        print(f"{self.BOLD}╔══════════════════════════════════════════════════════════════╗{self.RESET}")
-        print(f"{self.BOLD}║              Execution Summary                               ║{self.RESET}")
-        print(f"{self.BOLD}╠══════════════════════════════════════════════════════════════╣{self.RESET}")
-        print(f"{self.BOLD}║{self.RESET}  Total Nodes:   {total:3}                                        {self.BOLD}║{self.RESET}")
-        print(f"{self.BOLD}║{self.RESET}  ✅ Success:    {success:3}                                        {self.BOLD}║{self.RESET}")
-        print(f"{self.BOLD}║{self.RESET}  ❌ Failed:     {failed:3}                                        {self.BOLD}║{self.RESET}")
-        print(f"{self.BOLD}║{self.RESET}  ⏭️ Skipped:    {skipped:3}                                        {self.BOLD}║{self.RESET}")
-        print(f"{self.BOLD}╚══════════════════════════════════════════════════════════════╝{self.RESET}")
+        hline = "══════════════════════════════════════════════════════════════"
+        print(f"{self.BOLD}╔{hline}╗{self.RESET}")
+        print(
+            f"{self.BOLD}"
+            f"║              Execution Summary                               ║"
+            f"{self.RESET}"
+        )
+        print(f"{self.BOLD}╠{hline}╣{self.RESET}")
+        pad = "                                        "
+        print(f"{self.BOLD}║{self.RESET}  Total Nodes:   {total:3}{pad}{self.BOLD}║{self.RESET}")
+        print(f"{self.BOLD}║{self.RESET}  ✅ Success:    {success:3}{pad}{self.BOLD}║{self.RESET}")
+        print(f"{self.BOLD}║{self.RESET}  ❌ Failed:     {failed:3}{pad}{self.BOLD}║{self.RESET}")
+        print(f"{self.BOLD}║{self.RESET}  ⏭️ Skipped:    {skipped:3}{pad}{self.BOLD}║{self.RESET}")
+        print(f"{self.BOLD}╚{hline}╝{self.RESET}")
         print()
 
     def _print_event(

@@ -376,7 +376,11 @@ async def cmd_execute(args, dag: DAG | None = None):
         else:
             print("\nAgent requested approval but no ticket was created.", flush=True)
             print("This may be a configuration issue.", flush=True)
-        print("For local auto-approval: set HARNESS_NON_INTERACTIVE=true or use --non-interactive.", flush=True)
+        print(
+            "For local auto-approval: set HARNESS_NON_INTERACTIVE=true "
+            "or use --non-interactive.",
+            flush=True,
+        )
         return None
     except Exception as exc:
         store.emit_event(session_id, EventType.SESSION_ERROR, {

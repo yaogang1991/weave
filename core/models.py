@@ -65,7 +65,7 @@ from core.memory_models import (
     MemoryScope,
     MemoryType,
 )
-from core.analysis_models import (  # noqa: F401 — VerificationResult re-exported for backward compat
+from core.analysis_models import (  # noqa: F401 — backward-compat re-export
     DAGTemplate,
     ImpactRiskLevel,
     ImpactScope,

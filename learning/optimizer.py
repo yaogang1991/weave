@@ -72,7 +72,10 @@ class LearningOptimizer:
     def get_planning_hints(self, requirement: str = "") -> str:
         """Format relevant insights as planning hints for the orchestrator."""
         # Use store search with requirement as query for relevance
-        query = f"planning recommendation {requirement}" if requirement else "planning recommendation"
+        query = (
+            f"planning recommendation {requirement}"
+            if requirement else "planning recommendation"
+        )
         memories = self.memory_manager.store.search(
             query=query,
             scope=MemoryScope.GLOBAL,

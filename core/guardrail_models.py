@@ -60,7 +60,7 @@ class PersonalGuardrailPolicy(GuardrailPolicy):
         "wc",        # count lines/words
         "find",      # find files
         "python -m pytest",  # run tests
-        "python3 -m pytest", # run tests (alt)
+        "python3 -m pytest",  # run tests (alt)
         "pytest",    # run tests (direct)
     ])
     auto_approve_high: bool = False

@@ -190,7 +190,11 @@ class KnowledgeIndex:
         }
         # Match Latin words (a-zA-Z_) and CJK characters (Unicode ranges)
         words = re.findall(r"[a-zA-Z_]+|[\u4e00-\u9fff\u3400-\u4dbf]+", text.lower())
-        return [w for w in words if w not in stop_words and (len(w) > 2 or any('\u4e00' <= c <= '\u9fff' for c in w))]
+        return [
+            w for w in words
+            if w not in stop_words
+            and (len(w) > 2 or any('\u4e00' <= c <= '\u9fff' for c in w))
+        ]
 
     def get_relevant_context(
         self,

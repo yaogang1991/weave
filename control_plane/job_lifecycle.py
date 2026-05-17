@@ -171,7 +171,10 @@ class JobLifecycleManager:
                 "message": "Worker poll loop will detect approval and resume",
             })
             runs = self.repository.list_runs_by_job(job_id)
-            active_runs = [r for r in runs if r.status in {RunStatus.RUNNING, RunStatus.PENDING_APPROVAL}]
+            active_runs = [
+                r for r in runs
+                if r.status in {RunStatus.RUNNING, RunStatus.PENDING_APPROVAL}
+            ]
             return active_runs[-1] if active_runs else None
 
         # Legacy path for RUNNING/LEASED jobs

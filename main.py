@@ -46,7 +46,9 @@ from cli.jobs import (
     cmd_submit, cmd_status, cmd_list_jobs, cmd_cancel,
     cmd_worker, cmd_recover, cmd_console,
 )
-from control_plane.approval import ApprovalRepository as ApprovalRepository  # noqa: F401 — backward-compat re-export
+from control_plane.approval import (  # noqa: F401 — backward-compat re-export
+    ApprovalRepository as ApprovalRepository,
+)
 from cli.approval import cmd_tickets, cmd_approve, cmd_reject
 from cli.memory import (
     cmd_memory_search, cmd_memory_list, cmd_memory_stats,
@@ -129,7 +131,10 @@ Examples:
     )
     exec_parser.add_argument("plan_file", help="Path to plan JSON file")
     exec_parser.add_argument("--viz", action="store_true", help="Enable CLI + Web visualization")
-    exec_parser.add_argument("--visualize", action="store_true", help="Enable visualization and auto-open browser")
+    exec_parser.add_argument(
+        "--visualize", action="store_true",
+        help="Enable visualization and auto-open browser",
+    )
     exec_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     exec_parser.add_argument(
         "--allow-self-modify", action="store_true",
@@ -149,7 +154,10 @@ Examples:
     )
     exec_parser.add_argument(
         "--pass-threshold", type=float, default=None,
-        help="Evaluation pass threshold >0-10 (default: 7.0 from config; lint-only failures downgrade to WARN)",
+        help=(
+            "Evaluation pass threshold >0-10 "
+            "(default: 7.0 from config; lint-only failures downgrade to WARN)"
+        ),
     )
     exec_parser.set_defaults(func=cmd_execute)
 
@@ -192,7 +200,10 @@ Examples:
     )
     run_parser.add_argument(
         "--pass-threshold", type=float, default=None,
-        help="Evaluation pass threshold >0-10 (default: 7.0 from config; lint-only failures downgrade to WARN)",
+        help=(
+            "Evaluation pass threshold >0-10 "
+            "(default: 7.0 from config; lint-only failures downgrade to WARN)"
+        ),
     )
     run_parser.add_argument(
         "--non-interactive", action="store_true",
@@ -223,8 +234,12 @@ Examples:
     submit_parser = subparsers.add_parser("submit", help="Submit a new job")
     submit_parser.add_argument("requirement", help="Task requirement")
     submit_parser.add_argument("--project", help="Project path")
-    submit_parser.add_argument("--timeout", type=int, default=1800, help="Timeout in seconds (default: 1800)")
-    submit_parser.add_argument("--max-attempts", type=int, default=3, help="Max retry attempts (default: 3)")
+    submit_parser.add_argument(
+        "--timeout", type=int, default=1800, help="Timeout in seconds (default: 1800)",
+    )
+    submit_parser.add_argument(
+        "--max-attempts", type=int, default=3, help="Max retry attempts (default: 3)",
+    )
     submit_parser.add_argument(
         "--allow-self-modify", action="store_true",
         help="Allow agents to modify the harness source tree (NOT recommended)",
@@ -236,7 +251,9 @@ Examples:
     status_parser.set_defaults(func=cmd_status)
 
     list_parser = subparsers.add_parser("list", help="List jobs")
-    list_parser.add_argument("--status", choices=[s.value for s in JobStatus], help="Filter by status")
+    list_parser.add_argument(
+        "--status", choices=[s.value for s in JobStatus], help="Filter by status",
+    )
     list_parser.set_defaults(func=cmd_list_jobs)
 
     cancel_parser = subparsers.add_parser("cancel", help="Cancel a job")
@@ -244,8 +261,12 @@ Examples:
     cancel_parser.set_defaults(func=cmd_cancel)
 
     worker_parser = subparsers.add_parser("worker", help="Start worker")
-    worker_parser.add_argument("--concurrency", type=int, default=1, help="Number of concurrent jobs (default: 1)")
-    worker_parser.add_argument("--poll-interval", type=int, default=5, help="Poll interval in seconds (default: 5)")
+    worker_parser.add_argument(
+        "--concurrency", type=int, default=1, help="Number of concurrent jobs (default: 1)",
+    )
+    worker_parser.add_argument(
+        "--poll-interval", type=int, default=5, help="Poll interval in seconds (default: 5)",
+    )
     worker_parser.add_argument("--non-interactive", action="store_true",
                                help="Run in non-interactive mode (no stdin approval)")
     worker_parser.set_defaults(func=cmd_worker)
@@ -286,7 +307,9 @@ Examples:
     mem_search_parser.add_argument("query", help="Search query")
     mem_search_parser.add_argument("--agent", help="Filter by agent type")
     mem_search_parser.add_argument("--scope", choices=["private", "session", "global"])
-    mem_search_parser.add_argument("--type", choices=["fact", "experience", "preference", "context"])
+    mem_search_parser.add_argument(
+        "--type", choices=["fact", "experience", "preference", "context"],
+    )
     mem_search_parser.add_argument("--limit", type=int, default=10)
     mem_search_parser.set_defaults(func=cmd_memory_search)
 
@@ -301,8 +324,12 @@ Examples:
 
     mem_add_parser = subparsers.add_parser("memory-add", help="Add a manual memory entry")
     mem_add_parser.add_argument("content", help="Memory content")
-    mem_add_parser.add_argument("--type", choices=["fact", "experience", "preference", "context"], default="fact")
-    mem_add_parser.add_argument("--scope", choices=["private", "session", "global"], default="global")
+    mem_add_parser.add_argument(
+        "--type", choices=["fact", "experience", "preference", "context"], default="fact",
+    )
+    mem_add_parser.add_argument(
+        "--scope", choices=["private", "session", "global"], default="global",
+    )
     mem_add_parser.add_argument("--agent", default="shared")
     mem_add_parser.add_argument("--keywords", nargs="+", default=[])
     mem_add_parser.set_defaults(func=cmd_memory_add)
@@ -314,10 +341,14 @@ Examples:
     # Learning commands (M3.3)
     # ------------------------------------------------------------------
 
-    learn_analyze_parser = subparsers.add_parser("learning-analyze", help="Trigger learning analysis")
+    learn_analyze_parser = subparsers.add_parser(
+        "learning-analyze", help="Trigger learning analysis",
+    )
     learn_analyze_parser.set_defaults(func=cmd_learning_analyze)
 
-    learn_insights_parser = subparsers.add_parser("learning-insights", help="List learning insights")
+    learn_insights_parser = subparsers.add_parser(
+        "learning-insights", help="List learning insights",
+    )
     learn_insights_parser.add_argument("--limit", type=int, default=20)
     learn_insights_parser.set_defaults(func=cmd_learning_insights)
 
@@ -340,8 +371,10 @@ Examples:
 
     skill_parser = subparsers.add_parser("skill", help="Invoke a skill")
     skill_parser.add_argument("name", help="Skill name")
-    skill_parser.add_argument("--var", action="append", default=[], metavar="KEY=VALUE",
-        help="Skill variable (repeatable)")
+    skill_parser.add_argument(
+        "--var", action="append", default=[], metavar="KEY=VALUE",
+        help="Skill variable (repeatable)",
+    )
     skill_parser.add_argument("--project", default=".", help="Project path")
     skill_parser.add_argument("--max-parallel", type=int, default=3)
     skill_parser.add_argument("--max-iterations", type=int, default=50)
