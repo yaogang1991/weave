@@ -13,7 +13,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from visualizer.event_bridge import WebSocketEventBridge
-from visualizer.cli_renderer import CLIDAGRenderer
+from visualizer.event_bridge import WebSocketEventBridge  # noqa: E402
+from visualizer.cli_renderer import CLIDAGRenderer  # noqa: E402
 
 __all__ = ["WebSocketEventBridge", "CLIDAGRenderer"]

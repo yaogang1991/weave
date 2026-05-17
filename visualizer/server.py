@@ -22,18 +22,18 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel as PydanticModel
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.responses import HTMLResponse  # noqa: E402
+from pydantic import BaseModel as PydanticModel  # noqa: E402
 
-from visualizer.event_bridge import WebSocketEventBridge
-from session.store import SessionStore
-from core.config import HarnessConfig
+from visualizer.event_bridge import WebSocketEventBridge  # noqa: E402
+from session.store import SessionStore  # noqa: E402
+from core.config import HarnessConfig  # noqa: E402
 
-from control_plane.models import JobStatus
-from control_plane.repository import JobRepository
-from control_plane.approval import ApprovalRepository, TicketStatus
+from control_plane.models import JobStatus  # noqa: E402
+from control_plane.repository import JobRepository  # noqa: E402
+from control_plane.approval import ApprovalRepository, TicketStatus  # noqa: E402
 
 
 app = FastAPI(title="Harness Visualizer", version="2.0")

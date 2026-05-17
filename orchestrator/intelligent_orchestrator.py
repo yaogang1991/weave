@@ -44,7 +44,7 @@ from orchestrator.plan_validator import PlanValidator, PlanValidationError
 from orchestrator.prompts import PromptRegistry, get_prompt_registry
 
 logger = logging.getLogger(__name__)
-from templates.library import TemplateRegistry
+from templates.library import TemplateRegistry  # noqa: E402
 
 
 # Infrastructure errors cannot be fixed by retrying with the same environment.

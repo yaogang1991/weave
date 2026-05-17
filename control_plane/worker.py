@@ -34,15 +34,15 @@ from typing import Any
 # Ensure project root is on sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from control_plane.repository import JobRepository
-from control_plane.service import RunService
-from control_plane.models import JobStatus
-from control_plane.worker_recovery import (
+from control_plane.repository import JobRepository  # noqa: E402
+from control_plane.service import RunService  # noqa: E402
+from control_plane.models import JobStatus  # noqa: E402
+from control_plane.worker_recovery import (  # noqa: E402
     _json_log,
     recover_orphan_jobs,
     recover_pending_tickets,
 )
-from control_plane.worker_executor import (
+from control_plane.worker_executor import (  # noqa: E402
     classify_error,
     execute_job_core,
     finalize_pending_approval_run,

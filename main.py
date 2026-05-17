@@ -31,32 +31,34 @@ if hasattr(sys.stderr, "reconfigure"):
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from control_plane.models import JobStatus
-from control_plane.approval import TicketStatus
+from control_plane.models import JobStatus  # noqa: E402
+from control_plane.approval import TicketStatus  # noqa: E402
 
 # Import CLI command handlers from domain modules
-from cli.execution import cmd_plan, cmd_execute, cmd_run, cmd_viz
-from cli.utils import (  # noqa: F401 — backward-compat re-exports used by tests
+from cli.execution import cmd_plan, cmd_execute, cmd_run, cmd_viz  # noqa: E402
+from cli.utils import (  # noqa: E402, F401 — backward-compat re-exports used by tests
     _resolve_project_path,
     _check_dirty_workspace,
     _check_stdlib_shadowing,
     _parse_template_vars,
 )
-from cli.jobs import (
+from cli.jobs import (  # noqa: E402
     cmd_submit, cmd_status, cmd_list_jobs, cmd_cancel,
     cmd_worker, cmd_recover, cmd_console,
 )
-from control_plane.approval import (  # noqa: F401 — backward-compat re-export
+from control_plane.approval import (  # noqa: E402, F401 — backward-compat re-export
     ApprovalRepository as ApprovalRepository,
 )
-from cli.approval import cmd_tickets, cmd_approve, cmd_reject
-from cli.memory import (
+from cli.approval import cmd_tickets, cmd_approve, cmd_reject  # noqa: E402
+from cli.memory import (  # noqa: E402
     cmd_memory_search, cmd_memory_list, cmd_memory_stats,
     cmd_memory_add, cmd_memory_cleanup,
 )
-from cli.learning import cmd_learning_analyze, cmd_learning_insights, cmd_learning_status
-from cli.skills import cmd_skills, cmd_skill, cmd_templates
-from cli.impact import cmd_impact_predict, cmd_impact_graph, cmd_impact_history
+from cli.learning import (  # noqa: E402
+    cmd_learning_analyze, cmd_learning_insights, cmd_learning_status,
+)
+from cli.skills import cmd_skills, cmd_skill, cmd_templates  # noqa: E402
+from cli.impact import cmd_impact_predict, cmd_impact_graph, cmd_impact_history  # noqa: E402
 
 
 def main():
