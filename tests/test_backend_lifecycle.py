@@ -6,7 +6,6 @@ properly encapsulated and testable without full job execution.
 """
 import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
-from pathlib import Path
 
 from control_plane.backend_lifecycle import BackendLifecycleService
 

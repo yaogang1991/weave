@@ -8,7 +8,7 @@ Verifies:
 """
 import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from core.config import LLMConfig

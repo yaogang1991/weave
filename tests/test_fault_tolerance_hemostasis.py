@@ -14,12 +14,12 @@ Covers:
 
 import asyncio
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from core.exceptions import NodeTimeoutError, RateLimitError
-from core.models import (
+from core.models import (  # noqa: F401
     DAG, DAGNode, DAGEdge, NodeStatus, HandoffArtifact,
 )
 
@@ -160,7 +160,7 @@ class TestLLMSleepCap:
         client = LLMClient(config)
 
         sleep_times = []
-        original_sleep = time.sleep
+        _original_sleep = time.sleep  # noqa: F841
 
         def mock_sleep(seconds):
             sleep_times.append(seconds)
@@ -243,7 +243,7 @@ class TestCooperativeCancellation:
         import threading
 
         from core.config import LLMConfig
-        from core.llm_client import LLMClient
+        from core.llm_client import LLMClient  # noqa: F401
         from session.store import SessionStore
         from agent.worker import AgentWorker
 
@@ -280,7 +280,7 @@ class TestCooperativeCancellation:
 
         worker.llm.call = mock_call
 
-        messages = list(worker.run(
+        list(worker.run(  # noqa: F841
             session_id="test",
             system_prompt="test",
             user_message="test",

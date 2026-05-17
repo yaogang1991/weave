@@ -11,10 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from control_plane.models import Job, JobStatus, RetryPolicy
-from control_plane.service import _scan_existing_files
 
 
 def _utc_now() -> datetime:
@@ -152,7 +150,6 @@ class TestRetryContextInPrompt:
         """When project_context has retry_attempt > 0, prompt includes continuation."""
         from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
         from core.agent_registry import AgentRegistry
-        from core.config import LLMConfig
 
         # Capture what gets sent to LLM
         captured_messages = []

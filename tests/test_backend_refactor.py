@@ -1,13 +1,13 @@
 """Tests for backend architecture refactor (orthogonal dimensions)."""
 
-import asyncio
+import asyncio  # noqa: F401
 import pytest
 
-from backend.base import ExecutionBackend, WorkspaceIsolation, ExecutionSandbox
+from backend.base import WorkspaceIsolation, ExecutionSandbox
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
-from backend.sandbox import SandboxProvider, LocalSandbox, DockerSandbox, CommandResult
-from backend.lifecycle import BackendManager, HookResult, HookError
+from backend.sandbox import LocalSandbox, DockerSandbox
+from backend.lifecycle import BackendManager, HookError
 
 
 class TestWorkspaceIsolation:

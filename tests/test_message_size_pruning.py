@@ -9,7 +9,7 @@ Verifies:
 """
 import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from core.config import LLMConfig
@@ -154,7 +154,7 @@ class TestPlanIntegration:
         orch.llm = MagicMock()
         orch.llm.call = mock_call
 
-        dag = await orch.plan("Build API")
+        await orch.plan("Build API")  # noqa: F841
 
         assert call_count == 2
         # The second call's messages should have been pruned

@@ -8,7 +8,6 @@ Verifies that:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
 
 
 def test_generator_prompt_has_import_verification_rule():

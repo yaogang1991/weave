@@ -8,9 +8,9 @@ Key scenarios:
 4. Generator with non-file criteria (TESTS_PASS only) -> not fast-failed
 5. Generator with FILE_EXISTS criteria, zero output -> fast-failed
 """
-import asyncio
+import asyncio  # noqa: F401
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
 from core.models import (
     DAG, DAGNode, NodeStatus, FailureDecision,

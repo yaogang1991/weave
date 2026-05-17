@@ -5,7 +5,7 @@ Ensures empty/malformed tool calls return clear error messages
 instead of proceeding to the tool executor.
 """
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch, call  # noqa: F401
 
 from agent.worker import AgentWorker, TOOL_REQUIRED_ARGS, TOOL_NON_EMPTY_ARGS
 from core.models import ToolResult

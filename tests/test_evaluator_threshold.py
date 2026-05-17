@@ -12,7 +12,6 @@ Covers:
 """
 import argparse
 import pytest
-from unittest.mock import MagicMock, patch
 
 from core.models import CriterionType, SuccessCriterion
 from evaluator.engine import EvaluatorEngine

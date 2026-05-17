@@ -7,13 +7,10 @@ fileutils/test_hasher.py) but the agent places them in tests/
 them via fallback search.
 """
 import pytest
-from pathlib import Path
 
 from evaluator.checkers.file_exists import FileExistsChecker
 from evaluator.engine import EvaluatorEngine
-from evaluator.models import EvaluationContext
 from core.models import SuccessCriterion, CriterionType
-from unittest.mock import MagicMock
 
 
 @pytest.fixture

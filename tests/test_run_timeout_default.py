@@ -5,8 +5,6 @@ The default run_timeout_sec is 1800 (30 min) instead of the old 600 (10 min),
 and is configurable via HARNESS_RUN_TIMEOUT_SEC env var or CLI --timeout.
 """
 import inspect
-import os
-import pytest
 
 from core.config import HarnessConfig
 

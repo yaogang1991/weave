@@ -6,8 +6,6 @@ from __future__ import annotations
 
 import itertools
 import json
-import shutil
-import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

@@ -5,8 +5,6 @@ Verifies:
 1. TESTS_PASS warns (not passes) when no test files exist
 2. Artifact verification catches phantom output files
 """
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from core.models import CriterionType, SuccessCriterion

@@ -3,7 +3,6 @@
 Regression tests for issue #161: when --project is not specified and cwd is
 inside the harness source tree, the CLI must refuse to run.
 """
-import os
 import sys
 from pathlib import Path
 from unittest.mock import patch

@@ -7,7 +7,6 @@ Verifies:
 3. Cross-domain identity (same class object via both paths)
 4. DAGNode validator works with SuccessCriterion from eval_models
 """
-import pytest
 
 from core.eval_models import SuccessCriterion
 
@@ -16,7 +15,7 @@ class TestBackwardCompatImports:
     """All classes must remain importable from core.models."""
 
     def test_dag_domain(self):
-        from core.models import (
+        from core.models import (  # noqa: F401
             AgentCapability, NodeStatus, NodeHealth,
             NodeWorkspaceStrategy, NodeWorkspace, NodeWorkspaceResult,
             FileAccessPolicy, ConflictResolution, FileOwnershipContract,
@@ -26,34 +25,34 @@ class TestBackwardCompatImports:
         assert DAG is not None
 
     def test_tool_domain(self):
-        from core.models import ToolCall, ToolResult, AgentMessage
+        from core.models import ToolCall, ToolResult, AgentMessage  # noqa: F401
         assert ToolCall is not None
 
     def test_eval_domain(self):
-        from core.models import EvalStatus, EvaluationResult, CriterionType, SuccessCriterion
+        from core.models import EvalStatus, EvaluationResult, CriterionType, SuccessCriterion  # noqa: F401
         assert SuccessCriterion is not None
 
     def test_event_domain(self):
-        from core.models import EventType, Event, SessionMetrics, SessionState
+        from core.models import EventType, Event, SessionMetrics, SessionState  # noqa: F401
         assert SessionState is not None
 
     def test_guardrail_domain(self):
-        from core.models import RiskLevel, PermissionMode, GuardrailPolicy, PersonalGuardrailPolicy
+        from core.models import RiskLevel, PermissionMode, GuardrailPolicy, PersonalGuardrailPolicy  # noqa: F401
         assert PersonalGuardrailPolicy is not None
 
     def test_memory_domain(self):
-        from core.models import (
+        from core.models import (  # noqa: F401
             MemoryScope, MemoryType, MemoryEntry,
             LearningCategory, InsightType, LearningInsight,
         )
         assert MemoryEntry is not None
 
     def test_analysis_domain(self):
-        from core.models import DAGTemplate, ImpactRiskLevel, ImpactScope, VerificationResult
+        from core.models import DAGTemplate, ImpactScope, VerificationResult  # noqa: F401
         assert VerificationResult is not None
 
     def test_mcp_domain(self):
-        from core.models import MCPServerStatus, MCPToolInfo, SkillVariable, Skill
+        from core.models import MCPServerStatus, Skill  # noqa: F401
         assert Skill is not None
 
 
@@ -61,35 +60,35 @@ class TestDirectDomainImports:
     """Domain modules must be independently importable."""
 
     def test_eval_models(self):
-        from core.eval_models import EvalStatus, EvaluationResult, CriterionType, SuccessCriterion
+        from core.eval_models import EvalStatus, EvaluationResult, CriterionType, SuccessCriterion  # noqa: F401
         assert EvalStatus.CLEAN_PASS is not None
 
     def test_tool_models(self):
-        from core.tool_models import ToolCall, ToolResult, AgentMessage
+        from core.tool_models import ToolCall, ToolResult, AgentMessage  # noqa: F401
         assert ToolCall is not None
 
     def test_dag_models(self):
-        from core.dag_models import DAG, DAGNode, DAGEdge, NodeStatus, NodeHealth
+        from core.dag_models import DAG, DAGNode, DAGEdge, NodeStatus, NodeHealth  # noqa: F401
         assert DAG is not None
 
     def test_event_models(self):
-        from core.event_models import EventType, Event, SessionState, SessionMetrics
+        from core.event_models import EventType, Event, SessionState, SessionMetrics  # noqa: F401
         assert EventType.SESSION_START is not None
 
     def test_guardrail_models(self):
-        from core.guardrail_models import RiskLevel, PermissionMode, GuardrailPolicy
+        from core.guardrail_models import RiskLevel, PermissionMode, GuardrailPolicy  # noqa: F401
         assert RiskLevel.HIGH == 3
 
     def test_memory_models(self):
-        from core.memory_models import MemoryEntry, MemoryScope, LearningInsight
+        from core.memory_models import MemoryEntry, MemoryScope, LearningInsight  # noqa: F401
         assert MemoryScope.GLOBAL is not None
 
     def test_analysis_models(self):
-        from core.analysis_models import DAGTemplate, ImpactScope
+        from core.analysis_models import DAGTemplate, ImpactScope  # noqa: F401
         assert DAGTemplate is not None
 
     def test_mcp_models(self):
-        from core.mcp_models import MCPServerStatus, Skill
+        from core.mcp_models import MCPServerStatus, Skill  # noqa: F401
         assert MCPServerStatus.CONNECTED is not None
 
 

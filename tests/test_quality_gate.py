@@ -4,9 +4,7 @@ Tests for #177 PR4: QualityGate extraction from DAGExecutionEngine.
 Verifies that evaluation logic, feedback construction, and regression
 handling work correctly as an independent service.
 """
-import pytest
 from unittest.mock import MagicMock
-from datetime import datetime, timezone
 
 from core.quality_gate import QualityGate, EvaluationOutcome
 from core.models import (

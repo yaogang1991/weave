@@ -1,9 +1,9 @@
 """Tests for execution hooks (control_plane/hooks.py)."""
 
-import asyncio
+import asyncio  # noqa: F401
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 

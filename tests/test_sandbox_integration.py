@@ -6,7 +6,6 @@ PR 4: Minimal DockerSandbox implementation
 """
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
-from pathlib import Path
 
 from backend.sandbox import DockerSandbox, LocalSandbox, CommandResult
 from backend.lifecycle import BackendManager

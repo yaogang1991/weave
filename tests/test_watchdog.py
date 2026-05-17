@@ -436,7 +436,7 @@ class TestHealthEventChain:
             }
         )
 
-        result_dag = await engine.execute(dag)
+        await engine.execute(dag)  # noqa: F841
 
         # Verify event chain
         event_types = [e.event_type for e in events]

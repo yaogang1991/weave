@@ -387,7 +387,7 @@ class TestCheckAndExecute_Blocked:
         assert result.is_blocked is True
 
     def test_blocked_no_tool_execution(self, dont_ask_guardrails, mock_tool_registry):
-        result = dont_ask_guardrails.check_and_execute(
+        dont_ask_guardrails.check_and_execute(  # noqa: F841
             "edit", {"file_path": "/tmp/a.txt", "old_string": "a", "new_string": "b"}
         )
         mock_tool_registry.execute.assert_not_called()

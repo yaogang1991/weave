@@ -1,5 +1,4 @@
 """Tests for planner prompt ownership policy and orchestrator parsing (#272 PR 2)."""
-import os
 
 import pytest
 

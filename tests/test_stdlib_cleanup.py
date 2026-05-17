@@ -7,7 +7,6 @@ instead of silently continuing. Legitimate packages are never auto-deleted.
 """
 import os
 import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from main import _check_stdlib_shadowing

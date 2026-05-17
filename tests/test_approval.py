@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -352,7 +352,7 @@ class TestListTickets:
 
     def test_list_by_job_id(self, tmp_approval_repo: ApprovalRepository):
         t1 = tmp_approval_repo.create_ticket("job_A", "tool", {})
-        t2 = tmp_approval_repo.create_ticket("job_B", "tool", {})
+        tmp_approval_repo.create_ticket("job_B", "tool", {})  # side effect: creates ticket
         t3 = tmp_approval_repo.create_ticket("job_A", "tool", {})
 
         job_a_tickets = tmp_approval_repo.list_tickets(job_id="job_A")
@@ -648,7 +648,7 @@ class TestAtomicWrite:
         assert len(tmp_files) == 0, f"Found leftover .tmp files: {tmp_files}"
 
     def test_no_tmp_files_after_expire(self, tmp_approval_repo: ApprovalRepository, tmp_path: Path):
-        ticket = tmp_approval_repo.create_ticket("job_1", "tool", {}, timeout_sec=1)
+        tmp_approval_repo.create_ticket("job_1", "tool", {}, timeout_sec=1)  # noqa: F841
         time.sleep(1.5)
         tmp_approval_repo.expire_tickets()
         approvals_dir = tmp_path / "approvals"

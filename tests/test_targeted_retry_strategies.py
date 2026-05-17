@@ -7,7 +7,7 @@ Verifies:
 """
 import pytest
 
-from control_plane.models import Job, JobStatus, RetryPolicy
+from control_plane.models import Job
 from control_plane.service import _classify_error
 from datetime import datetime, timezone
 

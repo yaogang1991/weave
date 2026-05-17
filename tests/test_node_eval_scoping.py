@@ -5,8 +5,6 @@ When parallel generator nodes share the same workspace, each node's evaluator
 should only lint the files the node was tasked to create — not files from
 sibling nodes.
 """
-import pytest
-from pathlib import Path
 
 from core.models import SuccessCriterion, CriterionType
 from evaluator.engine import EvaluatorEngine

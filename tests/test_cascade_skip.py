@@ -5,10 +5,9 @@ are skipped — not all downstream nodes. Nodes whose dependencies all
 succeeded should continue executing.
 """
 
-import asyncio
+import asyncio  # noqa: F401
 import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

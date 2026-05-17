@@ -5,7 +5,7 @@ Verifies that evaluation feedback is not truncated in orchestrator
 decision-making and that retry instructions emphasize incremental fixes.
 """
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 from core.models import DAG, DAGNode, NodeStatus, FailureDecision
 from core.dag_engine import DAGExecutionEngine
@@ -118,7 +118,7 @@ class TestOrchestratorErrorVisibility:
             return_value={"action": "retry", "reasoning": "fix lint"},
         ):
             import asyncio
-            decision = asyncio.run(
+            asyncio.run(  # noqa: F841
                 orchestrator.adapt_to_failure(dag, "impl", dag.nodes["impl"].error),
             )
 
@@ -168,7 +168,7 @@ class TestEventFeedbackNotTruncated:
 
         engine = DAGExecutionEngine(capturing_executor, failure_handler)
         engine.on_event(lambda e: events.append(e))
-        result = await engine.execute(dag)
+        await engine.execute(dag)  # noqa: F841
 
         # Find upstream_retry event
         upstream_events = [e for e in events if e.event_type == "upstream_retry"]

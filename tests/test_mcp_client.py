@@ -1,6 +1,5 @@
 """Tests for MCP client helpers (M3.6)."""
 
-import pytest
 
 from mcp.client import make_prefixed_name, parse_prefixed_name
 

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from control_plane.worker import TaskWorker, WorkerConfig
-from control_plane.models import Job, JobStatus, RunStatus, Run
+from control_plane.models import Job, JobStatus, RunStatus
 from control_plane.repository import JobRepository
 from control_plane.service import RunService
 

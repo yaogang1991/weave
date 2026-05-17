@@ -8,7 +8,7 @@ Fix 2 (P3): LLM rate-limit sleep should bail early when cumulative
             sleep exceeds 50% of timeout budget.
 """
 import pytest
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock, patch
 
 from core.models import DAG, DAGNode, NodeStatus
 from core.dag_engine import DAGExecutionEngine
@@ -159,7 +159,7 @@ class TestLLMSleepCap:
             side_effect=RuntimeError("429 rate limit, retry-after: 60")
         )
 
-        with patch("core.llm_client.time.sleep") as mock_sleep:
+        with patch("core.llm_client.time.sleep"):
             # The first sleep is 60s (capped). Cumulative = 60 > 50.
             # On the next attempt, it should bail with RateLimitError.
             with pytest.raises(RateLimitError):

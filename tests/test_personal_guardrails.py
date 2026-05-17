@@ -26,7 +26,7 @@ from core.models import (
     RiskLevel,
     ToolResult,
 )
-from guardrails.policy import Guardrails, PersonalGuardrails
+from guardrails.policy import PersonalGuardrails
 
 
 # ---------------------------------------------------------------------------

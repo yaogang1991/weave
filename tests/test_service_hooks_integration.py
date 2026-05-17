@@ -5,7 +5,7 @@ that metadata persists, dependencies reach the right places,
 and hook errors never abort the core execution flow.
 """
 
-import asyncio
+import asyncio  # noqa: F401
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -224,7 +224,7 @@ class TestImpactHookMemoryManagerIntegration:
         ctx = _make_ctx(memory_manager=mock_mm)
 
         captured_mm = None
-        original_make = hook._make_predictor
+        _original_make = hook._make_predictor  # noqa: F841
 
         def capturing_make(memory_manager=None):
             nonlocal captured_mm
@@ -254,7 +254,7 @@ class TestImpactHookMemoryManagerIntegration:
     async def test_no_memory_manager_still_works(self):
         """ImpactHook should not fail if ctx.memory_manager is None."""
         hook = ImpactHook()
-        ctx = _make_ctx(memory_manager=None)
+        _make_ctx(memory_manager=None)  # noqa: F841
 
         predictor = hook._make_predictor(memory_manager=None)
         assert predictor.memory_manager is None

@@ -6,13 +6,11 @@ Verifies:
 3. PATTERN_PRESENT — fix code pattern must exist
 4. fix_bug template uses structured criteria
 """
-import re
 import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from core.models import SuccessCriterion, CriterionType
-from evaluator.engine import EvaluatorEngine
 from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
 from evaluator.models import EvaluationContext
 

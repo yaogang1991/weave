@@ -7,8 +7,6 @@ Covers:
 - EvaluatorEngine._try_stdlib_rename finds prefixed alternatives
 - EvaluatorEngine FILE_EXISTS / FILE_PATTERN fallback with stdlib prefix
 """
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from core.models import (

@@ -1,11 +1,9 @@
 """Tests for generator file path enforcement and ownership checks (#291, #297)."""
-import os
-import tempfile
 
 import pytest
 
 from tools.registry import ToolRegistry
-from core.models import DAGNode, ToolResult
+from core.models import DAGNode
 
 
 class TestOwnershipEnforcement:

@@ -4,9 +4,7 @@ Tests for #249: scope pytest to current artifacts to avoid leftover test files.
 Verifies that _run_tests and _check_coverage only collect test files related
 to the current DAG node's output_artifacts, not all test files in the workspace.
 """
-import pytest
-import tempfile
-from pathlib import Path
+import pytest  # noqa: F401
 from unittest.mock import MagicMock, patch
 
 from evaluator.engine import EvaluatorEngine

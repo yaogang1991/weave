@@ -5,7 +5,6 @@ The validator should only warn when the task explicitly creates/names a
 module that shadows stdlib, not when the task merely uses or imports from
 stdlib modules.
 """
-import pytest
 
 from orchestrator.plan_validator import PlanValidator
 

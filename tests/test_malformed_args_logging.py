@@ -4,13 +4,11 @@ Tests for #334: enhanced logging of malformed tool call arguments.
 Verifies that when tool calls have missing/blank args, the log messages
 include the raw arguments dict for debugging model-specific issues.
 """
-import json
 import logging
 import pytest
 from unittest.mock import MagicMock
 
-from core.models import ToolResult, EventType
-from core.config import LLMConfig
+from core.models import ToolResult
 from agent.worker import AgentWorker, EMPTY_CALL_MAX_RETRIES
 
 

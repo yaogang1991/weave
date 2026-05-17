@@ -10,10 +10,8 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import inspect
-import json
-import subprocess
+import subprocess  # noqa: F401
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -30,7 +28,7 @@ sys.modules["anthropic"] = _mock_anthropic
 sys.modules["openai"] = _mock_openai
 
 # Now safe to import project modules
-from control_plane.models import JobStatus, RunStatus
+from control_plane.models import JobStatus, RunStatus  # noqa: F401
 from control_plane.approval import TicketStatus
 from control_plane.repository import JobRepository
 from core.models import RiskLevel
@@ -197,14 +195,12 @@ class TestRunStatusEnum:
     REQUIRED_STATUSES = ["running", "pending_approval", "succeeded", "failed", "aborted", "timed_out"]
 
     def test_all_statuses_exist(self):
-        from control_plane.models import RunStatus
         actual = [s.value for s in RunStatus]
         for status in self.REQUIRED_STATUSES:
             assert status in actual, f"RunStatus '{status}' missing"
 
     def test_required_statuses_exist(self):
         """必需值都存在（允许扩展）。"""
-        from control_plane.models import RunStatus
         actual = {s.value for s in RunStatus}
         required = set(self.REQUIRED_STATUSES)
         assert required.issubset(actual), f"Missing required statuses: {required - actual}"
@@ -418,9 +414,9 @@ class TestTicketStateTransitions:
     def test_pending_to_expired(self, approval_repo):
         import datetime
         from unittest.mock import patch
-        from control_plane.approval import _utc_now
+        from control_plane.approval import _utc_now  # noqa: F401
 
-        ticket = approval_repo.create_ticket(
+        approval_repo.create_ticket(  # noqa: F841
             job_id="job_abc", tool_name="bash", args={"command": "echo hi"},
             timeout_sec=1,
         )
@@ -506,7 +502,6 @@ class TestPyprojectConfig:
 
     def test_pytest_can_collect_tests(self):
         """pytest 能正常收集测试（配置无错误）。"""
-        import subprocess
         result = subprocess.run(
             [sys.executable, "-m", "pytest", "--collect-only", "-q"],
             capture_output=True, text=True, cwd=str(Path(__file__).parent.parent),

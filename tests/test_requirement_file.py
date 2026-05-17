@@ -4,7 +4,6 @@ Tests for #224: --file option for reading requirements from file.
 Allows users to avoid shell escaping issues with ${...} patterns
 by reading requirements from a file instead of command line.
 """
-import pytest
 import subprocess
 import sys
 

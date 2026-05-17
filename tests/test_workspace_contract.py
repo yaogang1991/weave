@@ -4,7 +4,6 @@ Tests for #176 PR 1: workspace isolation contract.
 Verifies the NodeWorkspace models and BackendManager.setup_node/cleanup_node
 methods for per-node workspace isolation.
 """
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -176,7 +175,7 @@ class TestBackendManagerSetupNode:
             mock_get.return_value = mock_backend
             manager.setup("job1", "run1")
 
-        ws = manager.setup_node("job1", "run1", "node1", strategy="shared")
+        manager.setup_node("job1", "run1", "node1", strategy="shared")  # noqa: F841
         manager.cleanup_node("job1", "run1", "node1")
         # Shared workdir still exists
         assert run_workdir.exists()

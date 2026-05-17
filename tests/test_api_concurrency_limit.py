@@ -5,13 +5,11 @@ When HARNESS_MAX_CONCURRENT_API is set, the LLM client acquires a
 process-global semaphore before each API call, limiting concurrent
 requests across all parallel DAG nodes.
 """
-import os
 import threading
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from core.config import LLMConfig
-from core.llm_client import _get_api_semaphore, _global_api_semaphore
+from core.llm_client import _get_api_semaphore, _global_api_semaphore  # noqa: F401
 
 
 class TestAPIConcurrencyLimit:
@@ -64,7 +62,7 @@ class TestAPIConcurrencyLimit:
         mod._global_api_semaphore = None
 
         sem = _get_api_semaphore(2)
-        active = threading.atomic = []
+        threading.atomic = []  # noqa: F841
         active_count = 0
         lock = threading.Lock()
         barrier = threading.Barrier(3, timeout=5)

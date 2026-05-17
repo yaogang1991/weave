@@ -4,9 +4,6 @@ Tests for #177 PR4: ArtifactHandoffService extraction from DAGExecutionEngine.
 Verifies artifact collection, eval result passing, retry feedback,
 error-type guidance, and soft dependency warnings.
 """
-import pytest
-from unittest.mock import MagicMock
-from datetime import datetime, timezone
 
 from core.artifact_handoff import (
     ArtifactHandoffService,
@@ -17,7 +14,7 @@ from core.artifact_handoff import (
     _has_runtime_error,
     _has_init_import_error,
 )
-from core.models import (
+from core.models import (  # noqa: F401
     DAG,
     DAGNode,
     DAGEdge,

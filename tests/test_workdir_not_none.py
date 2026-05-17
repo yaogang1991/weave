@@ -5,7 +5,7 @@ Ensures:
 - cmd_execute always sets project_work_dir (never None after _resolve_project_path)
 - dag_engine fast-fails when work_dir is not set and evaluation is needed
 """
-import asyncio
+import asyncio  # noqa: F401
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from pathlib import Path

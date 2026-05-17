@@ -12,7 +12,6 @@ This is the normative test suite — any behavior change that breaks these
 tests likely indicates a regression in evaluator semantics.
 """
 
-import sys
 import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
@@ -364,7 +363,7 @@ class TestLintSemantics:
     def test_warn_no_linter_available(self, mock_run, evaluator, tmp_path):
         """No flake8/ruff → WARN (not hard FAIL)."""
         _file(tmp_path / "app.py")
-        import subprocess
+        import subprocess  # noqa: F401
 
         def _mock_run(cmd, **kwargs):
             # Import smoke test calls should succeed

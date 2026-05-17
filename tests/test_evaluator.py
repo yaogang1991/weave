@@ -4,7 +4,6 @@ Tests for evaluator/engine.py — criterion checking, scoring, evaluation flow.
 import json
 import sys
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from core.models import EvaluationResult, SuccessCriterion, CriterionType

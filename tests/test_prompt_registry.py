@@ -9,7 +9,6 @@ Verifies that:
 """
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 from orchestrator.prompts import PromptRegistry, get_prompt_registry
 
@@ -89,7 +88,7 @@ class TestPromptRegistry:
     def test_custom_prompts_dir_does_not_affect_default(self, tmp_path):
         custom = tmp_path / "planning.md"
         custom.write_text("OVERRIDDEN", encoding="utf-8")
-        registry = PromptRegistry(prompts_dir=tmp_path)
+        PromptRegistry(prompts_dir=tmp_path)  # noqa: F841
         default = get_prompt_registry()
         assert default.load("planning") != "OVERRIDDEN"
 

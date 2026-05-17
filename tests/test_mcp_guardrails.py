@@ -1,6 +1,5 @@
 """Tests for MCP guardrails risk mapping (M3.6)."""
 
-import pytest
 
 from core.models import MCPToolInfo, GuardrailPolicy, RiskLevel, PermissionMode
 from guardrails.policy import Guardrails

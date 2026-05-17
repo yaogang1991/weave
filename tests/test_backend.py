@@ -19,7 +19,7 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.base import ExecutionBackend, WorkspaceIsolation, ExecutionSandbox
+from backend.base import WorkspaceIsolation, ExecutionSandbox
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.lifecycle import BackendManager
@@ -129,7 +129,7 @@ class TestWorktreeBackend:
         base = tmp_path / "worktrees"
         assert not base.exists()
 
-        backend = WorktreeBackend(base_path=str(base))
+        WorktreeBackend(base_path=str(base))  # noqa: F841
 
         assert base.exists()
         assert base.is_dir()

@@ -1,10 +1,9 @@
 """Tests for core/project_config.py"""
 
-import pytest
+import pytest  # noqa: F401
 import yaml
-from pathlib import Path
 
-from core.project_config import (
+from core.project_config import (  # noqa: F401
     HookConfig,
     RuntimeConfig,
     GuardrailsConfig,
