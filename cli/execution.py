@@ -740,6 +740,64 @@ def _register_weave_tools(server) -> None:
             return {"error": str(exc), "entries": []}
 
     @server.tool(
+        "weave.memory_store",
+        description="Store a memory entry for an agent",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string",
+                    "description": "Memory content to store",
+                },
+                "agent_type": {
+                    "type": "string",
+                    "description": "Agent type (default: shared)",
+                },
+                "scope": {
+                    "type": "string",
+                    "description": "Memory scope: private, session, global (default: global)",
+                },
+            },
+            "required": ["content"],
+        },
+    )
+    def weave_memory_store(
+        content: str,
+        agent_type: str = "shared",
+        scope: str = "global",
+    ) -> dict:
+        try:
+            from core.config import WeaveConfig
+            from core.memory_models import MemoryScope
+            from memory.manager import MemoryManager
+
+            config = WeaveConfig.from_env()
+            if not config.memory.enabled:
+                return {"stored": False, "message": "Memory system is disabled"}
+
+            scope_map = {
+                "global": MemoryScope.GLOBAL,
+                "private": MemoryScope.PRIVATE,
+                "session": MemoryScope.SESSION,
+            }
+            memory_scope = scope_map.get(scope, MemoryScope.GLOBAL)
+
+            mm = MemoryManager(config.memory)
+            entry = mm.store_learning(
+                agent_type=agent_type,
+                content=content,
+                scope=memory_scope,
+            )
+            return {
+                "stored": True,
+                "id": entry.id,
+                "scope": entry.scope.value,
+                "agent_type": entry.agent_type,
+            }
+        except Exception as exc:
+            return {"error": str(exc), "stored": False}
+
+    @server.tool(
         "weave.health",
         description="Check Weave server health and configuration",
         input_schema={
