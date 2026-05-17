@@ -57,14 +57,23 @@ class TestContextWindow:
         assert orch._get_context_window() == 128_000
 
     def test_unknown_model_uses_default(self):
+        config = LLMConfig(model="some-truly-unknown-model", api_key="test")
+        orch = IntelligentOrchestrator(
+            llm_config=config,
+            session_store=MagicMock(spec=SessionStore),
+            agent_registry=AgentRegistry(),
+        )
+        # Default is 200K for truly unknown models
+        assert orch._get_context_window() == 200_000
+
+    def test_kimi_model_gets_262k_context(self):
         config = LLMConfig(model="kimi-for-coding", api_key="test")
         orch = IntelligentOrchestrator(
             llm_config=config,
             session_store=MagicMock(spec=SessionStore),
             agent_registry=AgentRegistry(),
         )
-        # Default is 200K
-        assert orch._get_context_window() == 200_000
+        assert orch._get_context_window() == 262_144
 
 
 class TestTruncateRequirement:

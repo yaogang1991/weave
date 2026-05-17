@@ -1,9 +1,10 @@
 """
-Tests for #419: planner message size pruning.
+Tests for #419/#428/#429: planner message size pruning.
 
 Verifies:
 - Message byte estimation
 - Pruning strategy (assistant truncation, user truncation, message dropping)
+- Token-based pruning for models with smaller context windows
 - Integration with plan() to prevent 2M byte limit exceeded
 """
 import json
@@ -157,10 +158,59 @@ class TestPlanIntegration:
 
         assert call_count == 2
         # The second call's messages should have been pruned
-        # (the assistant message should be truncated, not 500K chars)
+        # (the assistant message should be truncated — plan() truncates
+        # failed responses to 2000 chars before pruning)
         retry_messages = captured_messages[1]
         assistant_msgs = [
             m for m in retry_messages if m["role"] == "assistant"
         ]
         if assistant_msgs:
             assert len(assistant_msgs[-1]["content"]) <= 2100
+
+
+class TestTokenPruning:
+    """Token-based pruning prevents context window overflow (#428)."""
+
+    def test_truncates_when_tokens_exceed_half_context(self):
+        """When total tokens > context_window/2, largest message is truncated."""
+        orch = _make_orchestrator()
+        # Small context window (200K), messages that fit in bytes but not tokens
+        # 200K / 2 = 100K tokens max. At 3.5 chars/token, that's ~350K chars.
+        # Create a system prompt that's ~200K chars (57K tokens) and a user
+        # message that's ~200K chars (57K tokens) = 114K tokens > 100K limit.
+        # But bytes = 400K < 1.2M byte threshold, so byte pruning won't trigger.
+        messages = [
+            {"role": "system", "content": "s" * 200_000},
+            {"role": "user", "content": "u" * 200_000},
+        ]
+        result = orch._prune_messages_for_size(messages)
+        # At least one message should have been truncated
+        total_chars = sum(len(m.get("content", "")) for m in result)
+        # Should be significantly smaller than 400K
+        assert total_chars < 400_000
+        # Should contain truncation marker
+        has_truncation = any(
+            "truncated for token limit" in m.get("content", "")
+            for m in result
+        )
+        assert has_truncation
+
+    def test_no_token_pruning_when_within_budget(self):
+        """Small messages within token budget are not pruned."""
+        orch = _make_orchestrator()
+        messages = [
+            {"role": "system", "content": "You are a planner."},
+            {"role": "user", "content": "Build a REST API"},
+        ]
+        result = orch._prune_messages_for_size(messages)
+        assert len(result) == 2
+        assert result[0]["content"] == "You are a planner."
+        assert result[1]["content"] == "Build a REST API"
+
+    def test_kimi_context_window_recognized(self):
+        """Kimi models should get 262K context window, not default 200K."""
+        from core.config import LLMConfig
+        config = LLMConfig(api_key="test", model="kimi-for-coding")
+        orch = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
+        orch.llm_config = config
+        assert orch._get_context_window() == 262_144
