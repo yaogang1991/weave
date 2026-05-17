@@ -296,6 +296,14 @@ class MemoryConfig(BaseModel):
     retrieval_limit: int = Field(default=10, ge=1)              # Max memories injected per prompt
     decay_half_life_days: float = Field(default=30.0, ge=1.0)   # Relevance score decay rate
     auto_store: bool = True             # Automatically store learnings after task
+    embedding_provider: str = Field(    # #508 P2: semantic retrieval provider
+        default="local",
+        description="Embedding provider: local (default) or openai",
+    )
+    semantic_search_enabled: bool = Field(  # #508 P2: enable semantic retrieval
+        default=True,
+        description="Use semantic search for memory retrieval",
+    )
 
     @model_validator(mode="after")
     def _validate_memory_config(self) -> "MemoryConfig":
