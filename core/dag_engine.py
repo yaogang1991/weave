@@ -14,9 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import json
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Coroutine
 
@@ -35,6 +33,8 @@ from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
+from core.dag_checkpoint import CheckpointManager
+from core.dag_compat import DAGCompatMixin
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
@@ -43,7 +43,7 @@ ReplanHandler = Callable[[DAG, str], Coroutine[Any, Any, DAG]]
 logger = logging.getLogger(__name__)
 
 
-class DAGExecutionEngine:
+class DAGExecutionEngine(DAGCompatMixin):
     """
     Executes a DAG by:
     1. Computing topological levels
@@ -155,61 +155,7 @@ class DAGExecutionEngine:
         self._job_id = job_id
         self._run_id = run_id
         # #455: DAG execution state persistence for crash recovery
-        self._checkpoint_dir = Path(checkpoint_dir)
-        self._checkpoint_dir_created = False
-
-    # -- Backward-compat proxies for extracted services (#177 PR4) ------------
-
-    @property
-    def agent_executor(self):
-        """Proxy to NodeExecutor's agent_executor for backward compat.
-
-        Tests may override engine.agent_executor; this ensures the node
-        executor sees the updated value (#177 PR5).
-        """
-        return self._node_executor.agent_executor
-
-    @agent_executor.setter
-    def agent_executor(self, value):
-        self._node_executor.agent_executor = value
-
-    @property
-    def evaluator(self):
-        """Proxy to NodeExecutor's evaluator for backward compat."""
-        return self._node_executor.evaluator
-
-    @evaluator.setter
-    def evaluator(self, value):
-        self._node_executor.evaluator = value
-
-    @property
-    def heartbeat_interval_sec(self) -> float:
-        return self._watchdog._interval_sec
-
-    @property
-    def heartbeat_miss_threshold(self) -> int:
-        return self._watchdog._miss_threshold
-
-    @property
-    def enable_watchdog(self) -> bool:
-        return self._watchdog._enabled
-
-    @property
-    def _running_nodes(self) -> dict[str, DAGNode]:
-        return self._watchdog._running_nodes
-
-    @property
-    def _best_attempts(self) -> dict[str, dict]:
-        """Proxy to RetryPolicyEngine._best_attempts for backward compat."""
-        return self._retry_policy._best_attempts
-
-    def _get_heartbeat_settings(self, agent_type: str) -> tuple[float, int]:
-        """Proxy to WatchdogService for backward compat."""
-        return self._watchdog.get_heartbeat_settings(agent_type)
-
-    def _get_alert_threshold(self, agent_type: str) -> int:
-        """Proxy to WatchdogService for backward compat."""
-        return self._watchdog.get_alert_threshold(agent_type)
+        self._checkpoint = CheckpointManager(checkpoint_dir, session_id)
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -542,84 +488,22 @@ class DAGExecutionEngine:
     # -- #455: DAG execution state persistence ----------------------------
 
     def _checkpoint_file(self) -> Path:
-        """Return checkpoint file path for current session."""
-        if not self._checkpoint_dir_created:
-            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
-            self._checkpoint_dir_created = True
-        return self._checkpoint_dir / f"{self._session_id}.jsonl"
+        """Backward-compat proxy to CheckpointManager file path."""
+        return self._checkpoint._file_path()
 
     def _persist_node_completion(
         self, node_id: str, result: dict | None,
     ) -> None:
-        """Append node completion record to checkpoint file (#455).
-
-        Stores the full result dict so downstream nodes can access
-        artifacts and data after crash recovery.
-        """
-        if not self._session_id:
-            return
-        path = self._checkpoint_file()
-        entry = {
-            "node_id": node_id,
-            "status": "completed",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-        if result:
-            entry["result"] = result
-        try:
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry, default=str) + "\n")
-        except OSError as exc:
-            logger.warning(
-                "Failed to persist node %s checkpoint: %s", node_id, exc,
-            )
+        """Append node completion record to checkpoint file (#455)."""
+        self._checkpoint.persist_node_completion(node_id, result)
 
     def _load_completed_nodes(self) -> dict[str, dict | None]:
-        """Load completed node IDs and their results from checkpoint (#455).
-
-        Returns dict mapping node_id to its persisted result dict (or None).
-        Corrupt entries are skipped.
-        """
-        if not self._session_id:
-            return {}
-        path = self._checkpoint_file()
-        if not path.exists():
-            return {}
-        completed: dict[str, dict | None] = {}
-        try:
-            for line in path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    if entry.get("status") == "completed":
-                        completed[entry["node_id"]] = entry.get("result")
-                except (json.JSONDecodeError, KeyError):
-                    continue
-        except OSError as exc:
-            logger.warning(
-                "Failed to load checkpoint for session %s: %s",
-                self._session_id, exc,
-            )
-        return completed
+        """Load completed node IDs and their results from checkpoint (#455)."""
+        return self._checkpoint.load_completed_nodes()
 
     def _cleanup_checkpoint(self) -> None:
         """Remove checkpoint file after successful DAG completion (#455)."""
-        if not self._session_id:
-            return
-        path = self._checkpoint_file()
-        if path.exists():
-            try:
-                path.unlink()
-                logger.info(
-                    "Cleaned up checkpoint for session %s", self._session_id,
-                )
-            except OSError as exc:
-                logger.warning(
-                    "Failed to cleanup checkpoint for session %s: %s",
-                    self._session_id, exc,
-                )
+        self._checkpoint.cleanup()
 
     def _find_evaluator_target(self, dag: DAG, eval_node_id: str) -> str | None:
         """
