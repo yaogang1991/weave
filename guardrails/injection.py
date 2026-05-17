@@ -59,12 +59,13 @@ _INJECTION_PATTERNS: list[tuple[str, str]] = [
     # Output manipulation
     (
         r"(?i)(?:do\s+not|don'?t)\s+(?:show|display|reveal|tell)\s+"
-        r"(?:the\s+)?(?:system|original|real)\s+(?:prompt|instructions)",
+        r"(?:the\s+)?(?:system|original|real|true)\s+"
+        r"(?:system\s+)?(?:prompt|instructions)",
         "output_manipulation",
     ),
     (
-        r"(?i)output\s+(?:the\s+)?(?:full|complete|entire|original)\s+"
-        r"(?:system|initial)\s+(?:prompt|instructions)",
+        r"(?i)output\s+(?:the\s+)?(?:full|complete|entire|original|real)\s+"
+        r"(?:system\s+)?(?:prompt|instructions)",
         "output_manipulation",
     ),
     # Delimiter injection (common in multi-turn attacks)
