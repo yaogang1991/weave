@@ -17,15 +17,34 @@
 from __future__ import annotations
 
 import json
+import logging
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from control_plane.approval import ApprovalRepository, TicketStatus
 from control_plane.models import JobStatus
 from control_plane.repository import JobRepository
 from monitoring.metrics import MetricsCollector
+
+logger = logging.getLogger(__name__)
+
+# Blocked IP ranges for SSRF protection (#495)
+_BLOCKED_HOSTS = frozenset({
+    "localhost", "127.0.0.1", "0.0.0.0", "::1",
+})
+_BLOCKED_PREFIXES = (
+    "10.", "172.16.", "172.17.", "172.18.", "172.19.",
+    "172.20.", "172.21.", "172.22.", "172.23.", "172.24.",
+    "172.25.", "172.26.", "172.27.", "172.28.", "172.29.",
+    "172.30.", "172.31.",
+    "192.168.",
+    "169.254.",  # link-local (AWS metadata)
+    "fc00:", "fe80:",  # IPv6 private/link-local
+)
+_ALLOWED_SCHEMES = frozenset({"https", "http"})
 
 
 # ---------------------------------------------------------------------------
@@ -356,8 +375,40 @@ class AlertManager:
 
         return success
 
+    @staticmethod
+    def _validate_webhook_url(url: str) -> str | None:
+        """Validate webhook URL against SSRF attacks (#495).
+
+        Returns error message if blocked, None if allowed.
+        """
+        try:
+            parsed = urlparse(url)
+        except (ValueError, AttributeError):
+            return "Invalid URL"
+
+        if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
+            return f"Blocked scheme: {parsed.scheme}"
+
+        hostname = (parsed.hostname or "").lower()
+        if not hostname:
+            return "Missing hostname"
+
+        if hostname in _BLOCKED_HOSTS:
+            return f"Blocked host: {hostname}"
+
+        for prefix in _BLOCKED_PREFIXES:
+            if hostname.startswith(prefix):
+                return f"Blocked private IP range: {hostname}"
+
+        return None
+
     def _send_webhook(self, alert: AlertEvent) -> None:
         """发送 webhook 通知。"""
+        # SSRF validation (#495)
+        block_reason = self._validate_webhook_url(self.webhook_url)
+        if block_reason:
+            raise ValueError(f"Webhook URL blocked: {block_reason}")
+
         payload = json.dumps(
             {
                 "rule": alert.rule_name,
