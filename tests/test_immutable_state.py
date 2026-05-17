@@ -1,11 +1,9 @@
 """Tests for immutable state in SessionStore._apply_event (#457)."""
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
-from core.models import EventType, SessionState, AgentMessage
+from core.models import EventType, SessionState
 from session.store import SessionStore
 
 
@@ -116,3 +114,34 @@ class TestRestoreFileSnapshotBackup:
 
         assert (work_dir / "new_file.py").read_text() == "new content"
         assert not (work_dir / "new_file.py.bak").exists()
+
+
+class TestRollbackRestore:
+    """rollback_restore recovers from failed restore via .bak files (#487)."""
+
+    def test_rollback_restores_backup(self, tmp_path):
+        from core.retry_policy import RetryPolicyEngine
+
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        (work_dir / "app.py").write_text("original content")
+
+        snapshot = {"app.py": "restored content"}
+        RetryPolicyEngine.restore_file_snapshot(str(work_dir), snapshot)
+        assert (work_dir / "app.py").read_text() == "restored content"
+        assert (work_dir / "app.py.bak").exists()
+
+        RetryPolicyEngine.rollback_restore(str(work_dir), snapshot)
+        assert (work_dir / "app.py").read_text() == "original content"
+        assert not (work_dir / "app.py.bak").exists()
+
+    def test_rollback_noop_without_backup(self, tmp_path):
+        from core.retry_policy import RetryPolicyEngine
+
+        work_dir = tmp_path / "work"
+        work_dir.mkdir()
+        (work_dir / "new.py").write_text("fresh content")
+
+        # No backup exists — rollback should be a no-op
+        RetryPolicyEngine.rollback_restore(str(work_dir), {"new.py": "ignored"})
+        assert (work_dir / "new.py").read_text() == "fresh content"

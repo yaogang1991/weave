@@ -189,6 +189,20 @@ class RetryPolicyEngine:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
 
+    @staticmethod
+    def rollback_restore(work_dir: str, snapshot: dict[str, str]) -> None:
+        """Rollback a previous restore by copying .bak files back (#487).
+
+        For each file in snapshot, if a .bak backup exists, restore it.
+        Removes the .bak file after successful restore.
+        """
+        for art in snapshot:
+            path = os.path.join(work_dir, art)
+            backup_path = path + ".bak"
+            if os.path.isfile(backup_path):
+                import shutil
+                shutil.move(backup_path, path)
+
     # ------------------------------------------------------------------
     # Lint issue tolerance
     # ------------------------------------------------------------------
