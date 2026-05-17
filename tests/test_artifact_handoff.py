@@ -308,6 +308,29 @@ class TestRetryFeedback:
         assert "__INIT__.PY IMPORT ERROR" in feedback.content
         assert "MINIMAL" in feedback.content
 
+    def test_lint_error_guidance(self):
+        """Lint errors (F811 etc.) trigger targeted fix guidance (#523)."""
+        service = ArtifactHandoffService()
+        nodes = {
+            "target": DAGNode(
+                id="target", agent_type="generator",
+                task_description="Build", status=NodeStatus.RETRYING,
+                eval_feedback=(
+                    "Lint: main.py:15: F811 redefinition of unused 'app' "
+                    "from line 8"
+                ),
+                retry_count=1,
+            ),
+        }
+        dag = DAG(nodes=nodes, edges=[])
+        artifacts = service.collect(dag, "target")
+
+        feedback = [a for a in artifacts if a.metadata.get("type") == "eval_feedback"]
+        assert len(feedback) == 1
+        assert "LINT ERROR DETECTED" in feedback[0].content
+        assert "F811" in feedback[0].content
+        assert "EDIT tool" in feedback[0].content
+
     def test_no_feedback_when_empty(self):
         service = ArtifactHandoffService()
         nodes = {
