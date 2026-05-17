@@ -112,7 +112,7 @@ async def cmd_plan(args):
 
     print(f"\nPlan saved: {plan_file}")
     print(f"\nReasoning: {dag.reasoning}")
-    print(f"\nExecution levels:")
+    print("\nExecution levels:")
     for i, level in enumerate(dag.topological_levels()):
         print(f"  Level {i}: {' → '.join(level)}")
 
@@ -368,7 +368,7 @@ async def cmd_execute(args, dag: DAG | None = None):
             "error": f"Approval required: {exc.ticket_id}",
         })
         if exc.ticket_id:
-            print(f"\nAgent requested approval for a high-risk operation.", flush=True)
+            print("\nAgent requested approval for a high-risk operation.", flush=True)
             print(f"  Ticket ID: {exc.ticket_id}", flush=True)
             print(f"  Approve:   python main.py approve {exc.ticket_id}", flush=True)
             print(f"  Reject:    python main.py reject {exc.ticket_id}", flush=True)
@@ -386,7 +386,7 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     # Summary
     summary = engine.get_execution_summary(result_dag)
-    print(f"\nExecution complete:")
+    print("\nExecution complete:")
     print(f"  Total: {summary['total_nodes']}")
     print(f"  Success: {summary['success']}")
     print(f"  Failed: {summary['failed']}")

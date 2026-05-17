@@ -50,8 +50,8 @@ def _resolve_project_path(project: str | None, allow_self_modify: bool = False) 
                 "ERROR: --project not specified and cwd is inside the harness source tree.\n"
                 "Running without --project would let agents modify harness itself.\n\n"
                 "Pick one:\n"
-                f"  (1) --project ./my-project        target an existing project\n"
-                f"  (2) --allow-self-modify           explicit opt-in (NOT recommended)\n"
+                "  (1) --project ./my-project        target an existing project\n"
+                "  (2) --allow-self-modify           explicit opt-in (NOT recommended)\n"
             )
             sys.exit(2)
         sys.stderr.write("WARN: --allow-self-modify set; agents may modify harness source tree.\n")

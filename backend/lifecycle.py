@@ -21,6 +21,7 @@ from backend.base import ExecutionBackend, WorkspaceIsolation, ExecutionSandbox
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.sandbox import SandboxProvider, LocalSandbox, DockerSandbox
+from core.models import NodeWorkspace
 
 
 @dataclass

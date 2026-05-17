@@ -88,20 +88,20 @@ async def websocket_endpoint(websocket: WebSocket):
 async def _handle_client_command(websocket: WebSocket, data: dict) -> None:
     """Handle commands from WebSocket clients."""
     cmd = data.get("command")
-    
+
     if cmd == "list_sessions":
         sessions = _list_sessions()
         await websocket.send_json({"type": "sessions_list", "sessions": sessions})
-    
+
     elif cmd == "get_session":
         session_id = data.get("session_id")
         session_data = _get_session_data(session_id)
         await websocket.send_json({"type": "session_data", **session_data})
-    
+
     elif cmd == "list_plans":
         plans = _list_plans()
         await websocket.send_json({"type": "plans_list", "plans": plans})
-    
+
     elif cmd == "ping":
         await websocket.send_json({"type": "pong"})
 
@@ -131,19 +131,19 @@ def _list_sessions() -> list[dict]:
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
     sessions = []
-    
+
     for session_id in store.list_sessions():
         events = store.get_events(session_id)
         if not events:
             continue
-        
+
         start_event = events[0]
         end_event = events[-1] if events else None
-        
+
         # Count events by type
         node_events = [e for e in events if e.type.value.startswith("workflow.")]
         tool_calls = sum(1 for e in events if e.type.value == "agent.tool_use")
-        
+
         sessions.append({
             "session_id": session_id,
             "created_at": start_event.timestamp.isoformat() if start_event.timestamp else None,
@@ -152,7 +152,7 @@ def _list_sessions() -> list[dict]:
             "tool_calls": tool_calls,
             "workflow_stages": len(node_events),
         })
-    
+
     # Sort by created_at desc
     sessions.sort(key=lambda x: x["created_at"] or "", reverse=True)
     return sessions
@@ -162,10 +162,10 @@ def _get_session_data(session_id: str) -> dict:
     """Get full session data including events and DAG info."""
     config = HarnessConfig.from_env()
     store = SessionStore(config.event_store_path)
-    
+
     events = store.get_events(session_id)
     events_data = []
-    
+
     for event in events:
         events_data.append({
             "id": event.id,
@@ -173,10 +173,10 @@ def _get_session_data(session_id: str) -> dict:
             "type": event.type.value,
             "payload": event.payload,
         })
-    
+
     # Try to reconstruct DAG from events
     dag_data = _reconstruct_dag_from_events(events_data)
-    
+
     return {
         "session_id": session_id,
         "events": events_data,
@@ -196,14 +196,14 @@ def _reconstruct_dag_from_events(events: list[dict]) -> dict | None:
             payload = event.get("payload", {})
             if isinstance(payload, dict) and "nodes" in payload and "edges" in payload:
                 return payload
-    
+
     # Fallback: check any event payload for DAG-like data
     for event in events:
         payload = event.get("payload", {})
         if isinstance(payload, dict):
             if "nodes" in payload and "edges" in payload:
                 return payload
-    
+
     return None
 
 
@@ -212,7 +212,7 @@ def _list_plans() -> list[dict]:
     plans_dir = Path("./data/plans")
     if not plans_dir.exists():
         return []
-    
+
     plans = []
     for plan_file in sorted(plans_dir.glob("plan_*.json"), reverse=True):
         try:
@@ -225,7 +225,7 @@ def _list_plans() -> list[dict]:
             })
         except Exception:
             continue
-    
+
     return plans
 
 

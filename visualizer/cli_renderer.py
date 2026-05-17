@@ -18,14 +18,14 @@ from core.models import DAG, ExecutionEvent, NodeStatus
 class CLIDAGRenderer:
     """
     Rich-based CLI renderer for DAG execution.
-    
+
     Usage:
         renderer = CLIDAGRenderer()
         engine.on_event(renderer.handle_event)
-        
+
         # Before execution:
         renderer.render_dag(dag)
-        
+
         # After execution:
         renderer.render_summary(dag)
     """
@@ -50,25 +50,25 @@ class CLIDAGRenderer:
     def handle_event(self, event: ExecutionEvent) -> None:
         """Event handler for DAGExecutionEngine.on_event()."""
         self._event_count += 1
-        
+
         if event.event_type == "started":
             self._node_status[event.node_id] = "running"
             self._node_start_times[event.node_id] = time.time()
             self._print_event("▶️", event.node_id, "STARTED", event.details)
-            
+
         elif event.event_type == "completed":
             self._node_status[event.node_id] = "success"
             duration = self._get_duration(event.node_id)
             self._print_event("✅", event.node_id, "COMPLETED", event.details, duration)
-            
+
         elif event.event_type == "failed":
             self._node_status[event.node_id] = "failed"
             self._print_event("❌", event.node_id, "FAILED", event.details)
-            
+
         elif event.event_type == "retrying":
             self._node_status[event.node_id] = "retrying"
             self._print_event("🔄", event.node_id, "RETRYING", event.details)
-            
+
         elif event.event_type == "skipped":
             self._node_status[event.node_id] = "skipped"
             self._print_event("⏭️", event.node_id, "SKIPPED", event.details)
@@ -80,9 +80,9 @@ class CLIDAGRenderer:
         print(f"{self.BOLD}║                 DAG Execution Plan                          ║{self.RESET}")
         print(f"{self.BOLD}╚══════════════════════════════════════════════════════════════╝{self.RESET}")
         print()
-        
+
         levels = dag.topological_levels()
-        
+
         for level_idx, level in enumerate(levels):
             print(f"{self.BOLD}Level {level_idx}:{self.RESET}")
             for nid in level:
@@ -93,7 +93,7 @@ class CLIDAGRenderer:
                     f"{self.BOLD}{nid:15}{self.RESET} {node.task_description[:50]}"
                 )
             print()
-        
+
         if dag.reasoning:
             print(f"{self.BOLD}Reasoning:{self.RESET} {dag.reasoning[:200]}...")
             print()
@@ -102,11 +102,11 @@ class CLIDAGRenderer:
         """Print a compact live status of all nodes."""
         print()
         print(f"{self.BOLD}── Live Status ──{self.RESET}")
-        
+
         for nid, node in dag.nodes.items():
             color = self.STATUS_COLORS.get(node.status, "")
             status_str = f"{color}{node.status.value:8}{self.RESET}"
-            
+
             duration = ""
             if node.started_at and node.completed_at:
                 ms = (node.completed_at - node.started_at).total_seconds() * 1000
@@ -114,9 +114,9 @@ class CLIDAGRenderer:
             elif node.started_at and node.status == NodeStatus.RUNNING:
                 ms = (time.time() - node.started_at.timestamp()) * 1000
                 duration = f" ({ms:.0f}ms)"
-            
+
             print(f"  {nid:15} {status_str}{duration}")
-        
+
         print()
 
     def render_summary(self, dag: DAG) -> None:
@@ -125,7 +125,7 @@ class CLIDAGRenderer:
         success = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SUCCESS)
         failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
         skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
-        
+
         print()
         print(f"{self.BOLD}╔══════════════════════════════════════════════════════════════╗{self.RESET}")
         print(f"{self.BOLD}║              Execution Summary                               ║{self.RESET}")
@@ -149,7 +149,7 @@ class CLIDAGRenderer:
         extra = ""
         if duration is not None:
             extra = f" [{duration:.1f}s]"
-        
+
         detail_str = ""
         if details:
             # Compact detail representation
@@ -159,7 +159,7 @@ class CLIDAGRenderer:
                     v = v[:37] + "..."
                 parts.append(f"{k}={v}")
             detail_str = " | ".join(parts)
-        
+
         print(f"  {icon} [{node_id:12}] {event_type:10}{extra} {detail_str}")
 
     def _get_duration(self, node_id: str) -> float | None:

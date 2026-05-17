@@ -13,7 +13,7 @@ Enhanced with:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import json
 import logging

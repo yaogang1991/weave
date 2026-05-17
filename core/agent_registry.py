@@ -184,7 +184,7 @@ class AgentRegistry:
             lines.append(f"Input: {', '.join(agent.input_schema)}")
             lines.append(f"Output: {', '.join(agent.output_schema)}")
             if agent.constraints:
-                lines.append(f"Constraints:")
+                lines.append("Constraints:")
                 for c in agent.constraints:
                     lines.append(f"  - {c}")
         return "\n".join(lines)

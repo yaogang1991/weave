@@ -9,6 +9,7 @@ Manages promotion of memories between scopes:
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from core.models import MemoryEntry, MemoryScope, EventType
 from memory.manager import MemoryManager

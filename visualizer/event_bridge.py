@@ -4,7 +4,7 @@ Event Bridge: Connects DAGExecutionEngine events to WebSocket clients.
 Usage:
     bridge = WebSocketEventBridge()
     engine.on_event(bridge.handle_event)
-    
+
     # In FastAPI:
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket):
@@ -22,7 +22,7 @@ from core.models import ExecutionEvent
 class WebSocketEventBridge:
     """
     Bridges DAG execution events to WebSocket clients.
-    
+
     This is a singleton-style broadcaster:
     - Any number of WebSocket clients can connect
     - Execution events are broadcast to all connected clients
@@ -39,7 +39,7 @@ class WebSocketEventBridge:
         """Register a new WebSocket client."""
         async with self._lock:
             self._clients.append(websocket)
-        
+
         # Send recent history upon connection
         if self._history:
             await websocket.send_json({
@@ -56,7 +56,7 @@ class WebSocketEventBridge:
     async def handle_event(self, event: ExecutionEvent) -> None:
         """
         Event handler compatible with DAGExecutionEngine.on_event().
-        
+
         Broadcasts the event to all connected WebSocket clients.
         """
         payload = {
@@ -66,12 +66,12 @@ class WebSocketEventBridge:
             "event_type": event.event_type,
             "details": event.details,
         }
-        
+
         # Buffer for late-joining clients
         self._history.append(payload)
         if len(self._history) > self._max_history:
             self._history.pop(0)
-        
+
         await self._broadcast(payload)
 
     async def broadcast_dag(self, dag_data: dict) -> None:
@@ -100,16 +100,16 @@ class WebSocketEventBridge:
     async def _broadcast(self, payload: dict) -> None:
         """Send payload to all connected clients, removing dead ones."""
         dead_clients = []
-        
+
         async with self._lock:
             clients = list(self._clients)
-        
+
         for client in clients:
             try:
                 await client.send_json(payload)
             except Exception:
                 dead_clients.append(client)
-        
+
         if dead_clients:
             async with self._lock:
                 for client in dead_clients:

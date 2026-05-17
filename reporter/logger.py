@@ -27,13 +27,13 @@ class Reporter:
 
         lines = [
             f"# Session Report: {session_id}",
-            f"",
+            "",
             f"**Status**: {state.status}",
             f"**Stages Completed**: {', '.join(state.stages_completed) or 'None'}",
             f"**Total Events**: {len(events)}",
             f"**Total Tool Calls**: {state.metrics.total_tool_calls}",
             f"**Errors**: {len(state.metrics.errors)}",
-            f"",
+            "",
             "## Event Timeline",
             "",
         ]
@@ -57,11 +57,11 @@ class Reporter:
             lines.append("")
 
         report = "\n".join(lines)
-        
+
         # Write report
         report_file = self.report_path / f"{session_id}.md"
         report_file.write_text(report, encoding="utf-8")
-        
+
         return str(report_file)
 
     def _event_icon(self, event_type: EventType) -> str:
