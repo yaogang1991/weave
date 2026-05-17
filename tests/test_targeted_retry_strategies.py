@@ -8,7 +8,7 @@ Verifies:
 import pytest
 
 from control_plane.models import Job
-from control_plane.service import _classify_error
+from control_plane.errors import classify_error
 from datetime import datetime, timezone
 
 
@@ -17,45 +17,45 @@ def _utc_now() -> datetime:
 
 
 class TestErrorClassification:
-    """Verify _classify_error maps errors to correct categories."""
+    """Verify classify_error maps errors to correct categories."""
 
     def test_rate_limit(self):
-        assert _classify_error("429 Too Many Requests") == "rate_limit"
-        assert _classify_error("rate limit exceeded") == "rate_limit"
+        assert classify_error("429 Too Many Requests") == "rate_limit"
+        assert classify_error("rate limit exceeded") == "rate_limit"
 
     def test_timeout(self):
-        assert _classify_error("Command timed out after 60s") == "timeout"
-        assert _classify_error("Job execution timed out") == "timeout"
+        assert classify_error("Command timed out after 60s") == "timeout"
+        assert classify_error("Job execution timed out") == "timeout"
 
     def test_coverage_low(self):
-        assert _classify_error("Coverage 60% below target 80%") == "coverage_low"
-        assert _classify_error("coverage could not be verified") == "coverage_low"
+        assert classify_error("Coverage 60% below target 80%") == "coverage_low"
+        assert classify_error("coverage could not be verified") == "coverage_low"
 
     def test_coverage_pass_not_classified_as_low(self):
-        assert _classify_error("Coverage 90% passed") != "coverage_low"
+        assert classify_error("Coverage 90% passed") != "coverage_low"
 
     def test_naming_mismatch(self):
-        assert _classify_error("ImportError: cannot import 'Foo'") == "naming_mismatch"
-        assert _classify_error("ModuleNotFoundError: mylib") == "naming_mismatch"
+        assert classify_error("ImportError: cannot import 'Foo'") == "naming_mismatch"
+        assert classify_error("ModuleNotFoundError: mylib") == "naming_mismatch"
 
     def test_runtime_error(self):
-        assert _classify_error("RuntimeError: machine not started") == "runtime_error"
-        assert _classify_error(
+        assert classify_error("RuntimeError: machine not started") == "runtime_error"
+        assert classify_error(
             "AttributeError: 'NoneType' has no attribute 'name'"
         ) == "runtime_error"
-        assert _classify_error("KeyError: 'missing_key'") == "runtime_error"
+        assert classify_error("KeyError: 'missing_key'") == "runtime_error"
 
     def test_eval_failed(self):
-        assert _classify_error("evaluation failed: tests did not pass") == "eval_failed"
+        assert classify_error("evaluation failed: tests did not pass") == "eval_failed"
 
     def test_tool_blocked(self):
-        assert _classify_error("blocked unsafe command") == "tool_blocked"
+        assert classify_error("blocked unsafe command") == "tool_blocked"
 
     def test_watchdog(self):
-        assert _classify_error("killed by watchdog") == "watchdog"
+        assert classify_error("killed by watchdog") == "watchdog"
 
     def test_unknown(self):
-        assert _classify_error("something weird happened") == "unknown"
+        assert classify_error("something weird happened") == "unknown"
 
 
 class TestErrorCategoryValidation:
