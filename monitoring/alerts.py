@@ -273,9 +273,39 @@ class AlertManager:
     def _check_heartbeat_miss_spike(
         self, rule: AlertRule
     ) -> AlertEvent | None:
-        """检查心跳丢失激增。"""
-        # 实现从 metrics 中检查
-        return None  # Placeholder - implement if metrics support
+        """检查心跳丢失激增。
+
+        检查因 watchdog 心跳超时被杀死的节点数量。
+        与 _check_node_unhealthy_killed 的区别：
+        - node_unhealthy_killed 检查所有 watchdog 杀死事件
+        - heartbeat_miss_spike 专门检查心跳丢失导致的超时
+
+        使用 MetricsCollector 的 failure 统计中 heartbeat 相关错误。
+        """
+        metrics_data = self.metrics.collect()
+        failures = metrics_data.get("failures", {})
+        top_errors = failures.get("top_errors", [])
+
+        heartbeat_failures = 0
+        for error_entry in top_errors:
+            reason = error_entry.get("reason", "").lower()
+            if "heartbeat" in reason or "watchdog" in reason:
+                heartbeat_failures += error_entry.get("count", 0)
+
+        if heartbeat_failures >= rule.threshold:
+            return AlertEvent(
+                rule_name=rule.name,
+                severity="critical",
+                message=(
+                    f"心跳丢失激增：{heartbeat_failures} 次 "
+                    f"（阈值: {rule.threshold}）"
+                ),
+                details={
+                    "heartbeat_failure_count": heartbeat_failures,
+                    "threshold": rule.threshold,
+                },
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Sending
