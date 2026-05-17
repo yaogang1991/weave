@@ -22,7 +22,7 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.models import (  # noqa: F401
+from core.models import (  # noqa: E402, F401
     DAG,
     DAGNode,
     NodeStatus,
@@ -31,15 +31,15 @@ from core.models import (  # noqa: F401
     HandoffArtifact,
     OrchestratorPlan,
 )
-from core.dag_engine import DAGExecutionEngine
-from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
-from control_plane.models import (
+from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from orchestrator.intelligent_orchestrator import IntelligentOrchestrator  # noqa: E402
+from control_plane.models import (  # noqa: E402
     JobStatus,
     RunStatus,
     RetryPolicy,
 )
-from control_plane.repository import JobRepository
-from control_plane.service import RunService, _classify_error
+from control_plane.repository import JobRepository  # noqa: E402
+from control_plane.service import RunService, _classify_error  # noqa: E402
 
 
 # =============================================================================

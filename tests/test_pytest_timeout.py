@@ -13,9 +13,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evaluator.engine import EvaluatorEngine
-from core.models import CriterionType, SuccessCriterion
-from session.store import SessionStore
+from evaluator.engine import EvaluatorEngine  # noqa: E402
+from core.models import CriterionType, SuccessCriterion  # noqa: E402
+from session.store import SessionStore  # noqa: E402
 
 
 @pytest.fixture

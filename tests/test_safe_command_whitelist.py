@@ -12,9 +12,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.models import PersonalGuardrailPolicy
-from guardrails.policy import PersonalGuardrails
-from tools.registry import ToolRegistry
+from core.models import PersonalGuardrailPolicy  # noqa: E402
+from guardrails.policy import PersonalGuardrails  # noqa: E402
+from tools.registry import ToolRegistry  # noqa: E402
 
 
 @pytest.fixture

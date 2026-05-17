@@ -28,12 +28,12 @@ sys.modules["anthropic"] = _mock_anthropic
 sys.modules["openai"] = _mock_openai
 
 # Now safe to import project modules
-from control_plane.models import JobStatus, RunStatus  # noqa: F401
-from control_plane.approval import TicketStatus
-from control_plane.repository import JobRepository
-from core.models import RiskLevel
+from control_plane.models import JobStatus, RunStatus  # noqa: E402, F401
+from control_plane.approval import TicketStatus  # noqa: E402
+from control_plane.repository import JobRepository  # noqa: E402
+from core.models import RiskLevel  # noqa: E402
 
-import main as main_module
+import main as main_module  # noqa: E402
 
 
 # =============================================================================

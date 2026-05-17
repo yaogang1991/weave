@@ -12,7 +12,7 @@ import pytest
 
 # Import the function under test
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from main import _resolve_project_path
+from main import _resolve_project_path  # noqa: E402
 
 
 HARNESS_ROOT = Path(__file__).parent.parent.resolve()

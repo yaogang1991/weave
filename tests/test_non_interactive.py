@@ -26,15 +26,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.config import HarnessConfig
-from core.models import (  # noqa: F401
+from core.config import HarnessConfig  # noqa: E402
+from core.models import (  # noqa: E402, F401
     GuardrailPolicy,
     PersonalGuardrailPolicy,
     PermissionMode,
     RiskLevel,
     ToolResult,
 )
-from guardrails.policy import GuardrailResult, PersonalGuardrails
+from guardrails.policy import GuardrailResult, PersonalGuardrails  # noqa: E402
 
 
 # Inline WorkerConfig to avoid pulling heavy control_plane dependencies

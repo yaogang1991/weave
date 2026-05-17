@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from main import _check_dirty_workspace
+from main import _check_dirty_workspace  # noqa: E402
 
 
 class TestCheckDirtyWorkspace:

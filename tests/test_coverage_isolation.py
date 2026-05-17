@@ -14,13 +14,13 @@ import pytest
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evaluator.engine import EvaluatorEngine
-from core.models import (  # noqa: F401
+from evaluator.engine import EvaluatorEngine  # noqa: E402
+from core.models import (  # noqa: E402, F401
     CriterionType,
     EvaluationResult,
     SuccessCriterion,
 )
-from session.store import SessionStore
+from session.store import SessionStore  # noqa: E402
 
 
 @pytest.fixture

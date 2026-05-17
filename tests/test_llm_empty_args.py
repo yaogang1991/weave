@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.llm_client import LLMClient
+from core.llm_client import LLMClient  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

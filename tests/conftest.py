@@ -11,9 +11,9 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.config import LLMConfig
-from core.models import ToolResult
-from session.store import SessionStore
+from core.config import LLMConfig  # noqa: E402
+from core.models import ToolResult  # noqa: E402
+from session.store import SessionStore  # noqa: E402
 
 
 def pytest_configure(config: pytest.Config) -> None:
