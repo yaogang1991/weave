@@ -13,7 +13,7 @@ Enhanced with:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, TYPE_CHECKING
 
 import json
 import logging
@@ -25,6 +25,9 @@ from core.config import LLMConfig
 from core.llm_client import LLMClient
 from core.context import ContextManager
 from session.store import SessionStore
+
+if TYPE_CHECKING:
+    from memory.manager import MemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,7 @@ class AgentWorker:
         session_store: SessionStore,
         max_context_tokens: int = 100_000,
         base_cwd: str | None = None,
+        memory_manager: MemoryManager | None = None,
     ):
         self.config = config
         self.session_store = session_store
@@ -88,6 +92,7 @@ class AgentWorker:
         self.max_context_tokens = max_context_tokens
         self.artifacts: list[str] = []
         self._base_cwd = Path(base_cwd).resolve() if base_cwd else None
+        self._memory_manager = memory_manager
         self._context_manager = ContextManager(max_tokens=max_context_tokens)
 
     # -- Public interface ---------------------------------------------------
@@ -118,6 +123,23 @@ class AgentWorker:
             {"role": "user", "content": user_message},
         ]
 
+        # Inject memory context if memory manager is available (#481)
+        if self._memory_manager and self._memory_manager.config.enabled:
+            memory_entries = self._memory_manager.get_context_for_agent(
+                agent_type="shared",
+                task_description=user_message,
+                session_id=session_id,
+            )
+            if memory_entries:
+                memory_prompt = self._memory_manager.format_memory_prompt(
+                    memory_entries,
+                )
+                if memory_prompt:
+                    messages.append({
+                        "role": "user",
+                        "content": memory_prompt,
+                    })
+
         self.artifacts = []
         consecutive_empty_iterations = 0
         consecutive_degenerate_iterations = 0
@@ -129,7 +151,7 @@ class AgentWorker:
                     "Agent loop cancelled at iteration %d/%d (cooperative)",
                     iteration, max_iterations,
                 )
-                return
+                break
 
             # Context management: compact if exceeding threshold (#480)
             if self._context_manager.should_compact(messages):
@@ -165,6 +187,8 @@ class AgentWorker:
                         role="assistant",
                         content=assistant_message.get("content", ""),
                     )
+                    # Persist memory before exiting (#481)
+                    self._persist_memory(session_id, user_message, messages)
                     return  # No tool calls → done
 
                 tool_results, any_tool_executed = self._execute_tool_calls(
@@ -285,6 +309,9 @@ class AgentWorker:
                     },
                 )
                 break
+
+        # Extract and store key learnings to memory (#481)
+        self._persist_memory(session_id, user_message, messages)
 
     def _execute_tool_calls(
         self,
@@ -470,3 +497,34 @@ class AgentWorker:
                 return
             if path not in self.artifacts:
                 self.artifacts.append(path)
+
+    # -- Memory persistence (#481) ------------------------------------------
+
+    def _persist_memory(
+        self,
+        session_id: str,
+        task_description: str,
+        messages: list[dict],
+    ) -> None:
+        """Extract key learnings from conversation and persist to memory store.
+
+        Runs after the agent loop completes. Silently skips if memory
+        manager is not available or memory is disabled.
+        """
+        if not self._memory_manager or not self._memory_manager.config.enabled:
+            return
+        if not self._memory_manager.config.auto_store:
+            return
+
+        try:
+            self._memory_manager.extract_and_store(
+                agent_type="shared",
+                task_description=task_description,
+                execution_result={
+                    "artifacts": self.artifacts,
+                    "message_count": len(messages),
+                },
+                session_id=session_id,
+            )
+        except Exception as exc:
+            logger.debug("Memory persistence failed: %s", exc)
