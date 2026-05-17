@@ -138,19 +138,7 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     # Load DAG from file if not provided directly
     if dag is None:
-        with open(args.plan_file, "r", encoding="utf-8") as f:
-            plan_data = json.load(f)
-
-        dag = DAG(reasoning=plan_data.get("reasoning", ""))
-        for node_def in plan_data["nodes"]:
-            dag.add_node(DAGNode(
-                id=node_def["id"],
-                agent_type=node_def["agent_type"],
-                task_description=node_def["task"],
-                success_criteria=node_def.get("success_criteria", []),
-            ))
-        for edge_def in plan_data.get("edges", []):
-            dag.add_edge(edge_def["from"], edge_def["to"])
+        dag = _load_dag_from_file(args.plan_file)
 
     # Store DAG in session for visualizer
     store.emit_event(
@@ -159,7 +147,58 @@ async def cmd_execute(args, dag: DAG | None = None):
         _serialize_dag(dag),
     )
 
-    # Create guardrails
+    guardrails = _build_guardrails(args, tool_registry)
+    mcp_client = await _init_mcp_tools(config, tool_registry, guardrails)
+
+    runtime = _build_runtime(
+        args, config, store, registry, tool_registry, guardrails, session_id,
+    )
+
+    viz = _setup_visualization(args, runtime["engine"], dag, session_id)
+
+    _attach_event_logger(runtime["engine"], dag, store, session_id)
+
+    print(f"Executing DAG with {len(dag.nodes)} nodes...")
+    print(f"Levels: {dag.topological_levels()}")
+    print()
+    sys.stdout.flush()
+
+    # Execute
+    result_dag = await _execute_with_error_handling(
+        runtime["engine"], dag, store, session_id,
+    )
+    if result_dag is None:
+        return None
+
+    # Summary + cleanup
+    await _finalize_execution(
+        runtime["engine"], result_dag, store, session_id,
+        viz, mcp_client,
+    )
+
+    return result_dag
+
+
+def _load_dag_from_file(plan_file: str) -> DAG:
+    """Load a DAG from a plan JSON file."""
+    with open(plan_file, "r", encoding="utf-8") as f:
+        plan_data = json.load(f)
+
+    dag = DAG(reasoning=plan_data.get("reasoning", ""))
+    for node_def in plan_data["nodes"]:
+        dag.add_node(DAGNode(
+            id=node_def["id"],
+            agent_type=node_def["agent_type"],
+            task_description=node_def["task"],
+            success_criteria=node_def.get("success_criteria", []),
+        ))
+    for edge_def in plan_data.get("edges", []):
+        dag.add_edge(edge_def["from"], edge_def["to"])
+    return dag
+
+
+def _build_guardrails(args, tool_registry: ToolRegistry) -> Guardrails:
+    """Create guardrails based on CLI args."""
     non_interactive = (
         getattr(args, "non_interactive", False)
         or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
@@ -177,9 +216,11 @@ async def cmd_execute(args, dag: DAG | None = None):
             auto_approve_read=True,
             max_iterations=args.max_iterations,
         )
-    guardrails = Guardrails(policy, tool_registry)
+    return Guardrails(policy, tool_registry)
 
-    # M3.6: Connect to MCP servers and register their tools
+
+async def _init_mcp_tools(config, tool_registry, guardrails):
+    """Connect to MCP servers and register their tools."""
     mcp_client = None
     if config.mcp.servers:
         try:
@@ -198,21 +239,27 @@ async def cmd_execute(args, dag: DAG | None = None):
                           f"{connected} server(s)")
         except Exception as e:
             print(f"MCP initialization warning: {e}")
+    return mcp_client
 
-    # M3.6: Load skill registry
+
+def _build_runtime(
+    args, config, store, registry, tool_registry, guardrails, session_id,
+) -> dict:
+    """Build the runtime object graph: pool, orchestrator, evaluator, engine."""
+    # Skill registry
     skill_registry = None
     skills_dir = Path(args.project) / ".harness" / "skills" if args.project else None
     if skills_dir and skills_dir.is_dir():
         from skills.registry import SkillRegistry
         skill_registry = SkillRegistry(skills_dir=skills_dir)
 
-    # M3.1: LLM router
+    # LLM router
     llm_router = None
     if config.model_routing.routing:
         from core.llm_router import LLMRouter
         llm_router = LLMRouter(config.model_routing, config.llm)
 
-    # M3.2: Initialize memory manager
+    # Memory manager
     memory_manager = None
     if config.memory.enabled:
         try:
@@ -221,7 +268,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         except Exception:
             pass
 
-    # M3.3: Initialize learning optimizer
+    # Learning optimizer
     learning_optimizer = None
     if memory_manager:
         try:
@@ -230,7 +277,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         except Exception:
             pass
 
-    # Create agent pool with guardrails + M3 integration
+    # Agent pool
     approval_repo = ApprovalRepository()
     pool = AgentPool(
         llm_config=config.llm,
@@ -247,7 +294,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         approval_repo=approval_repo,
     )
 
-    # Create orchestrator for failure handling + M3 learning
+    # Orchestrator
     orchestrator = IntelligentOrchestrator(
         config.llm, store, registry,
         llm_router=llm_router,
@@ -255,7 +302,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         skill_registry=skill_registry,
     )
 
-    # Create evaluator for quality gates
+    # Evaluator
     from evaluator.engine import EvaluatorEngine
     cli_threshold = getattr(args, "pass_threshold", None)
     pass_threshold = cli_threshold if cli_threshold is not None else config.pass_threshold
@@ -265,7 +312,7 @@ async def cmd_execute(args, dag: DAG | None = None):
         auto_format_before_eval=config.auto_format_before_eval,
     )
 
-    # Create DAG engine + M3 memory integration
+    # DAG engine
     project_work_dir = str(Path(args.project).resolve())
     wd_cfg = config.watchdog
     from core.dag_engine import DAGExecutionEngine
@@ -293,7 +340,16 @@ async def cmd_execute(args, dag: DAG | None = None):
         },
     )
 
-    # Visualization setup
+    return {
+        "engine": engine,
+        "pool": pool,
+        "orchestrator": orchestrator,
+        "evaluator": evaluator,
+    }
+
+
+def _setup_visualization(args, engine, dag, session_id):
+    """Set up CLI and web visualization if requested."""
     bridge = None
     server_task = None
     cli_renderer = None
@@ -305,25 +361,16 @@ async def cmd_execute(args, dag: DAG | None = None):
         engine.on_event(cli_renderer.handle_event)
         cli_renderer.render_dag(dag)
 
-        if args.visualize:
-            from visualizer.event_bridge import WebSocketEventBridge
-            import uvicorn
-            from visualizer.server import app as viz_app
+    return {
+        "bridge": bridge,
+        "server_task": server_task,
+        "cli_renderer": cli_renderer,
+    }
 
-            bridge = WebSocketEventBridge()
-            engine.on_event(bridge.handle_event)
 
-            server_cfg = uvicorn.Config(viz_app, host="0.0.0.0", port=8080, log_level="warning")
-            server = uvicorn.Server(server_cfg)
-            server_task = asyncio.create_task(server.serve())
-            await asyncio.sleep(0.5)
+def _attach_event_logger(engine, dag, store, session_id):
+    """Attach default console progress logger and session event bridge."""
 
-            if not args.no_browser:
-                webbrowser.open("http://127.0.0.1:8080")
-
-        await bridge.broadcast_session_start(session_id, _serialize_dag(dag)) if bridge else None
-
-    # Default console progress + bridge DAG ExecutionEvents into SessionStore
     async def on_event(event):
         print(
             f"  [{event.event_type.upper()}] {event.node_id}: {event.details}",
@@ -348,14 +395,11 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     engine.on_event(on_event)
 
-    print(f"Executing DAG with {len(dag.nodes)} nodes...")
-    print(f"Levels: {dag.topological_levels()}")
-    print()
-    sys.stdout.flush()
 
-    # Execute
+async def _execute_with_error_handling(engine, dag, store, session_id):
+    """Execute DAG with error handling for cancellation, approval, and exceptions."""
     try:
-        result_dag = await engine.execute(dag)
+        return await engine.execute(dag)
     except asyncio.CancelledError:
         store.emit_event(session_id, EventType.SESSION_ERROR, {
             "error": "Execution cancelled (timeout or external signal)",
@@ -388,7 +432,9 @@ async def cmd_execute(args, dag: DAG | None = None):
         })
         raise
 
-    # Summary
+
+async def _finalize_execution(engine, result_dag, store, session_id, viz, mcp_client):
+    """Print summary, emit session end, clean up resources."""
     summary = engine.get_execution_summary(result_dag)
     print("\nExecution complete:")
     print(f"  Total: {summary['total_nodes']}")
@@ -402,6 +448,10 @@ async def cmd_execute(args, dag: DAG | None = None):
         EventType.SESSION_END,
         {"summary": summary},
     )
+
+    bridge = viz.get("bridge")
+    cli_renderer = viz.get("cli_renderer")
+    server_task = viz.get("server_task")
 
     if bridge:
         await bridge.broadcast_session_end(session_id, summary)
@@ -419,8 +469,6 @@ async def cmd_execute(args, dag: DAG | None = None):
 
     if mcp_client:
         await mcp_client.disconnect_all()
-
-    return result_dag
 
 
 async def cmd_run(args):
