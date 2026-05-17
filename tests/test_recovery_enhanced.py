@@ -778,9 +778,10 @@ class TestEmitEvent:
     async def test_emit_event_structure(
         self, tmp_repo: JobRepository,
         tmp_approval_repo: ApprovalRepository,
-        capsys: pytest.CaptureFixture
+        caplog: pytest.LogCaptureFixture,
     ):
-        """_emit_event prints a valid JSON line with expected fields."""
+        """_emit_event logs a valid JSON line with expected fields."""
+        import logging
         from core.config import LLMConfig
         service = RunService(
             repository=tmp_repo,
@@ -788,12 +789,18 @@ class TestEmitEvent:
             approval_repo=tmp_approval_repo,
         )
 
-        service._emit_event("test_event", "job_123", {"key": "value"})
+        with caplog.at_level(logging.INFO, logger="control_plane.service"):
+            service._emit_event("test_event", "job_123", {"key": "value"})
 
-        captured = capsys.readouterr()
-        output = captured.out.strip()
-        event = json.loads(output)
+        # Find the JSON event in the log messages
+        event = None
+        for record in caplog.records:
+            if "Execution event:" in record.message:
+                json_str = record.message.split("Execution event: ", 1)[1]
+                event = json.loads(json_str)
+                break
 
+        assert event is not None, "No event found in log output"
         assert event["type"] == "test_event"
         assert event["job_id"] == "job_123"
         assert event["details"] == {"key": "value"}
