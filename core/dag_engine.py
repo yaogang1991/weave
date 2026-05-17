@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Coroutine
 
 from core.models import (
@@ -82,6 +85,8 @@ class DAGExecutionEngine:
         # Job/run identifiers for workspace isolation (#176 PR2)
         job_id: str = "",
         run_id: str = "",
+        # #455: DAG execution state persistence for crash recovery
+        checkpoint_dir: str = "./data/dag_progress",
     ):
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
@@ -149,6 +154,9 @@ class DAGExecutionEngine:
         # Job/run identifiers for per-node workspace isolation (#176 PR2)
         self._job_id = job_id
         self._run_id = run_id
+        # #455: DAG execution state persistence for crash recovery
+        self._checkpoint_dir = Path(checkpoint_dir)
+        self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
     # -- Backward-compat proxies for extracted services (#177 PR4) ------------
 
@@ -288,6 +296,9 @@ class DAGExecutionEngine:
         Execute the full DAG with support for replanning.
 
         Returns the executed DAG with all nodes' status and results populated.
+
+        #455: On start, loads checkpointed node completions and skips them.
+        On successful completion, cleans up the checkpoint file.
         """
         try:
             levels = dag.topological_levels()
@@ -301,17 +312,44 @@ class DAGExecutionEngine:
         # R3: Auto-serialize parallel generators without ownership contracts (#272 EC4)
         levels = self._auto_serialize_parallel_generators(dag, levels)
 
+        # #455: Restore completed nodes from checkpoint
+        completed_nodes = self._load_completed_nodes()
+        if completed_nodes:
+            restored_count = 0
+            for node_id in completed_nodes:
+                if node_id in dag.nodes:
+                    dag.nodes[node_id].status = NodeStatus.SUCCESS
+                    restored_count += 1
+            if restored_count:
+                logger.info(
+                    "Restored %d completed nodes from checkpoint", restored_count,
+                )
+
         replan_count = 0
         level_idx = 0
 
         try:
             while level_idx < len(levels):
                 level = levels[level_idx]
+                # #455: Skip already-completed nodes
+                pending = [
+                    nid for nid in level
+                    if dag.nodes[nid].status != NodeStatus.SUCCESS
+                ]
+                if not pending:
+                    logger.info(
+                        "Level %d/%d fully completed (checkpoint), skipping",
+                        level_idx + 1, len(levels),
+                    )
+                    level_idx += 1
+                    continue
+
                 semaphore = asyncio.Semaphore(self.max_parallel)
 
                 logger.info(
-                    "Executing level %d/%d: %s",
+                    "Executing level %d/%d: %s (%d pending, %d completed)",
                     level_idx + 1, len(levels), level,
+                    len(pending), len(level) - len(pending),
                 )
 
                 async def run_with_limit(
@@ -320,8 +358,13 @@ class DAGExecutionEngine:
                     async with sem:
                         await self._node_executor.execute_node(dag_ref, node_id)
 
-                tasks = [run_with_limit(nid, semaphore, dag) for nid in level]
+                tasks = [run_with_limit(nid, semaphore, dag) for nid in pending]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
+
+                # #455: Persist completed nodes after each level
+                for nid in pending:
+                    if self._is_terminal_success(dag.nodes[nid].status):
+                        self._persist_node_completion(nid, dag.nodes[nid].result)
 
                 # Check for CancelledError (timeout/signal) — propagate (#304)
                 for r in results:
@@ -338,7 +381,7 @@ class DAGExecutionEngine:
                         raise r
 
                 failed_in_level = [
-                    nid for nid in level
+                    nid for nid in pending
                     if dag.nodes[nid].status == NodeStatus.FAILED
                 ]
 
@@ -421,6 +464,12 @@ class DAGExecutionEngine:
                                 node.error = ""
                                 await self._node_executor.execute_node(dag, failed_id)
 
+                            # #455: Persist retried node if it succeeded
+                            if self._is_terminal_success(dag.nodes[failed_id].status):
+                                self._persist_node_completion(
+                                    failed_id, dag.nodes[failed_id].result,
+                                )
+
                             # Check if retry resolved this failure
                             if not self._is_terminal_success(dag.nodes[failed_id].status):
                                 # This failure was not resolved — but don't skip
@@ -465,6 +514,9 @@ class DAGExecutionEngine:
                 else:
                     level_idx += 1
 
+            # #455: All levels completed — clean up checkpoint
+            self._cleanup_checkpoint()
+
             return dag
         except asyncio.CancelledError:
             # External cancellation (timeout, signal) — log before cleanup (#304)
@@ -486,6 +538,88 @@ class DAGExecutionEngine:
             self._running_tasks = {}
             # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
             self._executor.shutdown(wait=False)
+
+    # -- #455: DAG execution state persistence ----------------------------
+
+    def _checkpoint_file(self) -> Path:
+        """Return checkpoint file path for current session."""
+        return self._checkpoint_dir / f"{self._session_id}.jsonl"
+
+    def _persist_node_completion(
+        self, node_id: str, result: dict | None,
+    ) -> None:
+        """Append node completion record to checkpoint file (#455).
+
+        Atomic append: each write is a single line, safe for concurrent
+        asyncio tasks (single-threaded event loop serializes I/O).
+        """
+        if not self._session_id:
+            return
+        path = self._checkpoint_file()
+        entry = {
+            "node_id": node_id,
+            "status": "completed",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if result:
+            entry["result_summary"] = {
+                k: v for k, v in result.items()
+                if k in ("status", "summary", "output")
+            }
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except OSError as exc:
+            logger.warning(
+                "Failed to persist node %s checkpoint: %s", node_id, exc,
+            )
+
+    def _load_completed_nodes(self) -> set[str]:
+        """Load completed node IDs from checkpoint file (#455).
+
+        Returns set of node_id strings for nodes that completed successfully.
+        Corrupt entries are skipped.
+        """
+        if not self._session_id:
+            return set()
+        path = self._checkpoint_file()
+        if not path.exists():
+            return set()
+        completed: set[str] = set()
+        try:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    if entry.get("status") == "completed":
+                        completed.add(entry["node_id"])
+                except (json.JSONDecodeError, KeyError):
+                    continue
+        except OSError as exc:
+            logger.warning(
+                "Failed to load checkpoint for session %s: %s",
+                self._session_id, exc,
+            )
+        return completed
+
+    def _cleanup_checkpoint(self) -> None:
+        """Remove checkpoint file after successful DAG completion (#455)."""
+        if not self._session_id:
+            return
+        path = self._checkpoint_file()
+        if path.exists():
+            try:
+                path.unlink()
+                logger.info(
+                    "Cleaned up checkpoint for session %s", self._session_id,
+                )
+            except OSError as exc:
+                logger.warning(
+                    "Failed to cleanup checkpoint for session %s: %s",
+                    self._session_id, exc,
+                )
 
     def _find_evaluator_target(self, dag: DAG, eval_node_id: str) -> str | None:
         """
