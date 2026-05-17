@@ -1,11 +1,9 @@
 """Tests for immutable state in SessionStore._apply_event (#457)."""
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
-from core.models import EventType, SessionState, AgentMessage
+from core.models import EventType, SessionState
 from session.store import SessionStore
 
 
@@ -85,6 +83,21 @@ class TestImmutableApplyEvent:
         original_len = len(fresh_state.context_window)
         _ = store._apply_event(fresh_state, event)
         assert len(fresh_state.context_window) == original_len
+
+    def test_max_ctx_configurable(self, tmp_path, fresh_state):
+        """max_ctx from constructor is respected, not hardcoded (#485)."""
+        store = SessionStore(base_path=str(tmp_path / "events"), max_ctx=2)
+        for i in range(5):
+            event = store.emit_event(
+                "test-immutable",
+                EventType.AGENT_MESSAGE,
+                {"role": "assistant", "content": f"msg-{i}"},
+            )
+            fresh_state = store._apply_event(fresh_state, event)
+
+        assert len(fresh_state.context_window) == 2
+        assert fresh_state.context_window[0].content == "msg-3"
+        assert fresh_state.context_window[1].content == "msg-4"
 
 
 class TestRestoreFileSnapshotBackup:

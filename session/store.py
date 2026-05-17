@@ -161,9 +161,8 @@ class SessionStore:
         elif event.type == EventType.AGENT_MESSAGE:
             msg = AgentMessage(**event.payload)
             new_window = list(state.context_window) + [msg]
-            max_ctx = 50  # configurable
-            if len(new_window) > max_ctx:
-                new_window = new_window[-max_ctx:]
+            if len(new_window) > self._max_ctx:
+                new_window = new_window[-self._max_ctx:]
             updates["context_window"] = new_window
         elif event.type == EventType.AGENT_TOOL_USE:
             updates["metrics"] = state.metrics.model_copy(
