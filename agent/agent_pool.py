@@ -98,6 +98,7 @@ class WorkerAgent:
             llm_config, session_store,
             max_context_tokens=max_context_tokens,
             base_cwd=base_cwd,
+            memory_manager=memory_manager,
         )
         self.system_prompt = system_prompt
 
