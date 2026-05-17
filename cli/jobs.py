@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 
-from core.config import WeaveConfig
+from core.config import WeaveConfig, _get_non_interactive_env
 from session.store import SessionStore
 from control_plane.models import JobStatus
 from control_plane.worker import WorkerConfig, run_worker
@@ -139,9 +138,9 @@ async def cmd_cancel(args):
 async def cmd_worker(args):
     """Start a background worker that polls for and executes jobs."""
     repository = _make_repository()
-    non_interactive = args.non_interactive or os.getenv(
-        "WEAVE_NON_INTERACTIVE", ""
-    ).lower() in ("true", "1", "yes")
+    non_interactive = args.non_interactive or _get_non_interactive_env().lower() in (
+        "true", "1", "yes",
+    )
     service = _make_run_service(repository, non_interactive=non_interactive)
     config = WorkerConfig(
         concurrency=args.concurrency,

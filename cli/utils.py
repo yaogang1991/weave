@@ -5,13 +5,12 @@ Extracted from main.py as part of #438.
 """
 
 import json
-import os
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.config import WeaveConfig
+from core.config import WeaveConfig, _get_non_interactive_env
 from core.agent_registry import AgentRegistry
 from core.models import DAG, SuccessCriterion
 
@@ -91,7 +90,7 @@ def _check_dirty_workspace(project: str | None) -> None:
         f"This may be from a previous incomplete run.\n"
     )
 
-    non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in (
+    non_interactive = _get_non_interactive_env().lower() in (
         "true", "1", "yes",
     )
     if non_interactive:
@@ -192,7 +191,7 @@ def _check_stdlib_shadowing(
         msg += f"  - {path.name}/ shadows stdlib '{name}'\n"
     msg += "These will cause import failures in pytest, httpx, and other tools.\n"
 
-    non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in (
+    non_interactive = _get_non_interactive_env().lower() in (
         "true", "1", "yes",
     )
 
