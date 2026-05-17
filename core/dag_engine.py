@@ -14,33 +14,24 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import functools
 import logging
-import os
-import threading
-import traceback
-from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
 from core.models import (
     DAG,
     DAGNode,
     NodeStatus,
-    NodeHealth,
     EvalStatus,
     ExecutionEvent,
     FailureDecision,
     HandoffArtifact,
-    CriterionType,
-    SuccessCriterion,
 )
 from core.exceptions import PendingApprovalError
-from core.exceptions import RateLimitError  # NodeTimeoutError added in PR2
-from core.exceptions import NodeTimeoutError  # noqa: F401 — used in PR2
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
+from core.node_executor import NodeExecutor
 
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
@@ -92,12 +83,14 @@ class DAGExecutionEngine:
         job_id: str = "",
         run_id: str = "",
     ):
-        self.agent_executor = agent_executor
+        # Note: agent_executor is stored in NodeExecutor (created below).
+        # The .agent_executor property proxies to it.
         self.failure_handler = failure_handler
         self.replan_handler = replan_handler
         self.max_replans = max_replans
         self.max_parallel = max_parallel
-        self.evaluator = evaluator
+        # Note: evaluator is stored in NodeExecutor (created below).
+        # The .evaluator property proxies to it.
         self.artifact_path = artifact_path
         self.work_dir = work_dir
         self.job_timeout = job_timeout
@@ -134,6 +127,23 @@ class DAGExecutionEngine:
             memory_manager=memory_manager,
             session_id=session_id,
         )
+        # Node execution delegated to NodeExecutor (#177 PR5).
+        self._node_executor = NodeExecutor(
+            agent_executor=agent_executor,
+            emit_func=self._emit,
+            watchdog=self._watchdog,
+            evaluator=evaluator,
+            artifact_path=artifact_path,
+            work_dir=work_dir,
+            quality_gate=self._quality_gate,
+            artifact_handoff=self._artifact_handoff,
+            node_timeout_config=node_timeout_config,
+            backend_manager=backend_manager,
+            job_id=job_id,
+            run_id=run_id,
+            backoff_base=backoff_base,
+            backoff_cap=backoff_cap,
+        )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
         # Job/run identifiers for per-node workspace isolation (#176 PR2)
@@ -141,6 +151,28 @@ class DAGExecutionEngine:
         self._run_id = run_id
 
     # -- Backward-compat proxies for extracted services (#177 PR4) ------------
+
+    @property
+    def agent_executor(self):
+        """Proxy to NodeExecutor's agent_executor for backward compat.
+
+        Tests may override engine.agent_executor; this ensures the node
+        executor sees the updated value (#177 PR5).
+        """
+        return self._node_executor.agent_executor
+
+    @agent_executor.setter
+    def agent_executor(self, value):
+        self._node_executor.agent_executor = value
+
+    @property
+    def evaluator(self):
+        """Proxy to NodeExecutor's evaluator for backward compat."""
+        return self._node_executor.evaluator
+
+    @evaluator.setter
+    def evaluator(self, value):
+        self._node_executor.evaluator = value
 
     @property
     def heartbeat_interval_sec(self) -> float:
@@ -286,7 +318,7 @@ class DAGExecutionEngine:
                     node_id: str, sem: asyncio.Semaphore, dag_ref: DAG,
                 ) -> None:
                     async with sem:
-                        await self._execute_single_node(dag_ref, node_id)
+                        await self._node_executor.execute_node(dag_ref, node_id)
 
                 tasks = [run_with_limit(nid, semaphore, dag) for nid in level]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -354,7 +386,7 @@ class DAGExecutionEngine:
                                         # No budget left; retry evaluator directly
                                         node.status = NodeStatus.RETRYING
                                         node.error = ""
-                                        await self._execute_single_node(dag, failed_id)
+                                        await self._node_executor.execute_node(dag, failed_id)
                                     else:
                                         await self._emit(ExecutionEvent(
                                             node_id=target_id,
@@ -371,23 +403,23 @@ class DAGExecutionEngine:
                                         gen_node.retry_count = gen_node.max_retries - 1
                                         gen_node.status = NodeStatus.RETRYING
                                         gen_node.error = ""
-                                        await self._execute_single_node(dag, target_id)
+                                        await self._node_executor.execute_node(dag, target_id)
 
                                         if self._is_terminal_success(dag.nodes[target_id].status):
                                             # Re-run evaluator after generator fix
                                             node.status = NodeStatus.RETRYING
                                             node.error = ""
-                                            await self._execute_single_node(dag, failed_id)
+                                            await self._node_executor.execute_node(dag, failed_id)
                                 else:
                                     # No upstream generator found; retry evaluator directly
                                     node.status = NodeStatus.RETRYING
                                     node.error = ""
-                                    await self._execute_single_node(dag, failed_id)
+                                    await self._node_executor.execute_node(dag, failed_id)
                             else:
                                 # Normal retry: retry the failed node itself
                                 node.status = NodeStatus.RETRYING
                                 node.error = ""
-                                await self._execute_single_node(dag, failed_id)
+                                await self._node_executor.execute_node(dag, failed_id)
 
                             # Check if retry resolved this failure
                             if not self._is_terminal_success(dag.nodes[failed_id].status):
@@ -587,442 +619,23 @@ class DAGExecutionEngine:
         """Check if a lint issue is formatting-only and safe to tolerate."""
         return RetryPolicyEngine.is_tolerable_lint_issue(issue)
 
+    # -- Backward-compat proxies for NodeExecutor (#177 PR5) ------------------
+
     async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
-        """Execute a single DAG node with retry logic."""
-        node = dag.nodes[node_id]
+        """Proxy to NodeExecutor.execute_node for backward compat."""
+        await self._node_executor.execute_node(dag, node_id)
 
-        # Skip if already executed (from merged DAG after replan)
-        if self._is_terminal_success(node.status):
-            return
+    @property
+    def _get_node_timeout(self):
+        """Proxy to NodeExecutor._get_node_timeout for backward compat.
 
-        if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
-            return
-
-        # Dependency-aware skip with hard/soft semantics (#271).
-        # HARD deps: upstream FAILED/SKIPPED → downstream SKIP.
-        # SOFT deps: upstream FAILED/SKIPPED → downstream continues with warning.
-        hard_deps = dag.get_hard_dependencies(node_id)
-        failed_hard = [
-            d for d in hard_deps
-            if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
-        ]
-        if failed_hard:
-            node.status = NodeStatus.SKIPPED
-            node.error = (
-                f"Skipped: hard dependencies {failed_hard} "
-                f"failed/were skipped"
-            )
-            logger.info(
-                "Node %s skipped due to failed hard dependencies: %s",
-                node_id, failed_hard,
-            )
-            return
-
-        soft_deps = dag.get_soft_dependencies(node_id)
-        failed_soft = [
-            d for d in soft_deps
-            if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
-        ]
-        if failed_soft:
-            logger.info(
-                "Node %s: soft dependencies %s failed, continuing anyway",
-                node_id, failed_soft,
-            )
-
-        input_artifacts = self._collect_input_artifacts(
-            dag, node_id, failed_soft=failed_soft,
-        )
-
-        node.status = NodeStatus.RUNNING
-        node.started_at = datetime.now(timezone.utc)
-        node.health_status = NodeHealth.HEALTHY
-        node.record_heartbeat()  # M2.0: Initial heartbeat
-
-        logger.info(
-            "Node %s (%s) starting — attempt %d/%d",
-            node_id, node.agent_type, node.retry_count + 1, node.max_retries,
-        )
-
-        # M2.0: Register with watchdog
-        self._watchdog.register(node_id, node)
-        current_task = asyncio.current_task()
-        if current_task:
-            self._running_tasks[node_id] = current_task
-
-        await self._emit(ExecutionEvent(
-            node_id=node_id,
-            event_type="started",
-            details={"agent_type": node.agent_type, "task": node.task_description[:100]},
-        ))
-
-        # Per-node workspace isolation (#176 PR2).
-        # When backend_manager is available and node uses a non-SHARED strategy,
-        # allocate an isolated workspace for this node's execution.
-        from core.models import NodeWorkspaceStrategy
-        node_workspace = None
-        workspace_path: str | None = None
-        if (
-            self.backend_manager
-            and node.workspace_strategy != NodeWorkspaceStrategy.SHARED
-        ):
-            try:
-                node_workspace = self.backend_manager.setup_node(
-                    job_id=self._job_id,
-                    run_id=self._run_id,
-                    node_id=node_id,
-                    strategy=node.workspace_strategy.value,
-                )
-                workspace_path = node_workspace.workspace_path
-            except Exception as exc:
-                logger.warning(
-                    "Node %s: setup_node failed (%s), using shared workspace",
-                    node_id, exc,
-                )
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="workspace_isolation_failed",
-                    details={"error": str(exc)},
-                ))
-
-        try:
-            result = await self._execute_with_timeout(
-                node, input_artifacts,
-                workspace_path=workspace_path,
-            )
-
-            # -- Evaluation gate --
-            # Assign output_artifacts BEFORE evaluation so evaluator can use them
-            previous_artifacts = node.output_artifacts or []
-            reported_artifacts = result.get("artifacts", [])
-            # Preserve previous artifacts on retry: agent may only read/test
-            # without write/edit, leaving artifacts empty (#165).
-            if not reported_artifacts and previous_artifacts:
-                reported_artifacts = previous_artifacts
-                logger.info(
-                    "Node %s: retry produced no new artifacts, preserving %d from previous attempt",
-                    node_id, len(previous_artifacts),
-                )
-            node.output_artifacts = reported_artifacts
-            logger.debug("Node %s (%s) produced artifacts: %s", node_id, node.agent_type, node.output_artifacts)
-
-            # -- Zero-output fast-fail (#229) --
-            # If a node that should produce files has zero artifacts, fail
-            # immediately with a clear message — regardless of evaluator presence.
-            if (
-                not node.output_artifacts
-                and self._requires_output_artifacts(node)
-            ):
-                node.error = (
-                    f"Node produced zero output artifacts. "
-                    f"Agent type: {node.agent_type}, task: {node.task_description[:200]}. "
-                    f"This typically indicates the agent exhausted its iteration "
-                    f"budget without writing any files."
-                )
-                node.status = NodeStatus.FAILED
-                node.completed_at = datetime.now(timezone.utc)
-                node.retry_count += 1
-                logger.warning(
-                    "Node %s (%s) fast-failed: zero output artifacts",
-                    node_id, node.agent_type,
-                )
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="failed",
-                    details={
-                        "reason": "zero_output_artifacts",
-                        "agent_type": node.agent_type,
-                    },
-                ))
-                return
-
-            # Test file enforcement (#247): only enforce when the DAG
-            # explicitly includes a TEST_FILE_EXISTS criterion. This is
-            # distinct from TESTS_PASS which means "tests must pass", not
-            # "must create test files".
-            # Delegated to QualityGate (#177 PR4).
-            test_check = self._quality_gate.check_test_file_requirement(
-                node, node_id,
-            )
-            if test_check is not None:
-                node.eval_feedback = test_check.eval_feedback
-                node.error = test_check.error
-                node.status = test_check.node_status
-                node.completed_at = datetime.now(timezone.utc)
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type=test_check.event_type,
-                    details=test_check.event_details,
-                ))
-                return
-
-            if self.evaluator and node.success_criteria and node.agent_type == "generator":
-                if not self.work_dir:
-                    logger.error(
-                        "Node %s: work_dir not set — cannot evaluate safely. "
-                        "Aborting evaluation to prevent incorrect results.",
-                        node_id,
-                    )
-                    node.status = NodeStatus.FAILED
-                    node.error = (
-                        "Evaluation skipped: work_dir not configured. "
-                        "Pass --project to set the working directory."
-                    )
-                    node.completed_at = datetime.now(timezone.utc)
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="failed",
-                        details={"reason": "no_work_dir"},
-                    ))
-                    return
-                eval_work_dir = workspace_path or self.work_dir
-                eval_result = await asyncio.get_running_loop().run_in_executor(
-                    self._executor,
-                    functools.partial(
-                        self.evaluator.evaluate_stage,
-                        node_id, node_id, node.success_criteria, self.artifact_path,
-                        work_dir=eval_work_dir,
-                        output_artifacts=node.output_artifacts or None,
-                        owned_files=node.owned_files or None,
-                    ),
-                )
-
-                # Delegate evaluation result processing to QualityGate (#177 PR4).
-                outcome = self._quality_gate.evaluate(
-                    eval_result, node, node_id, eval_work_dir,
-                )
-
-                node.auto_eval_result = outcome.auto_eval_result
-
-                if not outcome.passed:
-                    node.retry_count += outcome.retry_count_increment
-                    node.eval_feedback = outcome.eval_feedback
-                    node.error = outcome.error
-                    node.status = outcome.node_status
-                    node.completed_at = datetime.now(timezone.utc)
-
-                    # Update artifacts from regression restoration
-                    if outcome.restored_artifacts is not None:
-                        node.output_artifacts = outcome.restored_artifacts
-
-                    # If node exhausted retries, clear auto_eval_result
-                    if node.retry_count >= node.max_retries:
-                        node.auto_eval_result = None
-
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="failed",
-                        details={
-                            "reason": "evaluation_failed",
-                            "score": eval_result.score,
-                            "attempt": node.retry_count,
-                        },
-                    ))
-                    return
-
-            # Map evaluator result to node status (#270).
-            if self.evaluator and node.success_criteria and node.agent_type == "generator":
-                node.status = self._eval_status_to_node_status(eval_result.eval_status)
-            else:
-                node.status = NodeStatus.SUCCESS
-            node.completed_at = datetime.now(timezone.utc)
-            node.result = result
-            node.output_artifacts = result.get("artifacts", [])
-
-            # R3: Cleanup leftover artifacts after node success (#240)
-            if self.backend_manager and node.owned_files and node.started_at:
-                try:
-                    cleaned = self.backend_manager.cleanup_node_artifacts(
-                        job_id="",
-                        run_id="",
-                        node_id=node_id,
-                        expected_artifacts=node.owned_files,
-                        started_at=node.started_at.timestamp(),
-                    )
-                    if cleaned:
-                        logger.info(
-                            "Cleaned up %d leftover files from node %s",
-                            len(cleaned), node_id,
-                        )
-                except Exception as e:
-                    logger.debug("Artifact cleanup failed for node %s: %s", node_id, e)
-
-            await self._emit(ExecutionEvent(
-                node_id=node_id,
-                event_type="completed",
-                details={"output_count": len(node.output_artifacts)},
-            ))
-
-        except asyncio.CancelledError:
-            # M2.0: Check if node was killed by watchdog (DEAD state)
-            # CancelledError is BaseException in Python 3.11+, not caught by
-            # Exception. We catch it here to handle watchdog cancellation.
-            if node.health_status == NodeHealth.DEAD:
-                return  # Swallow cancellation for watchdog-killed nodes
-            raise  # Re-raise for genuine cancellation requests
-
-        except PendingApprovalError:
-            # Agent hit a high-risk tool requiring human approval.
-            # Do NOT retry, do NOT mark as failed — just pause and re-raise
-            # so the Worker can enter its PENDING_APPROVAL poll loop.
-            node.status = NodeStatus.PENDING_APPROVAL
-            node.completed_at = datetime.now(timezone.utc)
-            raise
-
-        except Exception as e:
-            # M2.0: Check if node was already killed by watchdog (DEAD state)
-            if node.health_status == NodeHealth.DEAD:
-                # Node was killed by watchdog; do not retry
-                return
-
-            node.error = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
-
-            # RateLimitError: do NOT consume node retry budget (#360).
-            # The error will propagate to service.py which also skips the
-            # job-level retry budget for rate_limit errors.
-            if isinstance(e, RateLimitError):
-                node.status = NodeStatus.FAILED
-                node.completed_at = datetime.now(timezone.utc)
-                node.auto_eval_result = None
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="failed",
-                    details={
-                        "error": str(e),
-                        "reason": "rate_limit",
-                        "retry_budget_preserved": True,
-                    },
-                ))
-                return
-
-            node.retry_count += 1
-
-            if node.retry_count < node.max_retries:
-                # Clean up workspace before retry so setup_node gets a clean
-                # slate (e.g. git worktree add would fail if dir exists).
-                if node_workspace and self.backend_manager:
-                    try:
-                        self.backend_manager.cleanup_node(
-                            self._job_id, self._run_id, node_id,
-                        )
-                        node_workspace = None
-                        workspace_path = None
-                    except Exception as cleanup_exc:
-                        logger.warning(
-                            "Node %s: pre-retry cleanup failed: %s",
-                            node_id, cleanup_exc,
-                        )
-                node.status = NodeStatus.RETRYING
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="retrying",
-                    details={"attempt": node.retry_count, "error": str(e)},
-                ))
-                backoff = self._compute_backoff(node.retry_count)
-                await asyncio.sleep(backoff)
-                await self._execute_single_node(dag, node_id)
-            else:
-                node.status = NodeStatus.FAILED
-                node.completed_at = datetime.now(timezone.utc)
-                # Clear stale auto_eval_result on terminal failure (#145).
-                node.auto_eval_result = None
-
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="failed",
-                    details={"error": str(e), "attempts": node.retry_count},
-                ))
-        finally:
-            # M2.0: Unregister from watchdog on completion (unless killed by watchdog)
-            if node.health_status != NodeHealth.DEAD:
-                self._watchdog.unregister(node_id)
-                self._running_tasks.pop(node_id, None)
-            # Clean up per-node workspace (#176 PR2)
-            if node_workspace and self.backend_manager:
-                try:
-                    self.backend_manager.cleanup_node(
-                        self._job_id, self._run_id, node_id,
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Node %s: cleanup_node failed: %s", node_id, exc,
-                    )
-
-    async def _execute_with_timeout(
-        self,
-        node: DAGNode,
-        input_artifacts: list[HandoffArtifact],
-        workspace_path: str | None = None,
-    ) -> dict[str, Any]:
-        """Execute a node with unified wall-clock timeout (#360 PR3).
-
-        - Timeout is per-agent-type via node_timeout config
-        - Cooperative cancellation: threading.Event passed to agent thread
-        - Progress reporting: agent reports heartbeat after each LLM call and
-          tool execution via progress_callback, replacing the old auto-heartbeat
-          loop. Watchdog detects "no progress" rather than "event loop frozen".
+        Tests may monkey-patch this; the property delegates.
         """
-        timeout = self._get_node_timeout(node.agent_type)
-        cancel_event = threading.Event()
+        return self._node_executor._get_node_timeout
 
-        # Progress callback: agent thread calls this after each meaningful
-        # action (LLM response received, tool executed). This replaces the
-        # old _heartbeat_loop auto-heartbeat (#360 PR3).
-        loop = asyncio.get_running_loop()
-
-        def _on_progress() -> None:
-            # Thread-safe: schedule heartbeat on event loop thread
-            # instead of mutating node directly from worker thread.
-            try:
-                loop.call_soon_threadsafe(node.record_heartbeat)
-            except RuntimeError:
-                pass  # Event loop closed
-
-        async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
-            return await self.agent_executor(
-                n, arts,
-                cancel_event=cancel_event,
-                progress_callback=_on_progress,
-                workspace_path=workspace_path,
-            )
-
-        task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
-
-        try:
-            return await asyncio.wait_for(task, timeout=timeout)
-        except asyncio.TimeoutError:
-            # Signal the thread to stop at next iteration boundary
-            cancel_event.set()
-            logger.warning(
-                "Node %s (%s) timed out after %ds — cancel event set",
-                node.id, node.agent_type, timeout,
-            )
-            raise NodeTimeoutError(
-                node_id=node.id,
-                agent_type=node.agent_type,
-                timeout=timeout,
-            )
-        except asyncio.CancelledError:
-            cancel_event.set()
-            if not task.done():
-                task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            raise
-
-    def _get_node_timeout(self, agent_type: str) -> int:
-        """Return node timeout for the given agent type.
-
-        Uses NodeTimeoutConfig from config if available, otherwise falls
-        back to watchdog-based calculation for backward compatibility.
-        """
-        if self._node_timeout_config is not None:
-            return self._node_timeout_config.timeout_for(agent_type)
-        # Fallback: derive from watchdog settings (backward compat)
-        # Floor of 1s prevents timeout=0 when interval*threshold rounds down.
-        interval, threshold = self._get_heartbeat_settings(agent_type)
-        return max(1, int(interval * threshold))
+    @_get_node_timeout.setter
+    def _get_node_timeout(self, value):
+        self._node_executor._get_node_timeout = value
 
     def _collect_input_artifacts(
         self,
@@ -1030,11 +643,9 @@ class DAGExecutionEngine:
         node_id: str,
         failed_soft: list[str] | None = None,
     ) -> list[HandoffArtifact]:
-        """Collect output artifacts from all dependency nodes.
+        """Proxy to NodeExecutor._collect_input_artifacts for backward compat."""
+        return self._node_executor._collect_input_artifacts(dag, node_id, failed_soft)
 
-        Delegated to ArtifactHandoffService (#177 PR4).
-        """
-        return self._artifact_handoff.collect(dag, node_id, failed_soft)
 
     def get_execution_summary(self, dag: DAG) -> dict[str, Any]:
         """Generate a summary of DAG execution results."""
