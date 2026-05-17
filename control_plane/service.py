@@ -40,6 +40,7 @@ from control_plane.models import Job, Run, JobStatus, RetryPolicy  # noqa: E402
 from control_plane.repository import JobRepository  # noqa: E402
 from control_plane.run_lifecycle import RunLifecycleManager  # noqa: E402
 from control_plane.job_result import JobResultWriter  # noqa: E402
+from control_plane.errors import classify_error  # noqa: E402
 from control_plane.execution_factory import ExecutionFactory  # noqa: E402
 from control_plane.job_lifecycle import JobLifecycleManager  # noqa: E402
 
@@ -49,37 +50,6 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 # Error classification helper
 # ============================================================================
-
-
-def _classify_error(error: str) -> str:
-    """Classify an error string into a canonical category (#360).
-
-    Recognises structured exception names (NodeTimeoutError, RateLimitError)
-    as well as legacy string patterns.
-    """
-    lowered = error.lower()
-    # Rate limit: structured exception names and legacy patterns
-    if any(s in lowered for s in ("ratelimiterror", "429", "rate_limit", "rate limit")):
-        return "rate_limit"
-    if "nodetimeouterror" in lowered:
-        return "timeout"
-    if "timeout" in lowered or "timed out" in lowered:
-        return "timeout"
-    if "coverage" in lowered and (
-        "below target" in lowered or "could not be verified" in lowered or "not verified" in lowered
-    ):
-        return "coverage_low"
-    if "evaluation failed" in lowered or "eval_" in lowered:
-        return "eval_failed"
-    if "importerror" in lowered or "modulenotfounderror" in lowered or "cannot import" in lowered:
-        return "naming_mismatch"
-    if "runtimeerror" in lowered or "attributeerror" in lowered or "keyerror" in lowered:
-        return "runtime_error"
-    if "guardrail" in lowered or "blocked" in lowered or "permission" in lowered:
-        return "tool_blocked"
-    if "watchdog" in lowered or "killed by watchdog" in lowered:
-        return "watchdog"
-    return "unknown"
 
 
 def _default_watchdog_config() -> WatchdogConfig:
@@ -378,7 +348,7 @@ class RunService:
                         for nid in failed_nodes
                     ]
                     error_msg = "; ".join(errors)
-                    error_cat = _classify_error(error_msg)
+                    error_cat = classify_error(error_msg)
 
                 # Must transition RUNNING -> FAILED before handle_job_failure
                 self.repository.transition_job_status(
@@ -454,7 +424,7 @@ class RunService:
                 return self.repository.get_run(run.id) or run
 
             error_msg = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
-            error_cat = _classify_error(str(exc))
+            error_cat = classify_error(str(exc))
 
             run = self._lifecycle.mark_failed(run, {"error": "execution_error", "reason": str(exc)})
 

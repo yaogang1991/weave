@@ -39,18 +39,6 @@ def _json_log(
     print(log_line, file=sys.stderr, flush=True)
 
 
-def classify_error(exc: BaseException) -> str:
-    """Map an exception to a coarse error category."""
-    name = type(exc).__name__
-    if "Timeout" in name or "timeout" in str(exc).lower():
-        return "timeout"
-    if "Blocked" in name or "blocked" in str(exc).lower():
-        return "tool_blocked"
-    if "Eval" in name or "eval" in str(exc).lower():
-        return "eval_failed"
-    return "unknown"
-
-
 def finalize_pending_approval_run(
     repository: Any,
     job_id: str,

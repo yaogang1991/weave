@@ -39,7 +39,8 @@ from control_plane.models import (  # noqa: E402
     RetryPolicy,
 )
 from control_plane.repository import JobRepository  # noqa: E402
-from control_plane.service import RunService, _classify_error  # noqa: E402
+from control_plane.service import RunService  # noqa: E402
+from control_plane.errors import classify_error  # noqa: E402
 
 
 # =============================================================================
@@ -195,9 +196,9 @@ class TestTimeoutMechanisms:
     @pytest.mark.asyncio
     async def test_timeout_error_classification(self):
         """Timeout errors are classified correctly."""
-        assert _classify_error("asyncio.TimeoutError: timed out") == "timeout"
-        assert _classify_error("Job execution timed out after 30s") == "timeout"
-        assert _classify_error("Connection timed out waiting for response") == "timeout"
+        assert classify_error("asyncio.TimeoutError: timed out") == "timeout"
+        assert classify_error("Job execution timed out after 30s") == "timeout"
+        assert classify_error("Connection timed out waiting for response") == "timeout"
 
 
 # =============================================================================
@@ -808,18 +809,18 @@ class TestErrorClassification:
     """Tests for error categorization."""
 
     def test_timeout_classification(self):
-        assert _classify_error("asyncio.TimeoutError") == "timeout"
-        assert _classify_error("timed out after 30 seconds") == "timeout"
-        assert _classify_error("Connection timed out") == "timeout"
+        assert classify_error("asyncio.TimeoutError") == "timeout"
+        assert classify_error("timed out after 30 seconds") == "timeout"
+        assert classify_error("Connection timed out") == "timeout"
 
     def test_eval_failed_classification(self):
-        assert _classify_error("evaluation failed on criteria X") == "eval_failed"
-        assert _classify_error("eval_score below threshold") == "eval_failed"
+        assert classify_error("evaluation failed on criteria X") == "eval_failed"
+        assert classify_error("eval_score below threshold") == "eval_failed"
 
     def test_tool_blocked_classification(self):
-        assert _classify_error("guardrail blocked file deletion") == "tool_blocked"
-        assert _classify_error("permission denied for bash command") == "tool_blocked"
+        assert classify_error("guardrail blocked file deletion") == "tool_blocked"
+        assert classify_error("permission denied for bash command") == "tool_blocked"
 
     def test_unknown_classification(self):
-        assert _classify_error("some random error") == "unknown"
-        assert _classify_error("") == "unknown"
+        assert classify_error("some random error") == "unknown"
+        assert classify_error("") == "unknown"

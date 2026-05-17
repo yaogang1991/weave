@@ -37,13 +37,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from control_plane.repository import JobRepository  # noqa: E402
 from control_plane.service import RunService  # noqa: E402
 from control_plane.models import JobStatus  # noqa: E402
+from control_plane.errors import classify_error  # noqa: E402
 from control_plane.worker_recovery import (  # noqa: E402
     _json_log,
     recover_orphan_jobs,
     recover_pending_tickets,
 )
 from control_plane.worker_executor import (  # noqa: E402
-    classify_error,
     execute_job_core,
     finalize_pending_approval_run,
     handle_failure,
@@ -405,10 +405,6 @@ class TaskWorker:
             self.repository, self.run_service, job_id, ticket_id,
             stop_event=self._stop_event,
         )
-
-    @staticmethod
-    def _classify_error(exc: BaseException) -> str:
-        return classify_error(exc)
 
     def _log_event(self, event_type: str, job_id: str, payload: dict[str, Any]) -> None:
         from control_plane.worker_recovery import log_event
