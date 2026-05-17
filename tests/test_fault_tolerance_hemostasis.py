@@ -6,7 +6,7 @@ Covers:
 2. RateLimitError propagation chain
 3. RateLimitError does not consume node retry budget in dag_engine
 4. LLM rate limit sleep cap reduced from 300 to 60
-5. _classify_error recognises new exception names
+5. classify_error recognises new exception names
 6. PR2: Node timeout managed by dag_engine + cooperative cancel
 7. PR3: progress_callback replaces _heartbeat_loop
 8. PR4: Timeout inequality validation
@@ -184,33 +184,33 @@ class TestLLMSleepCap:
             assert s <= 61, f"Sleep {s}s exceeds 60s cap"
 
 
-# -- 5. _classify_error recognises new exceptions --------------------------
+# -- 5. classify_error recognises new exceptions --------------------------
 
 class TestClassifyError:
     def test_classify_node_timeout_error(self):
-        from control_plane.service import _classify_error
-        assert _classify_error(
+        from control_plane.errors import classify_error
+        assert classify_error(
             "NodeTimeoutError: Node n1 (generator) exceeded 300s timeout"
         ) == "timeout"
 
     def test_classify_rate_limit_error(self):
-        from control_plane.service import _classify_error
-        assert _classify_error(
+        from control_plane.errors import classify_error
+        assert classify_error(
             "RateLimitError: Rate limit exhausted for "
             "anthropic/claude-sonnet-4-6 after 3 retries"
         ) == "rate_limit"
 
     def test_classify_legacy_timeout_string(self):
-        from control_plane.service import _classify_error
-        assert _classify_error("Agent execution timed out after 300s") == "timeout"
+        from control_plane.errors import classify_error
+        assert classify_error("Agent execution timed out after 300s") == "timeout"
 
     def test_classify_legacy_429_string(self):
-        from control_plane.service import _classify_error
-        assert _classify_error("429 Too Many Requests") == "rate_limit"
+        from control_plane.errors import classify_error
+        assert classify_error("429 Too Many Requests") == "rate_limit"
 
     def test_classify_unknown(self):
-        from control_plane.service import _classify_error
-        assert _classify_error("Something unexpected happened") == "unknown"
+        from control_plane.errors import classify_error
+        assert classify_error("Something unexpected happened") == "unknown"
 
 
 # -- 6. PR2: Node timeout managed by dag_engine + cooperative cancel ---------

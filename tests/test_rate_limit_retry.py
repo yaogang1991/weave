@@ -29,27 +29,27 @@ def _make_job(attempt=1, max_attempts=3):
     )
 
 
-def test_classify_error_rate_limit_429():
-    from control_plane.service import _classify_error
-    assert _classify_error("429 rate limit exceeded") == "rate_limit"
+def testclassify_error_rate_limit_429():
+    from control_plane.errors import classify_error
+    assert classify_error("429 rate limit exceeded") == "rate_limit"
 
 
-def test_classify_error_rate_limit_anthropic():
-    from control_plane.service import _classify_error
-    assert _classify_error(
+def testclassify_error_rate_limit_anthropic():
+    from control_plane.errors import classify_error
+    assert classify_error(
         "anthropic.RateLimitError: rate limit exceeded"
     ) == "rate_limit"
 
 
-def test_classify_error_rate_limit_phrase():
-    from control_plane.service import _classify_error
-    assert _classify_error("API rate limit hit") == "rate_limit"
+def testclassify_error_rate_limit_phrase():
+    from control_plane.errors import classify_error
+    assert classify_error("API rate limit hit") == "rate_limit"
 
 
-def test_classify_error_non_rate():
-    from control_plane.service import _classify_error
-    assert _classify_error("timeout exceeded") == "timeout"
-    assert _classify_error("unknown error") == "unknown"
+def testclassify_error_non_rate():
+    from control_plane.errors import classify_error
+    assert classify_error("timeout exceeded") == "timeout"
+    assert classify_error("unknown error") == "unknown"
 
 
 def test_rate_limit_does_not_bump_attempt(tmp_path):
