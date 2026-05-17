@@ -6,7 +6,7 @@ Covers:
 2. RateLimitError propagation chain
 3. RateLimitError does not consume node retry budget in dag_engine
 4. LLM rate limit sleep cap reduced from 300 to 60
-5. _classify_error recognises new exception names
+5. classify_error recognises new exception names
 6. PR2: Node timeout managed by dag_engine + cooperative cancel
 7. PR3: progress_callback replaces _heartbeat_loop
 8. PR4: Timeout inequality validation
@@ -112,8 +112,8 @@ class TestRateLimitRetryBudget:
         )
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.FAILED
-        assert node.retry_count == 0  # NOT incremented
+        assert dag.nodes["test_node"].status == NodeStatus.FAILED
+        assert dag.nodes["test_node"].retry_count == 0  # NOT incremented
         assert call_count == 1
 
     @pytest.mark.asyncio
@@ -142,10 +142,12 @@ class TestRateLimitRetryBudget:
         )
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.FAILED
+        # Read from dag.nodes (not stale local `node`) after immutable updates (#486)
+        final_node = dag.nodes["test_node"]
+        assert final_node.status == NodeStatus.FAILED
         # dag_engine retries internally up to max_retries, then abort fires.
         # retry_count == max_retries means all internal retries were consumed.
-        assert node.retry_count == node.max_retries
+        assert final_node.retry_count == final_node.max_retries
         assert call_count >= 1
 
 
@@ -184,33 +186,33 @@ class TestLLMSleepCap:
             assert s <= 61, f"Sleep {s}s exceeds 60s cap"
 
 
-# -- 5. _classify_error recognises new exceptions --------------------------
+# -- 5. classify_error recognises new exceptions --------------------------
 
 class TestClassifyError:
     def test_classify_node_timeout_error(self):
-        from control_plane.service import _classify_error
-        assert _classify_error(
+        from control_plane.errors import classify_error
+        assert classify_error(
             "NodeTimeoutError: Node n1 (generator) exceeded 300s timeout"
         ) == "timeout"
 
     def test_classify_rate_limit_error(self):
-        from control_plane.service import _classify_error
-        assert _classify_error(
+        from control_plane.errors import classify_error
+        assert classify_error(
             "RateLimitError: Rate limit exhausted for "
             "anthropic/claude-sonnet-4-6 after 3 retries"
         ) == "rate_limit"
 
     def test_classify_legacy_timeout_string(self):
-        from control_plane.service import _classify_error
-        assert _classify_error("Agent execution timed out after 300s") == "timeout"
+        from control_plane.errors import classify_error
+        assert classify_error("Agent execution timed out after 300s") == "timeout"
 
     def test_classify_legacy_429_string(self):
-        from control_plane.service import _classify_error
-        assert _classify_error("429 Too Many Requests") == "rate_limit"
+        from control_plane.errors import classify_error
+        assert classify_error("429 Too Many Requests") == "rate_limit"
 
     def test_classify_unknown(self):
-        from control_plane.service import _classify_error
-        assert _classify_error("Something unexpected happened") == "unknown"
+        from control_plane.errors import classify_error
+        assert classify_error("Something unexpected happened") == "unknown"
 
 
 # -- 6. PR2: Node timeout managed by dag_engine + cooperative cancel ---------
@@ -242,7 +244,7 @@ class TestNodeTimeoutInDagEngine:
         engine._get_node_timeout = lambda agent_type: 1
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.FAILED
+        assert dag.nodes["slow_node"].status == NodeStatus.FAILED
 
 
 class TestCooperativeCancellation:
@@ -364,7 +366,7 @@ class TestProgressCallback:
         engine._get_node_timeout = lambda agent_type: 300
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.SUCCESS
+        assert dag.nodes["test_node"].status == NodeStatus.SUCCESS
         assert progress_calls >= 1
 
     @pytest.mark.asyncio
