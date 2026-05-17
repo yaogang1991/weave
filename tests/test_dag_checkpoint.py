@@ -73,20 +73,20 @@ class TestPersistNodeCompletion:
         assert entry_b["node_id"] == "node_b"
         assert entry_b["status"] == "completed"
 
-    def test_result_summary_filtered(self, tmp_path):
+    def test_result_stored_fully(self, tmp_path):
         engine = _make_engine(tmp_path)
         engine._persist_node_completion("node_a", {
             "status": "completed",
             "summary": "done",
             "output": "file.py",
-            "internal_data": "should_be_excluded",
+            "artifacts": [{"path": "out.py", "type": "code"}],
         })
 
         entry = json.loads(
             engine._checkpoint_file().read_text().strip()
         )
-        assert "internal_data" not in entry.get("result_summary", {})
-        assert "summary" in entry["result_summary"]
+        assert entry["result"]["artifacts"] == [{"path": "out.py", "type": "code"}]
+        assert entry["result"]["summary"] == "done"
 
     def test_noop_without_session_id(self, tmp_path):
         engine = _make_engine(tmp_path, session_id=None)
@@ -100,12 +100,12 @@ class TestLoadCompletedNodes:
         engine = _make_engine(tmp_path)
         path = engine._checkpoint_file()
         path.write_text(
-            '{"node_id": "a", "status": "completed"}\n'
+            '{"node_id": "a", "status": "completed", "result": {"status": "ok"}}\n'
             '{"node_id": "b", "status": "completed"}\n'
         )
 
         result = engine._load_completed_nodes()
-        assert result == {"a", "b"}
+        assert result == {"a": {"status": "ok"}, "b": None}
 
     def test_skips_non_completed_entries(self, tmp_path):
         engine = _make_engine(tmp_path)
@@ -116,12 +116,12 @@ class TestLoadCompletedNodes:
         )
 
         result = engine._load_completed_nodes()
-        assert result == {"a"}
+        assert result == {"a": None}
 
     def test_returns_empty_for_missing_file(self, tmp_path):
         engine = _make_engine(tmp_path)
         result = engine._load_completed_nodes()
-        assert result == set()
+        assert result == {}
 
     def test_skips_corrupt_lines(self, tmp_path):
         engine = _make_engine(tmp_path)
@@ -133,12 +133,12 @@ class TestLoadCompletedNodes:
         )
 
         result = engine._load_completed_nodes()
-        assert result == {"a", "c"}
+        assert result == {"a": None, "c": None}
 
     def test_noop_without_session_id(self, tmp_path):
         engine = _make_engine(tmp_path, session_id=None)
         result = engine._load_completed_nodes()
-        assert result == set()
+        assert result == {}
 
 
 class TestCleanupCheckpoint:
@@ -273,10 +273,9 @@ class TestCrashRecovery:
         # All nodes executed normally
         assert executed_nodes == ["a", "b", "c"]
 
-        # No checkpoint directory created (mkdir happens but no files)
+        # No checkpoint directory created (lazy mkdir — no files written)
         checkpoint_dir = tmp_path / "dag_progress"
-        jsonl_files = list(checkpoint_dir.glob("*.jsonl"))
-        assert len(jsonl_files) == 0
+        assert not checkpoint_dir.exists()
 
     @pytest.mark.asyncio
     async def test_checkpoint_preserved_on_failure(self, tmp_path):
@@ -333,3 +332,31 @@ class TestCrashRecovery:
         assert "a" not in executed_nodes
         assert "b" in executed_nodes
         assert "c" in executed_nodes
+
+    @pytest.mark.asyncio
+    async def test_restores_node_result_from_checkpoint(self, tmp_path):
+        """Crash recovery restores result dict, not just status."""
+        engine = _make_engine(tmp_path)
+        engine._persist_node_completion("a", {
+            "status": "completed",
+            "summary": "planned architecture",
+            "output": "plan.md",
+            "artifacts": [{"path": "plan.md", "type": "doc"}],
+        })
+
+        async def tracking_executor(node, artifacts, **kwargs):
+            return {"status": "completed", "summary": "done", "artifacts": []}
+
+        engine2 = DAGExecutionEngine(
+            tracking_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            checkpoint_dir=str(tmp_path / "dag_progress"),
+        )
+
+        dag = _make_three_node_dag()
+        await engine2.execute(dag)
+
+        assert dag.nodes["a"].result is not None
+        assert dag.nodes["a"].result["summary"] == "planned architecture"
+        assert dag.nodes["a"].result["artifacts"] == [{"path": "plan.md", "type": "doc"}]

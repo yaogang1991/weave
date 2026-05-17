@@ -156,7 +156,7 @@ class DAGExecutionEngine:
         self._run_id = run_id
         # #455: DAG execution state persistence for crash recovery
         self._checkpoint_dir = Path(checkpoint_dir)
-        self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self._checkpoint_dir_created = False
 
     # -- Backward-compat proxies for extracted services (#177 PR4) ------------
 
@@ -292,13 +292,10 @@ class DAGExecutionEngine:
         self._watchdog.stop()
 
     async def execute(self, dag: DAG) -> DAG:
-        """
-        Execute the full DAG with support for replanning.
+        """Execute the full DAG with replanning support.
 
-        Returns the executed DAG with all nodes' status and results populated.
-
-        #455: On start, loads checkpointed node completions and skips them.
-        On successful completion, cleans up the checkpoint file.
+        Loads checkpointed node completions on start and skips them.
+        Cleans up checkpoint on successful completion.
         """
         try:
             levels = dag.topological_levels()
@@ -316,9 +313,11 @@ class DAGExecutionEngine:
         completed_nodes = self._load_completed_nodes()
         if completed_nodes:
             restored_count = 0
-            for node_id in completed_nodes:
+            for node_id, result_data in completed_nodes.items():
                 if node_id in dag.nodes:
                     dag.nodes[node_id].status = NodeStatus.SUCCESS
+                    if result_data:
+                        dag.nodes[node_id].result = result_data
                     restored_count += 1
             if restored_count:
                 logger.info(
@@ -543,6 +542,9 @@ class DAGExecutionEngine:
 
     def _checkpoint_file(self) -> Path:
         """Return checkpoint file path for current session."""
+        if not self._checkpoint_dir_created:
+            self._checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            self._checkpoint_dir_created = True
         return self._checkpoint_dir / f"{self._session_id}.jsonl"
 
     def _persist_node_completion(
@@ -550,8 +552,8 @@ class DAGExecutionEngine:
     ) -> None:
         """Append node completion record to checkpoint file (#455).
 
-        Atomic append: each write is a single line, safe for concurrent
-        asyncio tasks (single-threaded event loop serializes I/O).
+        Stores the full result dict so downstream nodes can access
+        artifacts and data after crash recovery.
         """
         if not self._session_id:
             return
@@ -562,10 +564,7 @@ class DAGExecutionEngine:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if result:
-            entry["result_summary"] = {
-                k: v for k, v in result.items()
-                if k in ("status", "summary", "output")
-            }
+            entry["result"] = result
         try:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, default=str) + "\n")
@@ -574,18 +573,18 @@ class DAGExecutionEngine:
                 "Failed to persist node %s checkpoint: %s", node_id, exc,
             )
 
-    def _load_completed_nodes(self) -> set[str]:
-        """Load completed node IDs from checkpoint file (#455).
+    def _load_completed_nodes(self) -> dict[str, dict | None]:
+        """Load completed node IDs and their results from checkpoint (#455).
 
-        Returns set of node_id strings for nodes that completed successfully.
+        Returns dict mapping node_id to its persisted result dict (or None).
         Corrupt entries are skipped.
         """
         if not self._session_id:
-            return set()
+            return {}
         path = self._checkpoint_file()
         if not path.exists():
-            return set()
-        completed: set[str] = set()
+            return {}
+        completed: dict[str, dict | None] = {}
         try:
             for line in path.read_text(encoding="utf-8").splitlines():
                 line = line.strip()
@@ -594,7 +593,7 @@ class DAGExecutionEngine:
                 try:
                     entry = json.loads(line)
                     if entry.get("status") == "completed":
-                        completed.add(entry["node_id"])
+                        completed[entry["node_id"]] = entry.get("result")
                 except (json.JSONDecodeError, KeyError):
                     continue
         except OSError as exc:
