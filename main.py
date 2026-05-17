@@ -224,7 +224,7 @@ Examples:
 
     # viz command (standalone server)
     viz_parser = subparsers.add_parser("viz", help="Launch visualizer dashboard")
-    viz_parser.add_argument("--host", default="0.0.0.0", help="Server host (default: 0.0.0.0)")
+    viz_parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     viz_parser.add_argument("--port", type=int, default=8080, help="Server port (default: 8080)")
     viz_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     viz_parser.set_defaults(func=cmd_viz)
@@ -277,7 +277,7 @@ Examples:
     recover_parser.set_defaults(func=cmd_recover)
 
     console_parser = subparsers.add_parser("console", help="Launch Web Console")
-    console_parser.add_argument("--host", default="0.0.0.0", help="Host to bind")
+    console_parser.add_argument("--host", default="127.0.0.1", help="Host to bind")
     console_parser.add_argument("--port", type=int, default=8080, help="Port to listen")
     console_parser.set_defaults(func=cmd_console)
 

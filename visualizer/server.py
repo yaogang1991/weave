@@ -13,6 +13,7 @@ Endpoints:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
+from starlette.requests import Request  # noqa: E402
+from starlette.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel as PydanticModel  # noqa: E402
 
 from visualizer.event_bridge import WebSocketEventBridge  # noqa: E402
@@ -38,6 +41,42 @@ from control_plane.approval import ApprovalRepository, TicketStatus  # noqa: E40
 
 app = FastAPI(title="Harness Visualizer", version="2.0")
 bridge = WebSocketEventBridge()
+
+
+# ── API Key authentication (#494) ──────────────────────────────────
+
+_API_KEY_HEADER = "X-API-Key"
+_ENV_API_KEY = "WEAVE_API_KEY"
+
+# Paths that don't require auth (health check, static assets, websocket)
+_PUBLIC_PATHS = {"/", "/api/health", "/ws", "/favicon.ico"}
+
+
+@app.middleware("http")
+async def api_key_auth(request: Request, call_next):
+    """Require API key for non-public endpoints when WEAVE_API_KEY is set."""
+    api_key = os.environ.get(_ENV_API_KEY)
+    if not api_key:
+        # No key configured — skip auth
+        return await call_next(request)
+
+    # Public paths don't require auth
+    if request.url.path in _PUBLIC_PATHS:
+        return await call_next(request)
+
+    # Static assets
+    if request.url.path.startswith("/static/"):
+        return await call_next(request)
+
+    # Check API key
+    provided = request.headers.get(_API_KEY_HEADER) or request.query_params.get("api_key")
+    if provided != api_key:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing API key"},
+        )
+
+    return await call_next(request)
 
 
 # ── Request body models ──────────────────────────────────────────────
