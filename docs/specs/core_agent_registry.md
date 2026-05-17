@@ -106,11 +106,11 @@ agents:
 ### File Locations
 
 - Default agents: hardcoded in `_register_defaults()`.
-- Project-specific agents: `.harness/agents.yaml` (loaded by orchestrator at startup).
+- Project-specific agents: `.weave/agents.yaml` (loaded by orchestrator at startup).
 
 ## Extension Points
 
-1. **Custom agents via YAML**: Place YAML files in `.harness/` directory or load via `load_from_yaml()` / `load_from_directory()`.
+1. **Custom agents via YAML**: Place YAML files in `.weave/` directory or load via `load_from_yaml()` / `load_from_directory()`.
 2. **Custom agents via code**: Call `register(AgentCapability(...))` and optionally `register_factory(agent_id, factory)`.
 3. **Factory functions**: Register a `Callable` via `register_factory()` for custom agent instantiation logic.
 

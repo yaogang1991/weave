@@ -164,7 +164,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 # 或
 export OPENAI_API_KEY="sk-..."
 # 可选：指定模型
-export HARNESS_MODEL="gpt-4"
+export WEAVE_MODEL="gpt-4"
 ```
 
 ### 使用方式
@@ -185,7 +185,7 @@ python main.py run "..." --max-parallel 5
 
 ### 项目自定义 Agent
 
-在项目根目录创建 `.harness/agents.yaml`，编排器会自动加载：
+在项目根目录创建 `.weave/agents.yaml`，编排器会自动加载：
 
 ```yaml
 agents:
@@ -240,7 +240,7 @@ Guardrails（`guardrails/policy.py`）实现四层防御：
 |------|------|------|
 | 模型层 | Agent Worker | 不确定性时暂停，Constitutional AI |
 | 工具层 | Tool Registry | 最小权限，allow/deny 列表 |
-| Harness层 | Guardrails | PermissionMode：plan / default / accept_edits / auto / dont_ask |
+| Weave层 | Guardrails | PermissionMode：plan / default / accept_edits / auto / dont_ask |
 | 执行层 | Sandbox | Docker 隔离，凭证代理（配置中预留，当前实现以本地子进程为主） |
 
 **PermissionMode 含义**：
@@ -260,7 +260,7 @@ Guardrails（`guardrails/policy.py`）实现四层防御：
 2. **Append-Only**：SessionStore 是追加式 JSONL，不允许修改历史事件。状态通过重放事件重建。
 3. **Context Isolation**：每个 Worker Agent 拥有独立上下文，任务之间不共享消息历史，交接通过 `HandoffArtifact` 完成。
 4. **DAG 并行约束**：同层节点通过 `asyncio.gather` 并行执行，`max_parallel` 由信号量控制（默认 3~5）。
-5. **默认三 Agent**：`planner`（架构师）、`generator`（工程师）、`evaluator`（QA）为出厂设置，不可注销。项目可通过 `.harness/agents.yaml` 扩展。
+5. **默认三 Agent**：`planner`（架构师）、`generator`（工程师）、`evaluator`（QA）为出厂设置，不可注销。项目可通过 `.weave/agents.yaml` 扩展。
 6. **Checkpoint**：`session/store.py` 支持通过复制事件日志创建命名检查点，但当前未在编排层自动触发（配置中预留 `checkpoint_interval`）。
 
 ---

@@ -343,7 +343,7 @@ class MetricsReporter:
         failures = metrics["failures"]
 
         lines: list[str] = [
-            "# Harness M1 指标报告",
+            "# Weave M1 指标报告",
             "",
             f"**生成时间**: {metrics['timestamp']}",
             f"**统计周期**: {metrics['period']['since'] or '全部'} ~ "

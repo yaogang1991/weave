@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from core.config import HarnessConfig, LLMConfig, WatchdogConfig
+from core.config import WeaveConfig, LLMConfig, WatchdogConfig
 from core.dag_engine import DAGExecutionEngine
 from core.agent_registry import AgentRegistry
 from core.models import EventType, PersonalGuardrailPolicy
@@ -157,7 +157,7 @@ class ExecutionFactory:
         orchestrator = self.create_orchestrator(store)
 
         # Evaluator for quality gates
-        _cfg = HarnessConfig.from_env()
+        _cfg = WeaveConfig.from_env()
         evaluator = EvaluatorEngine(
             session_store=store,
             pass_threshold=_cfg.pass_threshold,
@@ -213,12 +213,12 @@ class ExecutionFactory:
 
     @staticmethod
     def load_project_guardrails(work_dir: Path | None) -> dict[str, Any]:
-        """Load guardrail overrides from .harness/config.yaml if present."""
+        """Load guardrail overrides from .weave/config.yaml if present."""
         result: dict[str, Any] = {}
         if work_dir is None:
             return result
         try:
-            config_path = Path(work_dir) / ".harness" / "config.yaml"
+            config_path = Path(work_dir) / ".weave" / "config.yaml"
             if config_path.exists():
                 import yaml
                 with open(config_path, "r", encoding="utf-8") as f:

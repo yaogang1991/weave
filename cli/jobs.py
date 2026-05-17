@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 from session.store import SessionStore
 from control_plane.models import JobStatus
 from control_plane.worker import WorkerConfig, run_worker
@@ -78,7 +78,7 @@ async def cmd_status(args):
             print(json.dumps(result, default=str))
             return
 
-        config = HarnessConfig.from_env()
+        config = WeaveConfig.from_env()
         store = SessionStore(config.event_store_path)
         if store.exists(args.job_id):
             summary = store.get_summary(args.job_id)
@@ -140,7 +140,7 @@ async def cmd_worker(args):
     """Start a background worker that polls for and executes jobs."""
     repository = _make_repository()
     non_interactive = args.non_interactive or os.getenv(
-        "HARNESS_NON_INTERACTIVE", ""
+        "WEAVE_NON_INTERACTIVE", ""
     ).lower() in ("true", "1", "yes")
     service = _make_run_service(repository, non_interactive=non_interactive)
     config = WorkerConfig(
@@ -171,6 +171,6 @@ async def cmd_recover(args):
 async def cmd_console(args):
     """Launch the Web Console (FastAPI server)."""
     from visualizer.server import run_server
-    print(f"Harness Console: http://{args.host}:{args.port}/console")
+    print(f"Weave Console: http://{args.host}:{args.port}/console")
     print(f"Visualizer: http://{args.host}:{args.port}/")
     await run_server(host=args.host, port=args.port)

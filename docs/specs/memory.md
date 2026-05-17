@@ -220,13 +220,13 @@ frequency_bonus  = 1.0 + min(access_count, 10) × 0.1
 
 | Env Var | Config Key | Default | Description |
 |---------|-----------|---------|-------------|
-| `HARNESS_MEMORY_ENABLED` | `memory.enabled` | `true` | Enable memory system |
-| `HARNESS_MEMORY_PATH` | `memory.base_path` | `./data/memory` | Storage directory |
-| `HARNESS_MEMORY_MAX_ENTRIES` | `memory.max_entries_per_agent` | `500` | Max entries per agent |
-| `HARNESS_MEMORY_MAX_LENGTH` | `memory.max_content_length` | `1000` | Max chars per entry |
-| `HARNESS_MEMORY_TTL_DAYS` | `memory.default_ttl_days` | `90` | Default expiry days |
-| `HARNESS_MEMORY_RETRIEVAL_LIMIT` | `memory.retrieval_limit` | `10` | Max memories per prompt |
-| `HARNESS_MEMORY_DECAY_DAYS` | `memory.decay_half_life_days` | `30.0` | Relevance half-life |
+| `WEAVE_MEMORY_ENABLED` | `memory.enabled` | `true` | Enable memory system |
+| `WEAVE_MEMORY_PATH` | `memory.base_path` | `./data/memory` | Storage directory |
+| `WEAVE_MEMORY_MAX_ENTRIES` | `memory.max_entries_per_agent` | `500` | Max entries per agent |
+| `WEAVE_MEMORY_MAX_LENGTH` | `memory.max_content_length` | `1000` | Max chars per entry |
+| `WEAVE_MEMORY_TTL_DAYS` | `memory.default_ttl_days` | `90` | Default expiry days |
+| `WEAVE_MEMORY_RETRIEVAL_LIMIT` | `memory.retrieval_limit` | `10` | Max memories per prompt |
+| `WEAVE_MEMORY_DECAY_DAYS` | `memory.decay_half_life_days` | `30.0` | Relevance half-life |
 
 ## Invariants
 

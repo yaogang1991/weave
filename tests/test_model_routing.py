@@ -1,7 +1,7 @@
 """Tests for M3.1 Multi-Model Routing."""
 
 
-from core.config import LLMConfig, ModelRoute, ModelRoutingConfig, HarnessConfig, infer_provider
+from core.config import LLMConfig, ModelRoute, ModelRoutingConfig, WeaveConfig, infer_provider
 from core.llm_router import LLMRouter
 
 
@@ -78,8 +78,8 @@ class TestModelRoutingConfig:
         assert config.routing == {}
 
     def test_from_env_with_vars(self, monkeypatch):
-        monkeypatch.setenv("HARNESS_PLANNER_MODEL", "claude-opus-4-6")
-        monkeypatch.setenv("HARNESS_GENERATOR_MODEL", "gpt-4o-mini")
+        monkeypatch.setenv("WEAVE_PLANNER_MODEL", "claude-opus-4-6")
+        monkeypatch.setenv("WEAVE_GENERATOR_MODEL", "gpt-4o-mini")
         config = ModelRoutingConfig.from_env()
         assert config.routing["planner"].model == "claude-opus-4-6"
         assert config.routing["planner"].provider == "anthropic"
@@ -87,8 +87,8 @@ class TestModelRoutingConfig:
         assert config.routing["generator"].provider == "openai"
 
     def test_from_env_o_series(self, monkeypatch):
-        monkeypatch.setenv("HARNESS_PLANNER_MODEL", "o3-mini")
-        monkeypatch.setenv("HARNESS_GENERATOR_MODEL", "o4-mini")
+        monkeypatch.setenv("WEAVE_PLANNER_MODEL", "o3-mini")
+        monkeypatch.setenv("WEAVE_GENERATOR_MODEL", "o4-mini")
         config = ModelRoutingConfig.from_env()
         assert config.routing["planner"].model == "o3-mini"
         assert config.routing["planner"].provider == "openai"
@@ -96,7 +96,7 @@ class TestModelRoutingConfig:
         assert config.routing["generator"].provider == "openai"
 
     def test_from_env_fallback(self, monkeypatch):
-        monkeypatch.setenv("HARNESS_MODEL_FALLBACK", "claude-opus-4-6,gpt-4o")
+        monkeypatch.setenv("WEAVE_MODEL_FALLBACK", "claude-opus-4-6,gpt-4o")
         config = ModelRoutingConfig.from_env()
         assert config.fallback_chain == ["claude-opus-4-6", "gpt-4o"]
 
@@ -136,17 +136,17 @@ routing:
         assert config.routing["generator"].provider == "openai"
 
 
-class TestHarnessConfigIntegration:
-    """Test that HarnessConfig includes model_routing."""
+class TestWeaveConfigIntegration:
+    """Test that WeaveConfig includes model_routing."""
 
     def test_default_model_routing(self):
-        config = HarnessConfig()
+        config = WeaveConfig()
         assert isinstance(config.model_routing, ModelRoutingConfig)
         assert config.model_routing.routing == {}
 
     def test_from_env_includes_routing(self, monkeypatch):
-        monkeypatch.setenv("HARNESS_PLANNER_MODEL", "claude-opus-4-6")
-        config = HarnessConfig.from_env()
+        monkeypatch.setenv("WEAVE_PLANNER_MODEL", "claude-opus-4-6")
+        config = WeaveConfig.from_env()
         assert config.model_routing.routing["planner"].model == "claude-opus-4-6"
 
 

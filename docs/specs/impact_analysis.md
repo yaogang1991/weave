@@ -189,8 +189,8 @@ class VerificationResult(BaseModel):
 
 | Env Var | Config Key | Default | Description |
 |---------|-----------|---------|-------------|
-| `HARNESS_IMPACT_ENABLED` | `impact.enabled` | `true` | Enable impact analysis |
-| `HARNESS_IMPACT_PATH` | `impact.base_path` | `./data/impact` | Analysis data directory |
+| `WEAVE_IMPACT_ENABLED` | `impact.enabled` | `true` | Enable impact analysis |
+| `WEAVE_IMPACT_PATH` | `impact.base_path` | `./data/impact` | Analysis data directory |
 | — | `impact.coverage_threshold` | `0.7` | Pass threshold for verification |
 | — | `impact.max_predicted_files` | `50` | Max predicted files |
 | — | `impact.confidence_threshold` | `0.5` | Min confidence threshold |

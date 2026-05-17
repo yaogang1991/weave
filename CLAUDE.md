@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Self-hosted unattended software development harness based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) architecture. Orchestrates multiple LLM agents (planner, generator, evaluator) to automate the full software dev lifecycle via LLM-driven dynamic DAG generation and execution.
+Self-hosted unattended software development system based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) architecture. Orchestrates multiple LLM agents (planner, generator, evaluator) to automate the full software dev lifecycle via LLM-driven dynamic DAG generation and execution.
 
 Python 3.11+, Pydantic models, async/await throughout.
 
@@ -76,7 +76,7 @@ flake8 --max-line-length=100
 python -m pytest --cov=. --cov-report=term-missing
 ```
 
-Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `HARNESS_MODEL` (optional, default: claude-sonnet-4-6), `HARNESS_DEFAULT_BACKEND` (optional: local|worktree), `HARNESS_NON_INTERACTIVE` (optional: true|false).
+Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `WEAVE_MODEL` (optional, default: claude-sonnet-4-6), `WEAVE_DEFAULT_BACKEND` (optional: local|worktree), `WEAVE_NON_INTERACTIVE` (optional: true|false).
 
 ## Architecture
 
@@ -87,7 +87,7 @@ Orchestrator Layer (LLM-driven planning, DAG generation)
     ↓
 Session Manager (append-only JSONL event log, state replay)
     ↓
-Harness Core / Dumb Loop (Agent Worker + Tool Registry + Guardrails)
+Weave Core / Dumb Loop (Agent Worker + Tool Registry + Guardrails)
     ↓
 Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 ```
@@ -108,8 +108,8 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `core/mcp_models.py` — MCPToolInfo, MCPServerStatus
 - `core/artifact_handoff.py` — HandoffArtifact, artifact collection/transfer
 - `core/exceptions.py` — Custom exception hierarchy
-- `core/config.py` — HarnessConfig, LLMConfig, SandboxConfig, MemoryConfig, LearningConfig, ImpactConfig
-- `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.harness/agents.yaml`)
+- `core/config.py` — WeaveConfig, LLMConfig, SandboxConfig, MemoryConfig, LearningConfig, ImpactConfig
+- `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.weave/agents.yaml`)
 - `core/dag_engine.py` — Topological sort, parallel execution with `asyncio.gather`, failure callback
 - `core/node_executor.py` — Single node execution logic (extracted from dag_engine)
 - `core/quality_gate.py` — Post-node quality checks (extracted from dag_engine)
@@ -117,7 +117,7 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `core/watchdog.py` — Watchdog coroutine for heartbeat monitoring (M2)
 - `core/llm_client.py` — Unified LLM client (Anthropic/OpenAI)
 - `core/llm_router.py` — M3.1: Multi-model routing per agent type
-- `core/project_config.py` — `.harness/config.yaml` loader (runtime parameters, hooks, guardrails)
+- `core/project_config.py` — `.weave/config.yaml` loader (runtime parameters, hooks, guardrails)
 
 ### cli/ — CLI command handlers (split from main.py)
 - `cli/__init__.py` — Exports all cmd_* functions

@@ -26,7 +26,7 @@ class SkillRegistry:
     """Discover, load, and instantiate skill definitions."""
 
     def __init__(self, skills_dir: str | Path | None = None) -> None:
-        self.skills_dir = Path(skills_dir) if skills_dir else Path(".harness/skills")
+        self.skills_dir = Path(skills_dir) if skills_dir else Path(".weave/skills")
         self._cache: dict[str, Skill] = {}
 
     def list_skills(self) -> list[Skill]:

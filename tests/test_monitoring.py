@@ -567,7 +567,7 @@ class TestMetricsReporterMarkdown:
             },
         }
         report = reporter.generate_markdown_report(metrics)
-        assert "# Harness M1 指标报告" in report
+        assert "# Weave M1 指标报告" in report
         assert "10" in report  # total
         assert "80.0%" in report  # success rate
         assert "timeout" in report
@@ -647,7 +647,7 @@ class TestMetricsReporterMarkdown:
         path = str(tmp_path / "report.md")
         reporter.generate_markdown_report(metrics, output_path=path)
         content = Path(path).read_text(encoding="utf-8")
-        assert "# Harness M1 指标报告" in content
+        assert "# Weave M1 指标报告" in content
 
 
 # ---------------------------------------------------------------------------

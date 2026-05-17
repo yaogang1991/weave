@@ -321,44 +321,44 @@ class TestCleanupPolicyContract:
 
 
 class TestCleanupPolicyValidation:
-    """Verify cleanup_policy validation in HarnessConfig and BackendManager."""
+    """Verify cleanup_policy validation in WeaveConfig and BackendManager."""
 
     def test_valid_policies_accepted(self):
         """All valid policy values should be accepted."""
-        from core.config import HarnessConfig
+        from core.config import WeaveConfig
         for policy in ("always", "on_success", "never"):
-            config = HarnessConfig(cleanup_policy=policy)
+            config = WeaveConfig(cleanup_policy=policy)
             assert config.cleanup_policy == policy
 
     def test_invalid_policy_rejected(self):
         """Invalid policy values should be rejected by Pydantic."""
-        from core.config import HarnessConfig
+        from core.config import WeaveConfig
         import pydantic
         with pytest.raises(pydantic.ValidationError):
-            HarnessConfig(cleanup_policy="invalid_policy")
+            WeaveConfig(cleanup_policy="invalid_policy")
 
     def test_typo_rejected(self):
         """Typos should be caught (e.g., 'Always' vs 'always')."""
-        from core.config import HarnessConfig
+        from core.config import WeaveConfig
         import pydantic
         with pytest.raises(pydantic.ValidationError):
-            HarnessConfig(cleanup_policy="Always")
+            WeaveConfig(cleanup_policy="Always")
 
     def test_from_env_validates_cleanup_policy(self):
         """from_env() must validate cleanup_policy from environment."""
         import os
-        from core.config import HarnessConfig
+        from core.config import WeaveConfig
         import pydantic
-        original = os.environ.get("HARNESS_CLEANUP_POLICY")
+        original = os.environ.get("WEAVE_CLEANUP_POLICY")
         try:
-            os.environ["HARNESS_CLEANUP_POLICY"] = "Always"
+            os.environ["WEAVE_CLEANUP_POLICY"] = "Always"
             with pytest.raises(pydantic.ValidationError):
-                HarnessConfig.from_env()
+                WeaveConfig.from_env()
         finally:
             if original is None:
-                os.environ.pop("HARNESS_CLEANUP_POLICY", None)
+                os.environ.pop("WEAVE_CLEANUP_POLICY", None)
             else:
-                os.environ["HARNESS_CLEANUP_POLICY"] = original
+                os.environ["WEAVE_CLEANUP_POLICY"] = original
 
     def test_backend_manager_rejects_invalid_policy(self, tmp_path):
         """BackendManager must reject invalid cleanup_policy."""

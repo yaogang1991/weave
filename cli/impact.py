@@ -6,14 +6,14 @@ import glob as glob_mod
 import json
 import os
 
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 
 
 async def cmd_impact_predict(args):
     """Predict impact of a change on the project."""
     from analysis.impact_predictor import ImpactPredictor
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     project_path = getattr(args, "project", None) or "."
 
     predictor = ImpactPredictor(
@@ -40,7 +40,7 @@ async def cmd_impact_graph(args):
 
 async def cmd_impact_history(args):
     """Show impact analysis history."""
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     impact_path = config.impact.base_path
 
     if not os.path.isdir(impact_path):

@@ -48,7 +48,7 @@ class TestSkillRegistry:
         assert registry.list_skills() == []
 
     def test_load_single_skill(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         skill_file = skills_dir / "review_code.yaml"
         skill_file.write_text(yaml.dump({
@@ -71,7 +71,7 @@ class TestSkillRegistry:
         assert skills[0].variables["focus"].default == "all"
 
     def test_get_skill_by_name(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "my_skill.yml").write_text(yaml.dump({
             "name": "my_skill",
@@ -89,7 +89,7 @@ class TestSkillRegistry:
         assert registry.get_skill("nonexistent") is None
 
     def test_instantiate_substitutes_variables(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "greet.yaml").write_text(yaml.dump({
             "name": "greet",
@@ -107,7 +107,7 @@ class TestSkillRegistry:
         assert "welcome to harness!" in result
 
     def test_instantiate_uses_defaults(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "greet.yaml").write_text(yaml.dump({
             "name": "greet",
@@ -121,7 +121,7 @@ class TestSkillRegistry:
         assert "Hello World!" in result
 
     def test_instantiate_required_variable_missing(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "strict.yaml").write_text(yaml.dump({
             "name": "strict",
@@ -140,7 +140,7 @@ class TestSkillRegistry:
             registry.instantiate("missing")
 
     def test_skills_for_agent_filter(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "eval_skill.yaml").write_text(yaml.dump({
             "name": "eval_skill",
@@ -163,7 +163,7 @@ class TestSkillRegistry:
         assert len(evaluator_skills) == 2
 
     def test_to_prompt_description(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "skill.yaml").write_text(yaml.dump({
             "name": "review",
@@ -187,7 +187,7 @@ class TestSkillRegistry:
         ctx_file = tmp_path / "style_guide.md"
         ctx_file.write_text("# Style Guide\nUse 4 spaces.")
 
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "lint.yaml").write_text(yaml.dump({
             "name": "lint",
@@ -202,7 +202,7 @@ class TestSkillRegistry:
         assert "4 spaces" in result
 
     def test_multiple_skills_loading(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         for i in range(3):
             (skills_dir / f"skill_{i}.yaml").write_text(yaml.dump({
@@ -218,7 +218,7 @@ class TestSkillRegistry:
         assert names == {"skill_0", "skill_1", "skill_2"}
 
     def test_invalid_yaml_skipped(self, tmp_path):
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "good.yaml").write_text(yaml.dump({
             "name": "good",
@@ -234,7 +234,7 @@ class TestSkillRegistry:
 
     def test_context_files_path_traversal_blocked(self, tmp_path):
         """Context files outside project root must be rejected."""
-        skills_dir = tmp_path / ".harness" / "skills"
+        skills_dir = tmp_path / ".weave" / "skills"
         skills_dir.mkdir(parents=True)
         (skills_dir / "evil.yaml").write_text(yaml.dump({
             "name": "evil",

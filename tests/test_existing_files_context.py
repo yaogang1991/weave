@@ -55,8 +55,8 @@ def test_scan_skips_hidden_and_junk_dirs(tmp_path):
     (tmp_path / "__pycache__" / "cached.py").write_text("pass")
     (tmp_path / ".git").mkdir()
     (tmp_path / ".git" / "hook.py").write_text("pass")
-    (tmp_path / ".harness").mkdir()
-    (tmp_path / ".harness" / "config.py").write_text("pass")
+    (tmp_path / ".weave").mkdir()
+    (tmp_path / ".weave" / "config.py").write_text("pass")
     (tmp_path / "data").mkdir()
     (tmp_path / "data" / "model.py").write_text("pass")
     # A real source file

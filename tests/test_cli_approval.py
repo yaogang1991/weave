@@ -22,19 +22,19 @@ class TestCLIApprovalWiring:
         import os
         result = (
             getattr(args, "non_interactive", False)
-            or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+            or os.getenv("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
         )
         assert result is True
 
     def test_non_interactive_from_env(self):
-        """HARNESS_NON_INTERACTIVE env var is respected."""
+        """WEAVE_NON_INTERACTIVE env var is respected."""
         import argparse
         args = argparse.Namespace()
         import os
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             result = (
                 getattr(args, "non_interactive", False)
-                or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+                or os.getenv("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
             )
         assert result is True
 
@@ -44,11 +44,11 @@ class TestCLIApprovalWiring:
         args = argparse.Namespace()
         import os
         with patch.dict(os.environ, {}, clear=True):
-            # Remove HARNESS_NON_INTERACTIVE if present
-            os.environ.pop("HARNESS_NON_INTERACTIVE", None)
+            # Remove WEAVE_NON_INTERACTIVE if present
+            os.environ.pop("WEAVE_NON_INTERACTIVE", None)
             result = (
                 getattr(args, "non_interactive", False)
-                or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+                or os.getenv("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
             )
         assert result is False
 
@@ -58,10 +58,10 @@ class TestCLIApprovalWiring:
         args = argparse.Namespace(non_interactive=True)
         import os
         # Even with env=false, flag wins
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "false"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "false"}):
             result = (
                 getattr(args, "non_interactive", False)
-                or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+                or os.getenv("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
             )
         assert result is True
 

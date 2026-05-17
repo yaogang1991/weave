@@ -26,12 +26,12 @@ def skip_no_api_key():
 @pytest.mark.asyncio
 async def test_orchestrator_generates_valid_dag():
     """IntelligentOrchestrator.plan() generates a structurally valid DAG."""
-    from core.config import HarnessConfig
+    from core.config import WeaveConfig
     from core.agent_registry import AgentRegistry
     from session.store import SessionStore
     from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = AgentRegistry()
 
@@ -62,7 +62,7 @@ async def test_orchestrator_generates_valid_dag():
 @pytest.mark.asyncio
 async def test_shortest_dag_path_executes():
     """Execute a simple DAG with real LLM: planner → generator."""
-    from core.config import HarnessConfig
+    from core.config import WeaveConfig
     from core.agent_registry import AgentRegistry
     from session.store import SessionStore
     from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
@@ -71,7 +71,7 @@ async def test_shortest_dag_path_executes():
     from core.models import FailureDecision
     from tools.registry import ToolRegistry
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = AgentRegistry()
     tool_registry = ToolRegistry()

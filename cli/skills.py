@@ -13,7 +13,7 @@ async def cmd_skills(args):
     """List available skills."""
     from skills.registry import SkillRegistry
     project_path = getattr(args, "project", None) or "."
-    registry = SkillRegistry(skills_dir=Path(project_path) / ".harness" / "skills")
+    registry = SkillRegistry(skills_dir=Path(project_path) / ".weave" / "skills")
     skills = registry.list_skills()
 
     agent_filter = getattr(args, "agent", None)
@@ -40,7 +40,7 @@ async def cmd_skill(args):
     """Invoke a skill (creates a plan+run with skill context)."""
     from skills.registry import SkillRegistry
     project_path = getattr(args, "project", None) or "."
-    registry = SkillRegistry(skills_dir=Path(project_path) / ".harness" / "skills")
+    registry = SkillRegistry(skills_dir=Path(project_path) / ".weave" / "skills")
 
     variables = _parse_template_vars(getattr(args, "var", []) or [])
     prompt = registry.instantiate(args.name, variables)

@@ -87,7 +87,7 @@ Examples:
 
     parser.add_argument(
         "--project",
-        help="Path to project directory (loads .harness/agents.yaml if exists)",
+        help="Path to project directory (loads .weave/agents.yaml if exists)",
     )
     parser.add_argument(
         "--max-parallel",
@@ -218,7 +218,7 @@ Examples:
     run_parser.add_argument(
         "--cleanup-stdlib-shadowing", action="store_true",
         help="Quarantine (not delete) leftover stdlib-shadowing directories to "
-             ".harness/quarantine/ instead of aborting",
+             ".weave/quarantine/ instead of aborting",
     )
     run_parser.set_defaults(func=cmd_run)
 

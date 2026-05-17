@@ -121,7 +121,7 @@
 - `generator` — 代码实现、文件编辑、功能开发
 - `evaluator` — 质量评估、测试验证、代码审查
 
-**项目扩展**：通过 `.harness/agents.yaml` 注册自定义 Agent
+**项目扩展**：通过 `.weave/agents.yaml` 注册自定义 Agent
 
 ```yaml
 agents:
@@ -366,7 +366,7 @@ Requirement → ImpactPredictor → ImpactScope → Execute DAG → ChangeVerifi
 |------|------|
 | `registry.py` | SkillRegistry — 发现、加载、实例化 YAML 技能 |
 
-技能存放在 `.harness/skills/*.yaml`，支持变量替换和 Agent 类型过滤。
+技能存放在 `.weave/skills/*.yaml`，支持变量替换和 Agent 类型过滤。
 
 ---
 
@@ -497,7 +497,7 @@ python main.py impact-history
 
 ### 11. 使用项目自定义 Agent
 
-在项目根目录创建 `.harness/agents.yaml`：
+在项目根目录创建 `.weave/agents.yaml`：
 
 ```yaml
 agents:
@@ -549,7 +549,7 @@ weave/
 │   ├── mcp_models.py              # MCP 模型（MCPToolInfo, MCPServerStatus）
 │   ├── artifact_handoff.py        # HandoffArtifact 交接逻辑
 │   ├── exceptions.py              # 自定义异常层级
-│   ├── config.py                  # 配置管理（HarnessConfig, LLMConfig, MemoryConfig 等）
+│   ├── config.py                  # 配置管理（WeaveConfig, LLMConfig, MemoryConfig 等）
 │   ├── agent_registry.py          # Agent 能力注册表
 │   ├── llm_client.py              # 统一 LLM 客户端（Anthropic/OpenAI）
 │   ├── llm_router.py              # M3.1: 多模型路由
@@ -558,7 +558,7 @@ weave/
 │   ├── quality_gate.py            # 节点后质量检查（从 dag_engine 拆分）
 │   ├── retry_policy.py            # 重试/退避策略（从 dag_engine 拆分）
 │   ├── watchdog.py                # Watchdog 心跳监控（从 dag_engine 拆分）
-│   └── project_config.py          # .harness/config.yaml 加载器
+│   └── project_config.py          # .weave/config.yaml 加载器
 ├── cli/                           # CLI 命令处理器（从 main.py 拆分）
 │   ├── __init__.py                # 导出所有 cmd_* 函数
 │   ├── execution.py               # plan, execute, run, viz 命令
@@ -683,7 +683,7 @@ weave/
 
 ## 六、项目特化
 
-通过 `.harness/agents.yaml` 注册项目自定义 Agent，编排 Agent 会自动发现并在规划时使用：
+通过 `.weave/agents.yaml` 注册项目自定义 Agent，编排 Agent 会自动发现并在规划时使用：
 
 ```bash
 python main.py run "设计登录页面" --project ./my-project

@@ -1,7 +1,7 @@
 """
 Tests for #300: API rate limiting — global concurrency semaphore.
 
-When HARNESS_MAX_CONCURRENT_API is set, the LLM client acquires a
+When WEAVE_MAX_CONCURRENT_API is set, the LLM client acquires a
 process-global semaphore before each API call, limiting concurrent
 requests across all parallel DAG nodes.
 """
@@ -46,8 +46,8 @@ class TestAPIConcurrencyLimit:
         mod._global_api_semaphore = None
 
     def test_config_reads_env_var(self, monkeypatch):
-        """LLMConfig.max_concurrent_api reads HARNESS_MAX_CONCURRENT_API."""
-        monkeypatch.setenv("HARNESS_MAX_CONCURRENT_API", "3")
+        """LLMConfig.max_concurrent_api reads WEAVE_MAX_CONCURRENT_API."""
+        monkeypatch.setenv("WEAVE_MAX_CONCURRENT_API", "3")
         config = LLMConfig()
         assert config.max_concurrent_api == 3
 

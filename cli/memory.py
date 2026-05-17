@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import json
 
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 from core.models import MemoryScope, MemoryType
 
 
 def _make_memory_manager():
     """Create a MemoryManager from config."""
     from memory.manager import MemoryManager
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     return MemoryManager(config.memory)
 
 

@@ -13,70 +13,70 @@ Complete reference for all environment variables, configuration options, and CLI
 | `ANTHROPIC_API_KEY` | *(required)* | Anthropic API key for Claude models |
 | `ANTHROPIC_AUTH_TOKEN` | *(fallback)* | Alternative auth token (checked if `ANTHROPIC_API_KEY` not set) |
 | `OPENAI_API_KEY` | *(optional)* | OpenAI API key (required when using OpenAI provider) |
-| `HARNESS_MODEL` | `claude-sonnet-4-6` | Default LLM model to use |
+| `WEAVE_MODEL` | `claude-sonnet-4-6` | Default LLM model to use |
 | `ANTHROPIC_BASE_URL` | `""` | Custom Anthropic API base URL (for proxies) |
 
 ### Backend Configuration (M2)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_DEFAULT_BACKEND` | `local` | Default execution backend: `local` or `worktree` |
-| `HARNESS_BACKEND_BASE_PATH` | `./data/backends` | Base directory for backend data |
-| `HARNESS_BACKEND_LOW` | `local` | Backend for LOW risk tasks |
-| `HARNESS_BACKEND_MEDIUM` | `local` | Backend for MEDIUM risk tasks |
-| `HARNESS_BACKEND_HIGH` | `worktree` | Backend for HIGH risk tasks |
-| `HARNESS_BACKEND_CRITICAL` | `worktree` | Backend for CRITICAL risk tasks |
+| `WEAVE_DEFAULT_BACKEND` | `local` | Default execution backend: `local` or `worktree` |
+| `WEAVE_BACKEND_BASE_PATH` | `./data/backends` | Base directory for backend data |
+| `WEAVE_BACKEND_LOW` | `local` | Backend for LOW risk tasks |
+| `WEAVE_BACKEND_MEDIUM` | `local` | Backend for MEDIUM risk tasks |
+| `WEAVE_BACKEND_HIGH` | `worktree` | Backend for HIGH risk tasks |
+| `WEAVE_BACKEND_CRITICAL` | `worktree` | Backend for CRITICAL risk tasks |
 
 ### Non-Interactive Mode (M1.1)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_NON_INTERACTIVE` | `false` | Set to `true`, `1`, or `yes` to enable non-interactive mode |
-| `HARNESS_APPROVAL_TIMEOUT_SEC` | `300` | Seconds before pending approval tickets expire |
+| `WEAVE_NON_INTERACTIVE` | `false` | Set to `true`, `1`, or `yes` to enable non-interactive mode |
+| `WEAVE_APPROVAL_TIMEOUT_SEC` | `300` | Seconds before pending approval tickets expire |
 
 ### General
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_EVENT_STORE` | `./data/events` | Path to event log directory |
-| `HARNESS_ARTIFACT_PATH` | `./data/artifacts` | Path to artifacts directory |
-| `HARNESS_AGENT_TIMEOUT` | `120` | Timeout per agent execution in seconds |
-| `HARNESS_MAX_CONTEXT_TOKENS` | `100000` | Token threshold for context truncation |
+| `WEAVE_EVENT_STORE` | `./data/events` | Path to event log directory |
+| `WEAVE_ARTIFACT_PATH` | `./data/artifacts` | Path to artifacts directory |
+| `WEAVE_AGENT_TIMEOUT` | `120` | Timeout per agent execution in seconds |
+| `WEAVE_MAX_CONTEXT_TOKENS` | `100000` | Token threshold for context truncation |
 
 ### Multi-Model Routing (M3.1)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_PLANNER_MODEL` | *(default model)* | Model for planner agent type |
-| `HARNESS_GENERATOR_MODEL` | *(default model)* | Model for generator agent type |
-| `HARNESS_EVALUATOR_MODEL` | *(default model)* | Model for evaluator agent type |
-| `HARNESS_ORCHESTRATOR_MODEL` | *(default model)* | Model for orchestrator agent type |
-| `HARNESS_MODEL_FALLBACK` | `claude-sonnet-4-6` | Comma-separated fallback chain |
+| `WEAVE_PLANNER_MODEL` | *(default model)* | Model for planner agent type |
+| `WEAVE_GENERATOR_MODEL` | *(default model)* | Model for generator agent type |
+| `WEAVE_EVALUATOR_MODEL` | *(default model)* | Model for evaluator agent type |
+| `WEAVE_ORCHESTRATOR_MODEL` | *(default model)* | Model for orchestrator agent type |
+| `WEAVE_MODEL_FALLBACK` | `claude-sonnet-4-6` | Comma-separated fallback chain |
 
 ### Agent Memory (M3.2)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_MEMORY_ENABLED` | `true` | Enable/disable memory system |
-| `HARNESS_MEMORY_PATH` | `./data/memory` | Memory storage directory |
-| `HARNESS_MEMORY_MAX_ENTRIES` | `500` | Max entries per agent |
-| `HARNESS_MEMORY_MAX_LENGTH` | `1000` | Max characters per entry |
-| `HARNESS_MEMORY_TTL_DAYS` | `90` | Default entry expiry in days |
-| `HARNESS_MEMORY_RETRIEVAL_LIMIT` | `10` | Max memories injected per prompt |
-| `HARNESS_MEMORY_DECAY_DAYS` | `30` | Relevance decay half-life in days |
+| `WEAVE_MEMORY_ENABLED` | `true` | Enable/disable memory system |
+| `WEAVE_MEMORY_PATH` | `./data/memory` | Memory storage directory |
+| `WEAVE_MEMORY_MAX_ENTRIES` | `500` | Max entries per agent |
+| `WEAVE_MEMORY_MAX_LENGTH` | `1000` | Max characters per entry |
+| `WEAVE_MEMORY_TTL_DAYS` | `90` | Default entry expiry in days |
+| `WEAVE_MEMORY_RETRIEVAL_LIMIT` | `10` | Max memories injected per prompt |
+| `WEAVE_MEMORY_DECAY_DAYS` | `30` | Relevance decay half-life in days |
 
 ### Self-Learning (M3.3)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_LEARNING_PATH` | `./data/learning` | Learning data directory |
+| `WEAVE_LEARNING_PATH` | `./data/learning` | Learning data directory |
 
 ### Impact Analysis (M3.5)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `HARNESS_IMPACT_ENABLED` | `true` | Enable/disable impact analysis |
-| `HARNESS_IMPACT_PATH` | `./data/impact` | Impact analysis data directory |
+| `WEAVE_IMPACT_ENABLED` | `true` | Enable/disable impact analysis |
+| `WEAVE_IMPACT_PATH` | `./data/impact` | Impact analysis data directory |
 
 ### External Config
 
@@ -118,7 +118,7 @@ The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANT
 | `servers` | `list[dict]` | `[]` | MCP server configurations |
 | `auto_discover` | `bool` | `False` | Auto-discover MCP servers |
 
-### HarnessConfig
+### WeaveConfig
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -202,13 +202,13 @@ model_routing:
 
 ```python
 # From environment variables
-config = HarnessConfig.from_env()
+config = WeaveConfig.from_env()
 
 # From YAML file
-config = HarnessConfig.from_yaml("config.yaml")
+config = WeaveConfig.from_yaml("config.yaml")
 
 # Programmatic
-config = HarnessConfig(llm=LLMConfig(model="gpt-4", provider="openai"))
+config = WeaveConfig(llm=LLMConfig(model="gpt-4", provider="openai"))
 ```
 
 ---
@@ -219,7 +219,7 @@ config = HarnessConfig(llm=LLMConfig(model="gpt-4", provider="openai"))
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--project PATH` | *(none)* | Project directory (loads `.harness/agents.yaml`) |
+| `--project PATH` | *(none)* | Project directory (loads `.weave/agents.yaml`) |
 | `--max-parallel N` | `3` | Max parallel DAG node executions |
 | `--max-iterations N` | `50` | Max iterations per agent |
 
@@ -302,7 +302,7 @@ python main.py plan "Fix bug" --template fix_bug --var bug="null pointer"
 
 ## Project Configuration Files
 
-### `.harness/agents.yaml`
+### `.weave/agents.yaml`
 
 Register project-specific agent types:
 
@@ -316,7 +316,7 @@ agents:
 
 ### `config.yaml` (optional)
 
-Full configuration file (loaded via `HarnessConfig.from_yaml()`):
+Full configuration file (loaded via `WeaveConfig.from_yaml()`):
 
 ```yaml
 llm:

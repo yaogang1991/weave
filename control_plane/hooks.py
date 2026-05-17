@@ -82,9 +82,9 @@ class MemoryHook(ExecutionHook):
 
     async def before_execution(self, ctx: ExecutionContext) -> None:
         try:
-            from core.config import HarnessConfig
+            from core.config import WeaveConfig
             from memory.manager import MemoryManager
-            config = HarnessConfig.from_env()
+            config = WeaveConfig.from_env()
             if config.memory.enabled:
                 ctx.memory_manager = MemoryManager(
                     config=config.memory, session_store=ctx.store,
@@ -114,7 +114,7 @@ class LearningHook(ExecutionHook):
 
     def _init(self) -> None:
         try:
-            from core.config import HarnessConfig
+            from core.config import WeaveConfig
             from memory.manager import MemoryManager
             from monitoring.metrics import MetricsCollector
             from learning.analyzer import LearningAnalyzer
@@ -122,7 +122,7 @@ class LearningHook(ExecutionHook):
             from learning.scheduler import LearningScheduler
             from control_plane.repository import JobRepository
 
-            config = HarnessConfig.from_env()
+            config = WeaveConfig.from_env()
             if not config.learning.enabled:
                 return
             mm = MemoryManager(config.memory) if config.memory.enabled else None
@@ -165,8 +165,8 @@ class ImpactHook(ExecutionHook):
 
     def _init(self) -> None:
         try:
-            from core.config import HarnessConfig
-            config = HarnessConfig.from_env()
+            from core.config import WeaveConfig
+            config = WeaveConfig.from_env()
             if not config.impact.enabled:
                 return
             self._coverage_threshold = config.impact.coverage_threshold
@@ -264,8 +264,8 @@ class ImpactHook(ExecutionHook):
         self, ctx: ExecutionContext, impact_scope: Any, verification: Any,
     ) -> None:
         try:
-            from core.config import HarnessConfig
-            cfg = HarnessConfig.from_env().impact
+            from core.config import WeaveConfig
+            cfg = WeaveConfig.from_env().impact
             record_dir = Path(cfg.base_path)
             record_dir.mkdir(parents=True, exist_ok=True)
             record = {

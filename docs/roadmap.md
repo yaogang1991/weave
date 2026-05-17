@@ -69,7 +69,7 @@
 
 ### Stage 2: Task 2 + 3 — 统一入口 + 非交互模式
 - ✅ `guardrails/policy.py` — 统一 `guarded_execute()` 三态返回: allowed/blocked/pending_approval
-- ✅ 非交互模式 — `--non-interactive` / `HARNESS_NON_INTERACTIVE`
+- ✅ 非交互模式 — `--non-interactive` / `WEAVE_NON_INTERACTIVE`
 - ✅ 高风险操作自动创建 pending ticket
 
 ### Stage 3: Task 4 + 5 — CLI 工具链 + 运行态恢复
@@ -121,7 +121,7 @@
   - setup() / get_work_dir() / cleanup() / preserve() / is_available()
 - ✅ `backend/local.py` — 本地直接执行后端
 - ✅ `backend/docker_stub.py` — Docker 后端 stub（M3 实现）
-- ✅ 配置路由: HARNESS_DEFAULT_BACKEND=local|worktree
+- ✅ 配置路由: WEAVE_DEFAULT_BACKEND=local|worktree
 
 ### M2.3 (P1) — Web Console MVP
 **目标:** 3 页面 + 5 操作，核心操作无需 CLI。
@@ -192,13 +192,13 @@ DAG 节点间: share_with_downstream() → 上游记忆共享给下游 Agent
 
 ### 环境变量
 
-- `HARNESS_MEMORY_PATH` — 存储路径（默认 ./data/memory）
-- `HARNESS_MEMORY_ENABLED` — 启用/禁用（默认 true）
-- `HARNESS_MEMORY_MAX_ENTRIES` — 每 Agent 最大条目数（默认 500）
-- `HARNESS_MEMORY_MAX_LENGTH` — 内容最大长度（默认 1000 字符）
-- `HARNESS_MEMORY_TTL_DAYS` — 默认过期天数（默认 90）
-- `HARNESS_MEMORY_RETRIEVAL_LIMIT` — 每次注入最大条目数（默认 10）
-- `HARNESS_MEMORY_DECAY_DAYS` — 相关度衰减半衰期（默认 30 天）
+- `WEAVE_MEMORY_PATH` — 存储路径（默认 ./data/memory）
+- `WEAVE_MEMORY_ENABLED` — 启用/禁用（默认 true）
+- `WEAVE_MEMORY_MAX_ENTRIES` — 每 Agent 最大条目数（默认 500）
+- `WEAVE_MEMORY_MAX_LENGTH` — 内容最大长度（默认 1000 字符）
+- `WEAVE_MEMORY_TTL_DAYS` — 默认过期天数（默认 90）
+- `WEAVE_MEMORY_RETRIEVAL_LIMIT` — 每次注入最大条目数（默认 10）
+- `WEAVE_MEMORY_DECAY_DAYS` — 相关度衰减半衰期（默认 30 天）
 
 ---
 
@@ -239,8 +239,8 @@ MetricsCollector + MemoryManager → Analyzer → Optimizer → MemoryManager
 
 ### 环境变量
 
-- `HARNESS_LEARNING_PATH` — 学习数据路径（默认 ./data/learning）
-- `HARNESS_LEARNING_ENABLED` — 启用/禁用（默认 true）
+- `WEAVE_LEARNING_PATH` — 学习数据路径（默认 ./data/learning）
+- `WEAVE_LEARNING_ENABLED` — 启用/禁用（默认 true）
 
 ---
 
@@ -335,8 +335,8 @@ python main.py impact-history
 
 ### 环境变量
 
-- `HARNESS_IMPACT_PATH` — 分析数据路径（默认 ./data/impact）
-- `HARNESS_IMPACT_ENABLED` — 启用/禁用（默认 true）
+- `WEAVE_IMPACT_PATH` — 分析数据路径（默认 ./data/impact）
+- `WEAVE_IMPACT_ENABLED` — 启用/禁用（默认 true）
 
 ---
 

@@ -1,13 +1,13 @@
 """
-Project-level configuration for the Harness.
+Project-level configuration for the Weave.
 
-Loads from ``.harness/config.yaml`` in the project root.
+Loads from ``.weave/config.yaml`` in the project root.
 Provides operational parameters (runtime, hooks, guardrails, project context)
 without touching prompts — the LLM orchestrator handles planning dynamically.
 
 Design rationale:
 - Symphony uses WORKFLOW.md for both prompt + config because it has a
-  hardcoded state machine. Harness uses an LLM-driven orchestrator, so
+  hardcoded state machine. Weave uses an LLM-driven orchestrator, so
   prompts are generated dynamically. This file only needs operational params.
 - Each config section is consumed by a different component:
   - runtime -> DAG engine, worker
@@ -74,7 +74,7 @@ class ProjectContext(BaseModel):
 
 
 class ProjectConfig(BaseModel):
-    """Top-level project configuration loaded from ``.harness/config.yaml``."""
+    """Top-level project configuration loaded from ``.weave/config.yaml``."""
 
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     hooks: HookConfig = Field(default_factory=HookConfig)
@@ -83,14 +83,14 @@ class ProjectConfig(BaseModel):
 
     @classmethod
     def load(cls, project_path: str | Path | None = None) -> ProjectConfig:
-        """Load project config from ``<project_path>/.harness/config.yaml``.
+        """Load project config from ``<project_path>/.weave/config.yaml``.
 
         Returns default config if the file does not exist.
         """
         if project_path is None:
             return cls()
 
-        config_path = Path(project_path) / ".harness" / "config.yaml"
+        config_path = Path(project_path) / ".weave" / "config.yaml"
         if not config_path.exists():
             return cls()
 

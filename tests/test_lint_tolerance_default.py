@@ -1,7 +1,7 @@
 """
 Tests for #316: lint-only failures should not block the entire DAG.
 
-When pass_threshold=7.0 (the new default from HarnessConfig), a node with
+When pass_threshold=7.0 (the new default from WeaveConfig), a node with
 all hard criteria passing but some soft criteria failing should downgrade
 the soft failures to WARNINGs and allow the node to pass.
 
@@ -10,7 +10,7 @@ threshold mechanism is the same regardless of criterion type.
 """
 import pytest
 
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 from core.models import SuccessCriterion, CriterionType, EvalStatus
 from evaluator.engine import EvaluatorEngine
 from session.store import SessionStore
@@ -72,19 +72,19 @@ class TestLintTolerance:
         assert result.eval_status == EvalStatus.FAILED
 
     def test_config_default_pass_threshold(self):
-        """HarnessConfig has default pass_threshold=7.0."""
-        cfg = HarnessConfig(llm={"api_key": "test", "model": "test"})
+        """WeaveConfig has default pass_threshold=7.0."""
+        cfg = WeaveConfig(llm={"api_key": "test", "model": "test"})
         assert cfg.pass_threshold == 7.0
 
     def test_config_env_override(self, monkeypatch):
-        """HARNESS_PASS_THRESHOLD env var overrides the default."""
-        monkeypatch.setenv("HARNESS_PASS_THRESHOLD", "8.5")
-        cfg = HarnessConfig(llm={"api_key": "test", "model": "test"})
+        """WEAVE_PASS_THRESHOLD env var overrides the default."""
+        monkeypatch.setenv("WEAVE_PASS_THRESHOLD", "8.5")
+        cfg = WeaveConfig(llm={"api_key": "test", "model": "test"})
         assert cfg.pass_threshold == 8.5
 
     def test_config_explicit_override(self):
         """Explicit pass_threshold in constructor overrides env default."""
-        cfg = HarnessConfig(
+        cfg = WeaveConfig(
             llm={"api_key": "test", "model": "test"},
             pass_threshold=9.0,
         )

@@ -300,7 +300,7 @@ class TaskWorker:
             pass
 
         for project_path_str in list(self._config_mtimes.keys()):
-            config_path = Path(project_path_str) / ".harness" / "config.yaml"
+            config_path = Path(project_path_str) / ".weave" / "config.yaml"
             if not config_path.exists():
                 continue
 
@@ -325,7 +325,7 @@ class TaskWorker:
         """Register a project path for hot reload monitoring."""
         from pathlib import Path
 
-        config_path = Path(project_path) / ".harness" / "config.yaml"
+        config_path = Path(project_path) / ".weave" / "config.yaml"
         if config_path.exists():
             try:
                 self._config_mtimes[project_path] = config_path.stat().st_mtime

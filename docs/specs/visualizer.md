@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Real-time visualization layer for the harness. Provides three complementary interfaces:
+Real-time visualization layer for the Weave. Provides three complementary interfaces:
 - **FastAPI HTTP/WebSocket server** (`server.py`): Serves a web dashboard and REST API for
   sessions, plans, jobs, tickets, metrics, and alerts.
 - **CLI DAG renderer** (`cli_renderer.py`): Terminal-based execution visualization using ANSI
@@ -17,7 +17,7 @@ Real-time visualization layer for the harness. Provides three complementary inte
 #### FastAPI Application
 
 ```python
-app: FastAPI  # title="Harness Visualizer", version="2.0"
+app: FastAPI  # title="Weave Visualizer", version="2.0"
 bridge: WebSocketEventBridge  # global singleton instance
 ```
 
@@ -232,7 +232,7 @@ CLI renderer errors: None -- all rendering is best-effort output to stdout.
 | `pydantic` | Third-party | `RejectRequest` model |
 | `visualizer.event_bridge` | Internal | `WebSocketEventBridge` |
 | `session.store` | Internal | `SessionStore` for session data |
-| `core.config` | Internal | `HarnessConfig` for event store path |
+| `core.config` | Internal | `WeaveConfig` for event store path |
 | `core.models` | Internal | `DAG`, `ExecutionEvent`, `NodeStatus` |
 | `control_plane.models` | Internal | `JobStatus`, `RunStatus` |
 | `control_plane.repository` | Internal | `JobRepository` |

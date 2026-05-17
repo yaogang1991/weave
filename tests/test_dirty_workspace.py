@@ -62,7 +62,7 @@ class TestCheckDirtyWorkspace:
         (tmp_path / "dirty.py").write_text("x = 1")
 
         # Non-interactive to avoid stdin prompt
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_dirty_workspace(str(tmp_path))
 
         captured = capsys.readouterr()
@@ -85,7 +85,7 @@ class TestCheckDirtyWorkspace:
         )
         (tmp_path / "dirty.py").write_text("x = 1")
 
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_dirty_workspace(str(tmp_path))  # Should NOT raise
 
         captured = capsys.readouterr()
@@ -108,7 +108,7 @@ class TestCheckDirtyWorkspace:
         )
         (tmp_path / "dirty.py").write_text("x = 1")
 
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": ""}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": ""}):
             with patch("builtins.input", return_value="n"):
                 with pytest.raises(SystemExit) as exc:
                     _check_dirty_workspace(str(tmp_path))
@@ -131,7 +131,7 @@ class TestCheckDirtyWorkspace:
         )
         (tmp_path / "dirty.py").write_text("x = 1")
 
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": ""}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": ""}):
             with patch("builtins.input", return_value="y"):
                 _check_dirty_workspace(str(tmp_path))  # Should NOT raise
 

@@ -63,9 +63,9 @@ class TestProjectConfig:
         assert cfg.runtime.max_parallel == 3
 
     def test_load_from_yaml(self, tmp_path):
-        harness_dir = tmp_path / ".harness"
-        harness_dir.mkdir()
-        config_file = harness_dir / "config.yaml"
+        weave_dir = tmp_path / ".weave"
+        weave_dir.mkdir()
+        config_file = weave_dir / "config.yaml"
         config_file.write_text(yaml.dump({
             "runtime": {
                 "max_parallel": 5,
@@ -90,9 +90,9 @@ class TestProjectConfig:
         assert cfg.project_context.framework == "fastapi"
 
     def test_load_partial_yaml(self, tmp_path):
-        harness_dir = tmp_path / ".harness"
-        harness_dir.mkdir()
-        config_file = harness_dir / "config.yaml"
+        weave_dir = tmp_path / ".weave"
+        weave_dir.mkdir()
+        config_file = weave_dir / "config.yaml"
         config_file.write_text(yaml.dump({
             "runtime": {"max_parallel": 7},
         }))
@@ -104,9 +104,9 @@ class TestProjectConfig:
         assert cfg.hooks.timeout_sec == 60
 
     def test_load_empty_yaml(self, tmp_path):
-        harness_dir = tmp_path / ".harness"
-        harness_dir.mkdir()
-        config_file = harness_dir / "config.yaml"
+        weave_dir = tmp_path / ".weave"
+        weave_dir.mkdir()
+        config_file = weave_dir / "config.yaml"
         config_file.write_text("")
 
         cfg = ProjectConfig.load(tmp_path)
