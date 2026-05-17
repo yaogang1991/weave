@@ -12,7 +12,7 @@ import logging
 from typing import Any
 
 from core.models import MemoryEntry, MemoryScope, EventType
-from memory.manager import MemoryManager
+from memory.manager import MemoryManager, _STOP_WORDS
 
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,10 @@ class MemorySharing:
 
         shared: list[MemoryEntry] = []
         for entry in private_entries:
-            # Simple relevance: check keyword overlap with downstream task
+            # Relevance: keyword overlap with stop-word filtering (#473)
             task_keywords = set(
                 w.lower() for w in node.task_description.split()
-                if len(w) > 3
+                if len(w) > 3 and w.lower() not in _STOP_WORDS
             )
             entry_tokens = set(k.lower() for k in entry.keywords)
             if not task_keywords or not entry_tokens:
