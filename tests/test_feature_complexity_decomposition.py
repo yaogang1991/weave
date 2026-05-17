@@ -29,7 +29,9 @@ class TestPlanningPromptHasComplexityRule:
         with open("orchestrator/prompts/planning.md") as f:
             content = f.read()
         # Should mention a numeric threshold (3) for max features per node
-        assert "3 distinct complex features" in content or "more than 3" in content.lower() or "3 complex feature" in content
+        assert ("3 distinct complex features" in content or
+                "more than 3" in content.lower() or
+                "3 complex feature" in content)
 
     def test_mentions_splitting_guidance(self):
         with open("orchestrator/prompts/planning.md") as f:
@@ -75,7 +77,10 @@ class TestGeneratorPromptHasEarlyOutputRule:
         prompt = WorkerAgent.SYSTEM_PROMPTS["generator"]
         # Should mention writing files incrementally/per-feature, not waiting
         prompt_lower = prompt.lower()
-        assert "write" in prompt_lower and ("incremental" in prompt_lower or "each feature" in prompt_lower or "as soon as" in prompt_lower)
+        assert ("write" in prompt_lower and
+                ("incremental" in prompt_lower or
+                 "each feature" in prompt_lower or
+                 "as soon as" in prompt_lower))
 
 
 # ---------------------------------------------------------------------------

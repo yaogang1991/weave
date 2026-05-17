@@ -72,7 +72,6 @@ class TestRetryFeedbackContent:
         mock_evaluator = MagicMock()
 
         def mock_evaluate(*args, **kwargs):
-            nonlocal attempt
             if attempt == 1:
                 return EvaluationResult(
                     passed=False,

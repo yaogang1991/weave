@@ -118,7 +118,11 @@ class TestGetSummaryMixed:
         })
         # Session completes
         store.emit_event("s1", EventType.SESSION_END, {
-            "summary": {"total_nodes": 2, "success": 1, "failed": 1, "skipped": 0, "all_succeeded": False},
+            "summary": {
+                "total_nodes": 2, "success": 1,
+                "failed": 1, "skipped": 0,
+                "all_succeeded": False,
+            },
         })
 
         summary = store.get_summary("s1")

@@ -168,7 +168,10 @@ class TestLLMSleepCap:
 
         # Simulate a rate limit error with a 200s wait time
         with patch.object(client, '_parse_rate_limit_wait', return_value=200.0):
-            with patch.object(client, '_call_once', side_effect=Exception("429 rate limit exceeded")):
+            with patch.object(
+                client, '_call_once',
+                side_effect=Exception("429 rate limit exceeded")
+            ):
                 with patch('time.sleep', side_effect=mock_sleep):
                     with pytest.raises((RateLimitError, Exception)):
                         client.call(
@@ -186,11 +189,16 @@ class TestLLMSleepCap:
 class TestClassifyError:
     def test_classify_node_timeout_error(self):
         from control_plane.service import _classify_error
-        assert _classify_error("NodeTimeoutError: Node n1 (generator) exceeded 300s timeout") == "timeout"
+        assert _classify_error(
+            "NodeTimeoutError: Node n1 (generator) exceeded 300s timeout"
+        ) == "timeout"
 
     def test_classify_rate_limit_error(self):
         from control_plane.service import _classify_error
-        assert _classify_error("RateLimitError: Rate limit exhausted for anthropic/claude-sonnet-4-6 after 3 retries") == "rate_limit"
+        assert _classify_error(
+            "RateLimitError: Rate limit exhausted for "
+            "anthropic/claude-sonnet-4-6 after 3 retries"
+        ) == "rate_limit"
 
     def test_classify_legacy_timeout_string(self):
         from control_plane.service import _classify_error

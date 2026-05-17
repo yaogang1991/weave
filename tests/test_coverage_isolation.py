@@ -140,7 +140,10 @@ class TestCoverageFileIsolation:
             engine.evaluate_stage(
                 session_id="sess-par",
                 stage_name="impl_a",
-                criteria=[SuccessCriterion(type=CriterionType.COVERAGE, target=80, description="coverage")],
+                criteria=[SuccessCriterion(
+                    type=CriterionType.COVERAGE, target=80,
+                    description="coverage"
+                )],
                 artifact_path=str(tmp_path),
                 work_dir=str(tmp_path),
                 output_artifacts=["mymod/core.py"],
@@ -148,7 +151,10 @@ class TestCoverageFileIsolation:
             engine.evaluate_stage(
                 session_id="sess-par",
                 stage_name="impl_b",
-                criteria=[SuccessCriterion(type=CriterionType.COVERAGE, target=80, description="coverage")],
+                criteria=[SuccessCriterion(
+                    type=CriterionType.COVERAGE, target=80,
+                    description="coverage"
+                )],
                 artifact_path=str(tmp_path),
                 work_dir=str(tmp_path),
                 output_artifacts=["mymod/utils.py"],

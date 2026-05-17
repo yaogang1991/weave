@@ -388,7 +388,10 @@ class TestFailureTopN:
     def test_top_n_limit(self, repo: JobRepository, collector: MetricsCollector):
         """Only top N (default 5) errors are returned."""
         # Use valid error_category values and last_error for additional variety
-        cats = ["timeout", "eval_failed", "tool_blocked", "unknown", "timeout", "eval_failed", "tool_blocked"]
+        cats = [
+            "timeout", "eval_failed", "tool_blocked",
+            "unknown", "timeout", "eval_failed", "tool_blocked"
+        ]
         for i, cat in enumerate(cats):
             make_job(
                 repo,
@@ -974,4 +977,3 @@ class TestApprovalStatsMarkdown:
         content = Path(path).read_text(encoding="utf-8")
         assert "## 审批统计" in content
         assert "待审批" in content
-

@@ -9,7 +9,6 @@ Verifies that:
 from __future__ import annotations
 
 
-
 def test_generator_prompt_has_import_verification_rule():
     """Generator system prompt should include import verification rule."""
     from agent.agent_pool import WorkerAgent

@@ -94,7 +94,10 @@ class TestLintWarnWhenUnavailable:
         result = evaluator.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="hello.py", description="file"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="hello.py", description="file"
+                ),
                 SuccessCriterion(type=CriterionType.LINT, description="lint clean"),
             ],
             str(tmp_path),

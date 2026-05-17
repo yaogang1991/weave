@@ -57,8 +57,14 @@ class TestStrictModeDefault:
         result = evaluator.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing.py", description="file b"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="missing.py", description="file b"
+                ),
             ],
             str(tmp_path),
         )
@@ -71,8 +77,14 @@ class TestStrictModeDefault:
         result = ev.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing.py", description="file b"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="missing.py", description="file b"
+                ),
             ],
             str(tmp_path),
         )
@@ -89,10 +101,22 @@ class TestThresholdMode:
         result = threshold_evaluator.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py", description="file b"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing1.py", description="file c"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing2.py", description="file d"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="b.py", description="file b"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="missing1.py", description="file c"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="missing2.py", description="file d"
+                ),
             ],
             str(tmp_path),
         )
@@ -103,7 +127,10 @@ class TestThresholdMode:
         (tmp_path / "a.py").write_text("ok", encoding="utf-8")
         result = threshold_evaluator.evaluate_stage(
             "s1", "impl",
-            [SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a")],
+            [SuccessCriterion(
+                type=CriterionType.FILE_EXISTS,
+                path="a.py", description="file a"
+            )],
             str(tmp_path),
         )
         assert result.passed
@@ -115,8 +142,14 @@ class TestThresholdMode:
         result = threshold_evaluator.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing.py", description="file b"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="missing.py", description="file b"
+                ),
             ],
             str(tmp_path),
         )
@@ -166,10 +199,22 @@ class TestHardCriteriaProtection:
         result = ev.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py", description="file b"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="c.py", description="file c"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="missing.py", description="file d"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="b.py", description="file b"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="c.py", description="file c"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="missing.py", description="file d"
+                ),
             ],
             str(tmp_path),
         )
@@ -204,9 +249,18 @@ class TestHardCriteriaProtection:
         result = ev.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py", description="file b"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="c.py", description="file c"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="b.py", description="file b"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="c.py", description="file c"
+                ),
                 SuccessCriterion(
                     type=CriterionType.PATTERN_PRESENT,
                     path="target.py",
@@ -227,10 +281,23 @@ class TestHardCriteriaProtection:
         result = ev.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py", description="file b"),
-                SuccessCriterion(type=CriterionType.NO_CRITICAL, path="a.py", description="no markers"),
-                SuccessCriterion(type=CriterionType.NO_CRITICAL, path="missing.py", description="no markers 2"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="b.py", description="file b"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.NO_CRITICAL,
+                    path="a.py", description="no markers"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.NO_CRITICAL,
+                    path="missing.py",
+                    description="no markers 2"
+                ),
             ],
             str(tmp_path),
             output_artifacts=["a.py", "b.py"],
@@ -248,11 +315,23 @@ class TestHardCriteriaProtection:
         result = ev.evaluate_stage(
             "s1", "impl",
             [
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="a.py", description="file a"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="b.py", description="file b"),
-                SuccessCriterion(type=CriterionType.FILE_EXISTS, path="c.py", description="file c"),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="a.py", description="file a"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="b.py", description="file b"
+                ),
+                SuccessCriterion(
+                    type=CriterionType.FILE_EXISTS,
+                    path="c.py", description="file c"
+                ),
                 # NO_CRITICAL on a.py has TODO marker -> fails (soft)
-                SuccessCriterion(type=CriterionType.NO_CRITICAL, path="a.py", description="no markers"),
+                SuccessCriterion(
+                    type=CriterionType.NO_CRITICAL,
+                    path="a.py", description="no markers"
+                ),
             ],
             str(tmp_path),
             output_artifacts=["a.py"],

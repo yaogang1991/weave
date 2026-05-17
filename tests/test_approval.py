@@ -277,9 +277,13 @@ class TestCreateTicket:
         )
         after = _utc_now()
         assert ticket.expires_at is not None
-        assert before + timedelta(seconds=120) <= ticket.expires_at <= after + timedelta(seconds=120)
+        assert (before + timedelta(seconds=120) <=
+                ticket.expires_at <=
+                after + timedelta(seconds=120))
 
-    def test_create_ticket_persists_file(self, tmp_approval_repo: ApprovalRepository, tmp_path: Path):
+    def test_create_ticket_persists_file(
+        self, tmp_approval_repo: ApprovalRepository, tmp_path: Path
+    ):
         ticket = tmp_approval_repo.create_ticket("job_1", "tool", {})
         file_path = tmp_path / "approvals" / f"{ticket.id}.json"
         assert file_path.exists()
@@ -633,7 +637,9 @@ class TestAtomicWrite:
         tmp_files = list(approvals_dir.glob("*.tmp"))
         assert len(tmp_files) == 0, f"Found leftover .tmp files: {tmp_files}"
 
-    def test_no_tmp_files_after_approve(self, tmp_approval_repo: ApprovalRepository, tmp_path: Path):
+    def test_no_tmp_files_after_approve(
+        self, tmp_approval_repo: ApprovalRepository, tmp_path: Path
+    ):
         ticket = tmp_approval_repo.create_ticket("job_1", "tool", {})
         tmp_approval_repo.approve_ticket(ticket.id)
         approvals_dir = tmp_path / "approvals"

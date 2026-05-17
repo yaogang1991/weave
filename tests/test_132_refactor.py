@@ -67,6 +67,7 @@ class TestWorkerNoDoubleTransition:
         mock_service = MagicMock()
         mock_service.run_job = AsyncMock(return_value=run)
         # Simulate RunService transitioning job to SUCCEEDED
+
         async def _run_job_and_succeed(job_id):
             tmp_repo.transition_job_status(job_id, JobStatus.SUCCEEDED)
             return run
@@ -390,7 +391,8 @@ class TestBashSandboxRunner:
         assert "hello sandbox" in result.output
         sandbox.run_command.assert_called_once()
         call_kwargs = sandbox.run_command.call_args.kwargs
-        assert call_kwargs.get("command") == "echo hello" or "echo hello" in str(sandbox.run_command.call_args)
+        assert (call_kwargs.get("command") == "echo hello" or
+                "echo hello" in str(sandbox.run_command.call_args))
 
     def test_bash_falls_back_to_subprocess_without_sandbox(self):
         from tools.registry import ToolRegistry

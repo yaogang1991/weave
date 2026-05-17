@@ -251,8 +251,10 @@ class TestMergeDagResults:
     """Replan merge preserves PARTIAL_PASS and WARNED states."""
 
     def test_merge_preserves_partial_pass(self):
-        old_dag = _make_dag({"n1": _make_node("n1", status=NodeStatus.PARTIAL_PASS,
-                                               result={"s": 1}, output_artifacts=["a.py"])})
+        old_dag = _make_dag({"n1": _make_node("n1",
+                             status=NodeStatus.PARTIAL_PASS,
+                             result={"s": 1},
+                             output_artifacts=["a.py"])})
         new_dag = _make_dag({"n1": _make_node("n1"), "n2": _make_node("n2")})
         engine = _make_engine()
         merged = engine._merge_dag_results(old_dag, new_dag)
@@ -260,16 +262,19 @@ class TestMergeDagResults:
         assert merged.nodes["n1"].output_artifacts == ["a.py"]
 
     def test_merge_preserves_warned(self):
-        old_dag = _make_dag({"n1": _make_node("n1", status=NodeStatus.WARNED,
-                                               result={"s": 1}, output_artifacts=["b.py"])})
+        old_dag = _make_dag({"n1": _make_node("n1",
+                             status=NodeStatus.WARNED,
+                             result={"s": 1},
+                             output_artifacts=["b.py"])})
         new_dag = _make_dag({"n1": _make_node("n1")})
         engine = _make_engine()
         merged = engine._merge_dag_results(old_dag, new_dag)
         assert merged.nodes["n1"].status == NodeStatus.WARNED
 
     def test_merge_does_not_preserve_failed(self):
-        old_dag = _make_dag({"n1": _make_node("n1", status=NodeStatus.FAILED,
-                                               result={"s": 1})})
+        old_dag = _make_dag({"n1": _make_node("n1",
+                             status=NodeStatus.FAILED,
+                             result={"s": 1})})
         new_dag = _make_dag({"n1": _make_node("n1")})
         engine = _make_engine()
         merged = engine._merge_dag_results(old_dag, new_dag)

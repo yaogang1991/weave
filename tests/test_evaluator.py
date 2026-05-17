@@ -188,7 +188,10 @@ class TestCriterionChecking:
         (tmp_path / "actual.py").write_text("y = 2\n", encoding="utf-8")
         result = evaluator.evaluate_stage(
             "s1", "impl",
-            [SuccessCriterion(type=CriterionType.FILE_EXISTS, path="planned.py", description="file")],
+            [SuccessCriterion(
+                type=CriterionType.FILE_EXISTS,
+                path="planned.py", description="file"
+            )],
             str(tmp_path),
             output_artifacts=["actual.py"],
         )
@@ -243,7 +246,9 @@ class TestEvaluateStage:
         # uncheckable, so overall result depends on other criteria.
         # With only this one criterion, overall_passed = False.
         # Feedback should indicate coverage was not verified.
-        assert "WARN" in result.feedback or "not verified" in result.feedback.lower() or "cannot verify" in result.feedback.lower()
+        assert ("WARN" in result.feedback or
+                "not verified" in result.feedback.lower() or
+                "cannot verify" in result.feedback.lower())
         # coverage should be in suggestions (uncheckable list)
         assert "coverage >= 80%" in result.suggestions
 

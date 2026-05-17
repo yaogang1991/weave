@@ -14,7 +14,7 @@ def _make_plan(num_nodes: int) -> dict:
     """Generate a valid plan with the given number of nodes."""
     nodes = [{"id": f"node_{i}", "agent_type": "generator", "task": f"task {i}"}
              for i in range(num_nodes)]
-    edges = [{"from": f"node_{i}", "to": f"node_{i+1}"}
+    edges = [{"from": f"node_{i}", "to": f"node_{i + 1}"}
              for i in range(num_nodes - 1)]
     return {"nodes": nodes, "edges": edges}
 

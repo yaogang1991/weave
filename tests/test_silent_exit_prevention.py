@@ -96,6 +96,7 @@ class TestSilentExitPrevention:
 
         # impl node fails (after plan succeeds)
         call_count = 0
+
         async def _failing_executor(node, artifacts, **kwargs):
             nonlocal call_count
             call_count += 1

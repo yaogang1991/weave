@@ -7,7 +7,6 @@ Verifies:
 from pathlib import Path
 
 
-
 class TestRetrySourceFixPermission:
     """Verify the generator prompt allows source fixes during retry."""
 

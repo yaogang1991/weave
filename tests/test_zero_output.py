@@ -37,7 +37,10 @@ class TestZeroOutputFastFail:
         async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
-        engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler, work_dir="/tmp/test_workdir")
+        engine = DAGExecutionEngine(
+            no_output_executor, _noop_failure_handler,
+            work_dir="/tmp/test_workdir"
+        )
         result = await engine.execute(dag)
         assert result.nodes["gen1"].status == NodeStatus.FAILED
         assert "zero output" in result.nodes["gen1"].error.lower()
@@ -150,7 +153,10 @@ class TestZeroOutputFastFail:
         async def no_output_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "done", "artifacts": []}
 
-        engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler, work_dir="/tmp/test_workdir")
+        engine = DAGExecutionEngine(
+            no_output_executor, _noop_failure_handler,
+            work_dir="/tmp/test_workdir"
+        )
         result = await engine.execute(dag)
         assert result.nodes["worker1"].status == NodeStatus.FAILED
         assert "zero output" in result.nodes["worker1"].error.lower()
@@ -172,7 +178,10 @@ class TestZeroOutputFastFail:
         async def event_handler(event):
             events.append(event)
 
-        engine = DAGExecutionEngine(no_output_executor, _noop_failure_handler, work_dir="/tmp/test_workdir")
+        engine = DAGExecutionEngine(
+            no_output_executor, _noop_failure_handler,
+            work_dir="/tmp/test_workdir"
+        )
         engine.on_event(event_handler)
         await engine.execute(dag)
 

@@ -175,7 +175,8 @@ class TestWatchdog:
         # Node should be FAILED (timed out via _execute_with_timeout)
         assert result_dag.nodes["n1"].status == NodeStatus.FAILED
         # Timeout-based failure; watchdog may or may not have detected unhealthy yet
-        assert "timeout" in result_dag.nodes["n1"].error.lower() or "timed out" in result_dag.nodes["n1"].error.lower()
+        assert ("timeout" in result_dag.nodes["n1"].error.lower() or
+                "timed out" in result_dag.nodes["n1"].error.lower())
 
     @pytest.mark.asyncio
     async def test_healthy_node_not_killed(self):
@@ -391,7 +392,6 @@ class TestHeartbeatRecord:
         node.record_heartbeat()
         assert node.last_heartbeat_at is not None
         assert node.last_heartbeat_at.tzinfo is not None
-
 
 
 # ---------------------------------------------------------------------------
@@ -983,4 +983,3 @@ class TestWatchdogServiceUnit:
             e.event_type == "health_alert" and e.node_id == "n1"
             for e in emitted_events
         )
-

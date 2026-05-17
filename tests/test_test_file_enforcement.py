@@ -16,7 +16,10 @@ from core.dag_engine import DAGExecutionEngine
 class TestIsTestFileExistsCriterion:
     def test_structured_test_file_exists(self):
         assert DAGExecutionEngine._is_test_file_exists_criterion(
-            SuccessCriterion(type=CriterionType.TEST_FILE_EXISTS, description="test files must exist"),
+            SuccessCriterion(
+                type=CriterionType.TEST_FILE_EXISTS,
+                description="test files must exist"
+            ),
         )
 
     def test_string_test_file_exists(self):

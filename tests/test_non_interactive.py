@@ -36,6 +36,7 @@ from core.models import (  # noqa: F401
 )
 from guardrails.policy import GuardrailResult, PersonalGuardrails
 
+
 # Inline WorkerConfig to avoid pulling heavy control_plane dependencies
 class WorkerConfig:
     """Minimal WorkerConfig for testing (mirrors control_plane.worker.WorkerConfig)."""

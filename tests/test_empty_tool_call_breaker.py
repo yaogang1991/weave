@@ -9,7 +9,10 @@ import pytest
 from unittest.mock import MagicMock
 
 from core.models import ToolResult, EventType
-from agent.worker import AgentWorker, EMPTY_TOOL_CALL_LIMIT, EMPTY_CALL_MAX_RETRIES, DEGENERATE_CALL_LIMIT
+from agent.worker import (
+    AgentWorker, EMPTY_TOOL_CALL_LIMIT,
+    EMPTY_CALL_MAX_RETRIES, DEGENERATE_CALL_LIMIT,
+)
 
 
 @pytest.fixture
