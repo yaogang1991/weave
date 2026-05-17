@@ -1,8 +1,10 @@
 """
 Tests for #179 PR 3+4: sandbox integration in service.py and DockerSandbox MVP.
 
-PR 3: BackendManager.sandbox → SyncSandboxAdapter → ToolRegistry wiring
+PR 3: BackendManager.sandbox -> SyncSandboxAdapter -> ToolRegistry wiring
 PR 4: Minimal DockerSandbox implementation
+#483: DockerSandbox resource limits
+#484: BackendManager risk-based sandbox selection
 """
 import os
 
@@ -270,3 +272,123 @@ class TestLocalSandboxCredentialIsolation:
             "echo $MY_VAR", cwd="/tmp", env={"MY_VAR": "test_value"},
         )
         assert "test_value" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# #484: BackendManager risk-based sandbox selection
+# ---------------------------------------------------------------------------
+
+class TestRiskBasedSandboxSelection:
+    """Verify BackendManager selects sandbox based on risk level (#484)."""
+
+    def test_default_sandbox_by_risk_mapping(self):
+        """Default mapping: low/medium -> local, high/critical -> docker."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        assert manager.sandbox_by_risk["low"] == "local"
+        assert manager.sandbox_by_risk["medium"] == "local"
+        assert manager.sandbox_by_risk["high"] == "docker"
+        assert manager.sandbox_by_risk["critical"] == "docker"
+
+    def test_custom_sandbox_by_risk_mapping(self):
+        """Custom sandbox_by_risk overrides defaults."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+            sandbox_by_risk={"low": "local", "high": "local"},
+        )
+        assert manager.sandbox_by_risk["high"] == "local"
+
+    def test_select_sandbox_returns_default_when_no_risk(self):
+        """No risk_level -> returns default sandbox."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        sandbox = manager._select_sandbox(None)
+        assert isinstance(sandbox, LocalSandbox)
+
+    def test_select_sandbox_low_risk_returns_local(self):
+        """Low risk -> LocalSandbox."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        sandbox = manager._select_sandbox("low")
+        assert isinstance(sandbox, LocalSandbox)
+
+    def test_select_sandbox_high_risk_falls_back_to_local(self):
+        """High risk -> DockerSandbox, but falls back to LocalSandbox if unavailable."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        sandbox = manager._select_sandbox("high")
+        # Docker is not available in test env, so falls back to LocalSandbox
+        assert isinstance(sandbox, LocalSandbox)
+
+    def test_select_sandbox_high_risk_uses_docker_when_available(self):
+        """High risk with Docker available -> DockerSandbox."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        with patch.object(DockerSandbox, "is_available", return_value=True):
+            sandbox = manager._select_sandbox("high")
+        assert isinstance(sandbox, DockerSandbox)
+
+    def test_select_sandbox_critical_risk_uses_docker_when_available(self):
+        """Critical risk with Docker available -> DockerSandbox."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        with patch.object(DockerSandbox, "is_available", return_value=True):
+            sandbox = manager._select_sandbox("critical")
+        assert isinstance(sandbox, DockerSandbox)
+
+    def test_setup_stores_risk_selected_sandbox(self):
+        """setup() stores the risk-selected sandbox for later retrieval."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        with patch.object(DockerSandbox, "is_available", return_value=True):
+            manager.setup("j1", "r1", risk_level="high")
+        sandbox = manager.get_sandbox("r1")
+        assert isinstance(sandbox, DockerSandbox)
+        # Cleanup
+        manager.cleanup("j1", "r1")
+
+    def test_get_sandbox_returns_default_for_unknown_run(self):
+        """get_sandbox() returns default sandbox for unknown run_id."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        sandbox = manager.get_sandbox("nonexistent")
+        assert sandbox is manager.sandbox
+
+    def test_cleanup_removes_active_sandbox(self):
+        """cleanup() removes the active sandbox for a run."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        manager.setup("j1", "r1")
+        assert "r1" in manager._active_sandboxes
+        manager.cleanup("j1", "r1")
+        assert "r1" not in manager._active_sandboxes
+
+    def test_preserve_removes_active_sandbox(self):
+        """preserve() removes the active sandbox for a run."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.LOCAL,
+        )
+        manager.setup("j1", "r1")
+        assert "r1" in manager._active_sandboxes
+        manager.preserve("j1", "r1", reason="test")
+        assert "r1" not in manager._active_sandboxes
