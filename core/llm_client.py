@@ -131,6 +131,7 @@ class LLMClient:
         messages: list[dict],
         tools: list[dict] | None = None,
         max_retries: int | None = None,
+        agent_timeout: float | None = None,
     ) -> dict:
         """
         Call the configured LLM with automatic retry for transient errors.
@@ -143,12 +144,21 @@ class LLMClient:
             messages: Chat messages in OpenAI-style format.
             tools: Tool schemas (OpenAI format).
             max_retries: Override default retry count for this call.
+            agent_timeout: Node-level timeout in seconds. When provided,
+                cumulative rate-limit sleep is tracked and the call bails
+                early with RateLimitError if sleep exceeds 50% of this
+                budget (#432).
 
         Returns:
             dict with keys: ``role``, ``content``, and optionally
             ``tool_calls``.
         """
         retries = max_retries if max_retries is not None else self.max_retries
+        # #432: Track cumulative sleep to bail before consuming too much
+        # of the agent's wall-clock timeout budget.
+        sleep_budget = (agent_timeout * 0.5) if agent_timeout else None
+        cumulative_sleep = 0.0
+
         for attempt in range(retries + 1):
             try:
                 return self._call_once(messages, tools)
@@ -178,13 +188,26 @@ class LLMClient:
 
                 # For 429 / rate-limit: parse reset time and wait
                 if "429" in error_lower or "rate_limit" in error_lower or "ratelimit" in error_lower:
+                    # #432: Bail early if cumulative sleep already ate
+                    # more than 50% of the agent timeout budget.
+                    if sleep_budget is not None and cumulative_sleep >= sleep_budget:
+                        raise RateLimitError(
+                            provider=self.config.provider,
+                            model=self.config.model,
+                            retries=retries,
+                        ) from e
+
                     wait_sec = self._parse_rate_limit_wait(error_msg)
                     if wait_sec is not None:
-                        time.sleep(min(wait_sec + 1, 60))  # cap at 60s (#360)
+                        actual_sleep = min(wait_sec + 1, 60)
+                        time.sleep(actual_sleep)
+                        cumulative_sleep += actual_sleep
                         continue
 
                 # Generic transient: exponential backoff
-                time.sleep(2 ** attempt)
+                backoff = 2 ** attempt
+                time.sleep(backoff)
+                cumulative_sleep += backoff
 
     def _call_once(
         self, messages: list[dict], tools: list[dict] | None = None
