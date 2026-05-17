@@ -888,3 +888,77 @@ class TestCriticalRisk:
         ):
             result = plan_guardrails.evaluate("destroy", {"target": "prod"})
         assert result.decision == "blocked"
+
+
+# ---------------------------------------------------------------------------
+# Project directory whitelisting (#524)
+# ---------------------------------------------------------------------------
+
+
+class TestProjectDirWhitelist:
+    """File writes within --project directory should auto-lower risk (#524)."""
+
+    def test_write_in_project_dir_allowed_in_default_mode(self, mock_tool_registry):
+        """Write to a file inside project_dir gets risk lowered to LOW."""
+        project_dir = "/tmp/my-project"
+        policy = GuardrailPolicy(mode=PermissionMode.DEFAULT)
+        guardrails = Guardrails(policy, mock_tool_registry, project_dir=project_dir)
+
+        result = guardrails.evaluate("write", {"path": "/tmp/my-project/src/main.py"})
+        assert result.decision == "allowed"
+
+    def test_edit_in_project_dir_allowed_in_default_mode(self, mock_tool_registry):
+        """Edit to a file inside project_dir gets risk lowered to LOW."""
+        project_dir = "/tmp/my-project"
+        policy = GuardrailPolicy(mode=PermissionMode.DEFAULT)
+        guardrails = Guardrails(policy, mock_tool_registry, project_dir=project_dir)
+
+        result = guardrails.evaluate("edit", {"path": "/tmp/my-project/README.md"})
+        assert result.decision == "allowed"
+
+    def test_write_outside_project_dir_still_needs_approval(self, mock_tool_registry):
+        """Write to a file outside project_dir keeps original risk."""
+        project_dir = "/tmp/my-project"
+        policy = GuardrailPolicy(mode=PermissionMode.DEFAULT)
+        guardrails = Guardrails(policy, mock_tool_registry, project_dir=project_dir)
+
+        result = guardrails.evaluate("write", {"path": "/etc/config.yaml"})
+        assert result.decision == "pending_approval"
+
+    def test_no_project_dir_behaves_as_before(self, mock_tool_registry):
+        """Without project_dir, write is still MEDIUM risk in default mode."""
+        policy = GuardrailPolicy(mode=PermissionMode.DEFAULT)
+        guardrails = Guardrails(policy, mock_tool_registry, project_dir=None)
+
+        result = guardrails.evaluate("write", {"path": "/tmp/file.py"})
+        assert result.decision == "pending_approval"
+
+    def test_relative_path_resolved_against_project_dir(self, mock_tool_registry):
+        """Relative paths are resolved and checked against project_dir."""
+        project_dir = "/tmp/my-project"
+        policy = GuardrailPolicy(mode=PermissionMode.DEFAULT)
+        guardrails = Guardrails(policy, mock_tool_registry, project_dir=project_dir)
+
+        with patch("os.getcwd", return_value="/tmp/my-project"):
+            result = guardrails.evaluate("write", {"path": "src/main.py"})
+        assert result.decision == "allowed"
+
+    def test_bash_not_affected_by_project_dir(self, mock_tool_registry):
+        """Bash tool is NOT affected by project_dir whitelisting."""
+        project_dir = "/tmp/my-project"
+        policy = GuardrailPolicy(mode=PermissionMode.DEFAULT)
+        guardrails = Guardrails(policy, mock_tool_registry, project_dir=project_dir)
+
+        result = guardrails.evaluate("bash", {"command": "rm -rf /"})
+        assert result.decision == "pending_approval"
+
+    def test_personal_guardrails_project_dir(self, mock_tool_registry):
+        """PersonalGuardrails also accepts and uses project_dir."""
+        project_dir = "/tmp/my-project"
+        policy = PersonalGuardrailPolicy()
+        guardrails = PersonalGuardrails(
+            policy, mock_tool_registry, project_dir=project_dir,
+        )
+
+        result = guardrails.evaluate("write", {"path": "/tmp/my-project/app.py"})
+        assert result.decision == "allowed"

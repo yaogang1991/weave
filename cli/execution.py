@@ -216,7 +216,8 @@ def _build_guardrails(args, tool_registry: ToolRegistry) -> Guardrails:
             auto_approve_read=True,
             max_iterations=args.max_iterations,
         )
-    return Guardrails(policy, tool_registry)
+    project_path = getattr(args, "project", None)
+    return Guardrails(policy, tool_registry, project_dir=project_path)
 
 
 async def _init_mcp_tools(config, tool_registry, guardrails):

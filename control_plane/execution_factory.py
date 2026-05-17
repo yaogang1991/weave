@@ -90,6 +90,7 @@ class ExecutionFactory:
         approval_repo: Any | None = None,
         run_id: str | None = None,
         backend_manager: Any | None = None,
+        project_dir: str | None = None,
     ) -> DAGExecutionEngine:
         """Build a DAGExecutionEngine with agent pool, failure handler,
         and optional replan handler."""
@@ -133,9 +134,10 @@ class ExecutionFactory:
                 tool_registry,
                 non_interactive=self._non_interactive,
                 approval_repo=self._approval_repo,
+                project_dir=project_dir,
             )
         else:
-            guardrails = Guardrails(policy, tool_registry)
+            guardrails = Guardrails(policy, tool_registry, project_dir=project_dir)
 
         pool = AgentPool(
             llm_config=self._llm_config,

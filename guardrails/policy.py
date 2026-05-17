@@ -13,11 +13,13 @@ Unified tri-state result:
 
 from __future__ import annotations
 
+import os
 import re
 import select
 import sys
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from core.models import (
@@ -113,9 +115,17 @@ class Guardrails:
 
     # -- construction -------------------------------------------------
 
-    def __init__(self, policy: GuardrailPolicy, tool_registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        policy: GuardrailPolicy,
+        tool_registry: ToolRegistry,
+        project_dir: str | Path | None = None,
+    ) -> None:
         self.policy = policy
         self.tool_registry = tool_registry
+        self._project_dir = (
+            Path(project_dir).resolve() if project_dir else None
+        )
         self._pending_approvals: dict[str, str] = {}
         # Instance-level copy to prevent cross-instance leakage (#413 review).
         self.RISK_MAP = dict(self.RISK_MAP)
@@ -125,6 +135,25 @@ class Guardrails:
     def evaluate(self, tool_name: str, arguments: dict) -> GuardrailResult:
         """Unified evaluation entry-point.  Returns a tri-state GuardrailResult."""
         risk = self.RISK_MAP.get(tool_name, RiskLevel.HIGH)
+
+        # 0. --project directory whitelisting (#524):
+        # Lower risk for file writes within the user-specified project dir.
+        if (
+            self._project_dir
+            and tool_name in ("write", "edit")
+            and risk.value >= RiskLevel.MEDIUM.value
+        ):
+            target = arguments.get("path", arguments.get("file_path", ""))
+            if target:
+                try:
+                    resolved = Path(target)
+                    if not resolved.is_absolute():
+                        resolved = Path(os.getcwd()) / resolved
+                    resolved = resolved.resolve()
+                    if str(resolved).startswith(str(self._project_dir)):
+                        risk = RiskLevel.LOW
+                except (ValueError, OSError):
+                    pass
 
         # 1. Check deny lists (always enforced, regardless of mode)
         if tool_name in self.policy.denied_tools:
@@ -428,8 +457,9 @@ class PersonalGuardrails(Guardrails):
         tool_registry: ToolRegistry,
         non_interactive: bool = False,
         approval_repo: ApprovalRepository | None = None,
+        project_dir: str | Path | None = None,
     ) -> None:
-        super().__init__(policy, tool_registry)
+        super().__init__(policy, tool_registry, project_dir=project_dir)
         self.personal_policy = policy
         self.non_interactive = non_interactive
         self.approval_repo = approval_repo

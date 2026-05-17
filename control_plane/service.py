@@ -314,6 +314,7 @@ class RunService:
                 backend_manager=backend_manager,
                 job_id=job.id,
                 run_id=run.id,
+                project_dir=job.project_path,
             )
             summary = engine.get_execution_summary(result_dag)
 
@@ -619,6 +620,7 @@ class RunService:
             approval_repo=self.approval_repo,
             run_id=run_id,
             backend_manager=backend_manager,
+            project_dir=job.project_path,
         )
         result_dag = await engine.execute(dag)
 

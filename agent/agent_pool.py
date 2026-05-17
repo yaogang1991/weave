@@ -602,6 +602,7 @@ class AgentPool:
                 if self.guardrails:
                     node_guardrails = Guardrails(
                         self.guardrails.policy, node_tool_registry,
+                        project_dir=self.guardrails._project_dir,
                     )
             worker = self.create_worker(
                 node.agent_type,
