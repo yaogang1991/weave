@@ -12,6 +12,11 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def _load_claude_settings() -> dict[str, str]:
     """Load env vars from ~/.claude/settings-kimi.json if present."""
     settings_path = Path.home() / ".claude" / "settings-kimi.json"
@@ -20,8 +25,8 @@ def _load_claude_settings() -> dict[str, str]:
             with open(settings_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return data.get("env", {})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Failed to load claude settings: %s", exc)
     return {}
 
 

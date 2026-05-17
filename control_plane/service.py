@@ -523,7 +523,7 @@ class RunService:
             "job_id": job_id,
             "details": details,
         }
-        print(json.dumps(event), flush=True)
+        logger.info("Execution event: %s", json.dumps(event))
 
     # ------------------------------------------------------------------
     # Internal helpers

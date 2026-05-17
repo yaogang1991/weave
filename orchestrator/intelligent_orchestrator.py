@@ -311,7 +311,7 @@ class IntelligentOrchestrator:
 
         if validator.warnings:
             for w in validator.warnings:
-                print(f"[PlanValidator] {w}")
+                logger.warning("[PlanValidator] %s", w)
         plan = OrchestratorPlan(**fixed_plan_data)
 
         dag = self._plan_to_dag(plan)
