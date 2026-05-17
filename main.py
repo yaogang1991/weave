@@ -35,7 +35,7 @@ from control_plane.models import JobStatus  # noqa: E402
 from control_plane.approval import TicketStatus  # noqa: E402
 
 # Import CLI command handlers from domain modules
-from cli.execution import cmd_plan, cmd_execute, cmd_run, cmd_viz  # noqa: E402
+from cli.execution import cmd_plan, cmd_execute, cmd_run, cmd_viz, cmd_serve  # noqa: E402
 from cli.utils import (  # noqa: E402, F401 — backward-compat re-exports used by tests
     _resolve_project_path,
     _check_dirty_workspace,
@@ -149,6 +149,10 @@ Examples:
     viz_parser.add_argument("--port", type=int, default=8080, help="Server port (default: 8080)")
     viz_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")
     viz_parser.set_defaults(func=cmd_viz)
+
+    # serve command — MCP Server mode (#512)
+    serve_parser = subparsers.add_parser("serve", help="Start MCP Server")
+    serve_parser.set_defaults(func=cmd_serve)
 
     # ------------------------------------------------------------------
     # Control-plane commands
@@ -348,6 +352,7 @@ Examples:
         "templates",
         "impact-predict", "impact-graph", "impact-history",
         "skills",
+        "serve",
     }
     # Template-based plan doesn't need an LLM key (run still executes agents)
     if args.command == "plan" and getattr(args, "template", None):

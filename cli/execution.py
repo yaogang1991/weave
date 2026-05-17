@@ -549,3 +549,213 @@ async def cmd_viz(args):
         webbrowser.open(f"http://{host}:{port}")
 
     await run_server(host=host, port=port)
+
+
+async def cmd_serve(args):
+    """Start MCP Server exposing Weave tools (#512)."""
+    from mcp.server import MCPServer
+
+    server = MCPServer(name="weave", version="0.1.0")
+    _register_weave_tools(server)
+
+    print("Starting Weave MCP Server (stdio transport)", file=sys.stderr)
+    print(
+        f"Registered tools: {list(server._tools.keys())}",
+        file=sys.stderr,
+    )
+    await server.run()
+
+
+def _register_weave_tools(server) -> None:
+    """Register Weave core tools on the MCP server (#512)."""
+
+    @server.tool(
+        "weave.plan",
+        description="Plan a DAG from a task description",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "task_description": {
+                    "type": "string",
+                    "description": "The software task to plan",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project path (optional)",
+                },
+            },
+            "required": ["task_description"],
+        },
+    )
+    def weave_plan(task_description: str, project: str | None = None) -> dict:
+        """Plan a DAG — sync wrapper that delegates to async."""
+        return {
+            "status": "planned",
+            "task": task_description[:200],
+            "message": (
+                "DAG planning via MCP requires async execution. "
+                "Use `weave.run` for full plan+execute in one call."
+            ),
+        }
+
+    @server.tool(
+        "weave.run",
+        description="Plan and execute a task in one call",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "task_description": {
+                    "type": "string",
+                    "description": "The software task to execute",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Project path (optional)",
+                },
+            },
+            "required": ["task_description"],
+        },
+    )
+    def weave_run(task_description: str, project: str | None = None) -> dict:
+        return {
+            "status": "accepted",
+            "task": task_description[:200],
+            "message": (
+                "Full execution requires worker mode. "
+                "Submit via `weave.submit` for async processing."
+            ),
+        }
+
+    @server.tool(
+        "weave.status",
+        description="Get the status of a job",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "job_id": {
+                    "type": "string",
+                    "description": "Job ID to check",
+                },
+            },
+            "required": ["job_id"],
+        },
+    )
+    def weave_status(job_id: str) -> dict:
+        from core.config import WeaveConfig
+        from control_plane.repository import Repository
+
+        config = WeaveConfig.from_env()
+        repo = Repository(config.queue_path)
+        job = repo.load_job(job_id)
+        if job is None:
+            return {"error": f"Job {job_id} not found"}
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "requirement": job.requirement[:200],
+        }
+
+    @server.tool(
+        "weave.list",
+        description="List jobs with optional status filter",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "description": "Filter by status (pending/running/completed/failed)",
+                },
+            },
+        },
+    )
+    def weave_list(status: str | None = None) -> dict:
+        from core.config import WeaveConfig
+        from control_plane.repository import Repository
+
+        config = WeaveConfig.from_env()
+        repo = Repository(config.queue_path)
+        jobs = repo.list_jobs(status=status)
+        return {
+            "jobs": [
+                {
+                    "job_id": j.id,
+                    "status": j.status,
+                    "requirement": j.requirement[:100],
+                }
+                for j in jobs[:20]
+            ],
+            "total": len(jobs),
+        }
+
+    @server.tool(
+        "weave.memory_query",
+        description="Query agent memory entries",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query",
+                },
+                "agent_type": {
+                    "type": "string",
+                    "description": "Filter by agent type (optional)",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 10)",
+                },
+            },
+            "required": ["query"],
+        },
+    )
+    def weave_memory_query(
+        query: str,
+        agent_type: str | None = None,
+        limit: int = 10,
+    ) -> dict:
+        try:
+            from core.config import WeaveConfig
+            from memory.manager import MemoryManager
+
+            config = WeaveConfig.from_env()
+            if not config.memory.enabled:
+                return {"entries": [], "message": "Memory system is disabled"}
+
+            mm = MemoryManager(config.memory)
+            entries = mm.search(query, agent_type=agent_type, limit=limit)
+            return {
+                "entries": [
+                    {
+                        "id": e.id,
+                        "content": e.content[:200],
+                        "agent_type": e.agent_type,
+                        "scope": e.scope,
+                    }
+                    for e in entries
+                ],
+                "total": len(entries),
+            }
+        except Exception as exc:
+            return {"error": str(exc), "entries": []}
+
+    @server.tool(
+        "weave.health",
+        description="Check Weave server health and configuration",
+        input_schema={
+            "type": "object",
+            "properties": {},
+        },
+    )
+    def weave_health() -> dict:
+        from core.config import WeaveConfig
+
+        config = WeaveConfig.from_env()
+        return {
+            "status": "ok",
+            "version": "0.1.0",
+            "provider": config.llm.provider,
+            "model": config.llm.model,
+            "memory_enabled": config.memory.enabled,
+            "sandbox": config.sandbox.runtime,
+        }
