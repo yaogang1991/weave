@@ -112,8 +112,8 @@ class TestRateLimitRetryBudget:
         )
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.FAILED
-        assert node.retry_count == 0  # NOT incremented
+        assert dag.nodes["test_node"].status == NodeStatus.FAILED
+        assert dag.nodes["test_node"].retry_count == 0  # NOT incremented
         assert call_count == 1
 
     @pytest.mark.asyncio
@@ -142,10 +142,12 @@ class TestRateLimitRetryBudget:
         )
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.FAILED
+        # Read from dag.nodes (not stale local `node`) after immutable updates (#486)
+        final_node = dag.nodes["test_node"]
+        assert final_node.status == NodeStatus.FAILED
         # dag_engine retries internally up to max_retries, then abort fires.
         # retry_count == max_retries means all internal retries were consumed.
-        assert node.retry_count == node.max_retries
+        assert final_node.retry_count == final_node.max_retries
         assert call_count >= 1
 
 
@@ -242,7 +244,7 @@ class TestNodeTimeoutInDagEngine:
         engine._get_node_timeout = lambda agent_type: 1
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.FAILED
+        assert dag.nodes["slow_node"].status == NodeStatus.FAILED
 
 
 class TestCooperativeCancellation:
@@ -364,7 +366,7 @@ class TestProgressCallback:
         engine._get_node_timeout = lambda agent_type: 300
         await engine.execute(dag)
 
-        assert node.status == NodeStatus.SUCCESS
+        assert dag.nodes["test_node"].status == NodeStatus.SUCCESS
         assert progress_calls >= 1
 
     @pytest.mark.asyncio
