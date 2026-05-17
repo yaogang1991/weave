@@ -29,6 +29,7 @@ from cli.utils import (
     _serialize_dag,
     _parse_template_vars,
 )
+from guardrails.injection import detect_injection  # noqa: E402 (#511)
 
 
 async def cmd_plan(args):
@@ -92,6 +93,23 @@ async def cmd_plan(args):
 
         print(f"Planning: {args.requirement}")
         print(f"Available agents: {[a.id for a in registry.list_agents()]}")
+
+        # Input-layer injection detection (#511)
+        injection_result = detect_injection(args.requirement)
+        if injection_result.detected:
+            print(
+                f"\nWARNING: Potential prompt injection detected "
+                f"(risk: {injection_result.risk_level}). "
+                f"{injection_result.details}",
+                file=sys.stderr,
+            )
+            if injection_result.risk_level == "high":
+                print(
+                    "High-risk injection patterns detected. "
+                    "Proceeding with caution.",
+                    file=sys.stderr,
+                )
+
         dag = await orchestrator.plan(
             requirement=args.requirement,
             project_context={"project_path": args.project} if args.project else None,
