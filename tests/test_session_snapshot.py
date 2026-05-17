@@ -152,3 +152,73 @@ class TestCheckpoint:
         """_load_snapshot returns None when no snapshot file exists."""
         result = store._load_snapshot("nonexistent-session")
         assert result is None
+
+
+class TestAutoSnapshot:
+    """Verify periodic auto-snapshot triggers at configured interval (#510)."""
+
+    def test_auto_snapshot_at_interval(self, tmp_path):
+        """Snapshot auto-created when event count reaches interval."""
+        store = SessionStore(
+            base_path=str(tmp_path / "events"),
+            snapshot_interval=5,
+        )
+        sid = "test-auto"
+        store.create_session(sid, "test")  # 1 event
+
+        # Emit 4 more → total 5 → triggers auto-snapshot
+        for i in range(4):
+            store.emit_event(
+                sid, EventType.AGENT_MESSAGE,
+                {"role": "assistant", "content": f"msg-{i}"},
+            )
+
+        assert store._snapshot_file(sid).exists()
+
+    def test_auto_snapshot_disabled_with_large_interval(self, tmp_path):
+        """No auto-snapshot when interval is very large."""
+        store = SessionStore(
+            base_path=str(tmp_path / "events"),
+            snapshot_interval=10000,
+        )
+        sid = "test-no-auto"
+        store.create_session(sid, "test")
+        for i in range(10):
+            store.emit_event(
+                sid, EventType.AGENT_MESSAGE,
+                {"role": "assistant", "content": f"msg-{i}"},
+            )
+
+        assert not store._snapshot_file(sid).exists()
+
+    def test_event_counter_resets_after_snapshot(self, tmp_path):
+        """Event counter resets after auto-snapshot, enabling next cycle."""
+        store = SessionStore(
+            base_path=str(tmp_path / "events"),
+            snapshot_interval=3,
+        )
+        sid = "test-reset"
+        store.create_session(sid, "test")  # 1 event
+
+        # Emit 2 more → total 3 → snapshot triggered, counter resets to 0
+        for i in range(2):
+            store.emit_event(
+                sid, EventType.AGENT_MESSAGE,
+                {"role": "assistant", "content": f"batch1-{i}"},
+            )
+        assert store._snapshot_file(sid).exists()
+        assert store._event_counts[sid] == 0  # Reset after snapshot
+
+        # Emit 3 more → counter goes to 3 → second snapshot
+        store._snapshot_file(sid).unlink()  # Remove first snapshot
+        for i in range(3):
+            store.emit_event(
+                sid, EventType.AGENT_MESSAGE,
+                {"role": "assistant", "content": f"batch2-{i}"},
+            )
+        assert store._snapshot_file(sid).exists()
+
+    def test_default_snapshot_interval_is_50(self):
+        """Default snapshot_interval is 50."""
+        store = SessionStore(base_path="/tmp/test-default")
+        assert store._snapshot_interval == 50

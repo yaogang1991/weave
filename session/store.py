@@ -33,10 +33,14 @@ class SessionStore:
         self,
         base_path: str = "./data/events",
         max_ctx: int = 50,
+        snapshot_interval: int = 50,
     ):
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
         self._max_ctx = max_ctx
+        self._snapshot_interval = snapshot_interval
+        # Track event counts per session for auto-snapshot (#510)
+        self._event_counts: dict[str, int] = {}
 
     def _session_file(self, session_id: str) -> Path:
         return self.base_path / f"{session_id}.jsonl"
@@ -78,6 +82,11 @@ class SessionStore:
                 "Failed to write event %s to session %s: %s",
                 event_type.value, session_id, exc,
             )
+        # Auto-snapshot: create periodic checkpoint (#510)
+        self._event_counts[session_id] = (
+            self._event_counts.get(session_id, 0) + 1
+        )
+        self._maybe_snapshot(session_id)
         return event
 
     def get_events(
@@ -295,6 +304,22 @@ class SessionStore:
         )
 
     # -- Snapshot helpers (#454) --
+
+    def _maybe_snapshot(self, session_id: str) -> None:
+        """Auto-snapshot when event count reaches interval (#510).
+
+        Creates a snapshot and truncates the log to keep file size bounded.
+        Skips if session has too few events or snapshot fails.
+        """
+        count = self._event_counts.get(session_id, 0)
+        if count < self._snapshot_interval or count % self._snapshot_interval != 0:
+            return
+        try:
+            self.checkpoint(session_id, label="auto")
+            # Reset counter after truncation — remaining events start from 0
+            self._event_counts[session_id] = 0
+        except Exception as exc:
+            logger.debug("Auto-snapshot failed for session %s: %s", session_id, exc)
 
     def _save_snapshot(self, session_id: str, snapshot: SessionSnapshot) -> None:
         """Write snapshot to disk."""
