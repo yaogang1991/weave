@@ -22,22 +22,31 @@ def _empty_bash_call(call_id="tc1"):
     return {"id": call_id, "name": "bash", "arguments": {}}
 
 
+def _blank_bash_call(call_id="tc1"):
+    """Tool call with blank (empty string) required argument.
+
+    Unlike _empty_bash_call (args={}), blank args do NOT trigger #541
+    early termination, so the auto-retry mechanism is still exercised.
+    """
+    return {"id": call_id, "name": "bash", "arguments": {"command": ""}}
+
+
 def _valid_bash_call(call_id="tc1"):
     return {"id": call_id, "name": "bash", "arguments": {"command": "ls"}}
 
 
 class TestEmptyCallAutoRetry:
     def test_auto_retry_succeeds_on_second_attempt(self, worker, mock_tool_executor):
-        """LLM produces empty args first, then valid args on retry."""
+        """LLM produces blank args first, then valid args on retry."""
         responses = [
-            {"role": "assistant", "content": "", "tool_calls": [_empty_bash_call()]},
+            {"role": "assistant", "content": "", "tool_calls": [_blank_bash_call()]},
             {"role": "assistant", "content": "", "tool_calls": [_valid_bash_call()]},
             {"role": "assistant", "content": "done"},
         ]
         worker.llm.call = MagicMock(side_effect=responses)
         msgs = list(worker.run("s1", "sys", "do it", [], mock_tool_executor))
 
-        # 1st LLM call: empty → retry
+        # 1st LLM call: blank → retry
         # 2nd LLM call: valid → execute
         # 3rd LLM call: text → done
         assert len(msgs) == 2  # valid tool call + text response
@@ -54,14 +63,14 @@ class TestEmptyCallAutoRetry:
         assert len(msgs) == DEGENERATE_CALL_LIMIT
 
     def test_auto_retry_three_attempts_per_iteration(self, worker, mock_tool_executor):
-        """Verify exactly EMPTY_CALL_MAX_RETRIES retries happen per empty iteration."""
+        """Verify exactly EMPTY_CALL_MAX_RETRIES retries happen per blank iteration."""
         call_count = 0
 
         def counting_call(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count <= EMPTY_CALL_MAX_RETRIES:
-                return {"role": "assistant", "content": "", "tool_calls": [_empty_bash_call()]}
+                return {"role": "assistant", "content": "", "tool_calls": [_blank_bash_call()]}
             return {"role": "assistant", "content": "", "tool_calls": [_valid_bash_call()]}
 
         worker.llm.call = MagicMock(side_effect=counting_call)

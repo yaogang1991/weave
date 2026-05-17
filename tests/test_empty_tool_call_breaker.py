@@ -75,30 +75,33 @@ class TestEmptyToolCallBreaker:
     def test_resets_on_successful_tool_call(self, worker, mock_tool_executor):
         """Counter resets when at least one tool call is valid.
 
-        With auto-retry (#282), each empty iteration consumes
+        With auto-retry (#282), each blank iteration consumes
         (EMPTY_CALL_MAX_RETRIES + 1) = 4 LLM calls internally
         before advancing to the next outer iteration.
 
-        Pattern (outer iterations): 2 empty → 1 valid → 2 empty → text
-        Empty iterations consume 4 LLM calls each internally.
+        Pattern (outer iterations): 2 blank → 1 valid → 2 blank → text
+        Blank iterations consume 4 LLM calls each internally.
+
+        Uses blank args (command="") instead of completely empty {}
+        so #541 early termination does not skip the retry path.
         """
         responses = []
-        # 2 empty outer iterations (4 LLM calls each = 8)
+        # 2 blank outer iterations (4 LLM calls each = 8)
         for _ in range(2 * (EMPTY_CALL_MAX_RETRIES + 1)):
             responses.append({
                 "role": "assistant", "content": "",
-                "tool_calls": [_empty_bash_call()],
+                "tool_calls": [_blank_bash_call()],
             })
         # 1 valid outer iteration (1 LLM call)
         responses.append({
             "role": "assistant", "content": "",
             "tool_calls": [_valid_bash_call()],
         })
-        # 2 empty outer iterations (4 LLM calls each = 8)
+        # 2 blank outer iterations (4 LLM calls each = 8)
         for _ in range(2 * (EMPTY_CALL_MAX_RETRIES + 1)):
             responses.append({
                 "role": "assistant", "content": "",
-                "tool_calls": [_empty_bash_call()],
+                "tool_calls": [_blank_bash_call()],
             })
         # Text-only response
         responses.append({"role": "assistant", "content": "done"})

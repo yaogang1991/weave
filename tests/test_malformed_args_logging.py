@@ -21,6 +21,15 @@ def _empty_write_call(call_id="tc1"):
     return {"id": call_id, "name": "write", "arguments": {}}
 
 
+def _partial_write_call(call_id="tc1"):
+    """Write call with file_path but missing content.
+
+    Unlike _empty_write_call (args={}), partial args do NOT trigger
+    #541 early termination, so the auto-retry mechanism is still exercised.
+    """
+    return {"id": call_id, "name": "write", "arguments": {"file_path": "/tmp/test.py"}}
+
+
 def _valid_write_call(call_id="tc1"):
     return {"id": call_id, "name": "write", "arguments": {
         "file_path": "/tmp/test.py", "content": "x = 1",
@@ -55,7 +64,7 @@ class TestMalformedArgsLogging:
     def test_auto_retry_log_includes_raw_calls(self, worker, caplog):
         """Auto-retry warning includes raw tool calls structure (#334)."""
         worker.llm.call = MagicMock(side_effect=[
-            {"role": "assistant", "content": "", "tool_calls": [_empty_write_call()]},
+            {"role": "assistant", "content": "", "tool_calls": [_partial_write_call()]},
         ] * (EMPTY_CALL_MAX_RETRIES + 1) + [
             {"role": "assistant", "content": "done"},
         ])
