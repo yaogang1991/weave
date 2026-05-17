@@ -385,13 +385,34 @@ class LLMClient:
             "messages": anthropic_messages,
         }
         if system_prompt:
-            kwargs["system"] = system_prompt
+            # Mark system prompt for prompt caching (#503).
+            # Anthropic's prompt caching uses cache_control markers on
+            # content blocks. The system field accepts a list of blocks
+            # with cache_control to enable prefix caching.
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                },
+            ]
         if tools:
             kwargs["tools"] = tools
         if tool_choice:
             kwargs["tool_choice"] = tool_choice
 
         response = self._client.messages.create(**kwargs)
+
+        # Log cache usage stats from response (#503)
+        if hasattr(response, "usage") and response.usage:
+            cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            if cache_read or cache_creation:
+                logger.info(
+                    "Prompt cache stats: %d tokens read from cache, "
+                    "%d tokens written to cache (#503)",
+                    cache_read, cache_creation,
+                )
 
         msg: dict = {"role": "assistant", "content": ""}
 

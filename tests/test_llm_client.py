@@ -102,3 +102,85 @@ class TestRateLimitParsing:
         # Should sleep ~61 seconds (parsed + 1 buffer), not 2^0 = 1 second
         assert mock_sleep.call_count == 1
         assert mock_sleep.call_args[0][0] > 30
+
+
+# ------------------------------------------------------------------------------
+# Prompt caching (#503)
+# ------------------------------------------------------------------------------
+
+class TestPromptCaching:
+    def test_system_prompt_has_cache_control(self, client):
+        """System prompt is sent as a content block with cache_control (#503)."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="hi")]
+        mock_response.usage = MagicMock(
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        client._client.messages.create = MagicMock(return_value=mock_response)
+
+        messages = [
+            {"role": "system", "content": "you are a helper"},
+            {"role": "user", "content": "hello"},
+        ]
+        client._call_anthropic(messages, [])
+
+        call_kwargs = client._client.messages.create.call_args.kwargs
+        system = call_kwargs.get("system")
+        assert system is not None
+        assert isinstance(system, list)
+        assert len(system) == 1
+        assert system[0]["type"] == "text"
+        assert system[0]["text"] == "you are a helper"
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_no_system_prompt_no_cache_control(self, client):
+        """When no system prompt, 'system' key is absent from kwargs."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="hi")]
+        mock_response.usage = MagicMock()
+        client._client.messages.create = MagicMock(return_value=mock_response)
+
+        messages = [{"role": "user", "content": "hello"}]
+        client._call_anthropic(messages, [])
+
+        call_kwargs = client._client.messages.create.call_args.kwargs
+        assert "system" not in call_kwargs
+
+    def test_cache_usage_logged(self, client):
+        """Cache usage stats are logged when present in response (#503)."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="done")]
+        mock_response.usage = MagicMock(
+            cache_read_input_tokens=500,
+            cache_creation_input_tokens=200,
+        )
+        client._client.messages.create = MagicMock(return_value=mock_response)
+
+        with patch("core.llm_client.logger") as mock_logger:
+            client._call_anthropic(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+                [],
+            )
+        # Check that info was called with cache stats
+        info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        assert any("cache" in c.lower() for c in info_calls)
+
+    def test_no_cache_usage_no_log(self, client):
+        """No cache log when usage has no cache tokens."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="hi")]
+        mock_response.usage = MagicMock(
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        client._client.messages.create = MagicMock(return_value=mock_response)
+
+        with patch("core.llm_client.logger") as mock_logger:
+            client._call_anthropic(
+                [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+                [],
+            )
+        # Should not log cache stats when both are 0
+        info_calls = [str(c) for c in mock_logger.info.call_args_list]
+        assert not any("cache" in c.lower() for c in info_calls)
