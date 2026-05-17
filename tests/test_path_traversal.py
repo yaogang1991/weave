@@ -5,14 +5,13 @@ from tools.registry import ToolRegistry
 
 
 class TestPathTraversalPrevention:
-    """Verify _resolve_path always enforces workspace boundary (#500)."""
+    """Verify _resolve_path enforces workspace boundary when configured (#500)."""
 
-    def test_default_base_cwd_is_cwd(self):
-        """When base_cwd is None, defaults to cwd instead of unrestricted."""
-        from pathlib import Path
-
+    def test_default_base_cwd_is_none(self):
+        """When base_cwd is not provided, it stays None (no workspace boundary)."""
         registry = ToolRegistry()
-        assert registry.base_cwd == Path.cwd()
+        assert registry.base_cwd is None
+        assert registry._base_cwd_explicit is False
 
     def test_explicit_base_cwd(self, tmp_path):
         registry = ToolRegistry(base_cwd=str(tmp_path))
@@ -50,8 +49,19 @@ class TestPathTraversalPrevention:
         with pytest.raises(ValueError, match="Path escapes workspace"):
             registry._resolve_path("escape/shadow")
 
-    def test_no_base_cwd_still_blocks_escape(self):
-        """Even with default cwd, path traversal is blocked."""
+    def test_no_base_cwd_allows_absolute_paths(self):
+        """Without explicit base_cwd, absolute paths are resolved freely (#529)."""
+        from pathlib import Path
+
         registry = ToolRegistry()
-        with pytest.raises(ValueError, match="Path escapes workspace"):
-            registry._resolve_path("../../../etc/shadow")
+        # No ValueError — no workspace boundary enforced
+        result = registry._resolve_path("/tmp/test.py")
+        assert result == Path("/tmp/test.py").resolve()
+
+    def test_no_base_cwd_resolves_relative_to_cwd(self):
+        """Without explicit base_cwd, relative paths resolve against cwd."""
+        from pathlib import Path
+
+        registry = ToolRegistry()
+        result = registry._resolve_path("src/main.py")
+        assert result == Path.cwd().resolve() / "src/main.py"
