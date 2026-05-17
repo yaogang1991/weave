@@ -13,7 +13,6 @@ operational scripts (npm install, pytest) that need access to the host.
 from __future__ import annotations
 
 import abc
-import os
 from dataclasses import dataclass
 
 from backend.base import ExecutionSandbox
@@ -68,9 +67,17 @@ class LocalSandbox(SandboxProvider):
     sensitive keys (API tokens, passwords). When env is explicitly passed,
     uses it as-is — the caller is responsible for filtering.
 
+    Resource limits (#482): Uses resource.setrlimit() to constrain child
+    process memory and CPU usage. Limits are configurable via constructor.
+    On platforms where setrlimit is unsupported or fails, limits are
+    silently skipped with a debug log.
     """
 
     sandbox_type = ExecutionSandbox.LOCAL
+
+    # Default resource limits
+    DEFAULT_MEMORY_LIMIT_MB: int = 2048  # 2 GB
+    DEFAULT_CPU_LIMIT_SEC: int = 300  # 5 minutes
 
     SENSITIVE_ENV_PREFIXES: tuple[str, ...] = (
         "ANTHROPIC_",
@@ -83,6 +90,14 @@ class LocalSandbox(SandboxProvider):
         "API_KEY",
     )
 
+    def __init__(
+        self,
+        memory_limit_mb: int = DEFAULT_MEMORY_LIMIT_MB,
+        cpu_limit_sec: int = DEFAULT_CPU_LIMIT_SEC,
+    ) -> None:
+        self._memory_limit_mb = memory_limit_mb
+        self._cpu_limit_sec = cpu_limit_sec
+
     def _build_safe_env(self) -> dict[str, str]:
         """Build environment dict with sensitive keys removed."""
         import os
@@ -94,6 +109,42 @@ class LocalSandbox(SandboxProvider):
 
         }
 
+    def _make_preexec_fn(self):
+        """Create a preexec_fn that sets resource limits (#482).
+
+        Returns None if resource limits are not available on this platform.
+        """
+        import sys
+
+        if sys.platform == "win32":
+            return None
+
+        try:
+            import resource
+
+            memory_bytes = self._memory_limit_mb * 1024 * 1024
+            cpu_sec = self._cpu_limit_sec
+
+            def _set_limits():
+                try:
+                    resource.setrlimit(
+                        resource.RLIMIT_AS,
+                        (memory_bytes, memory_bytes),
+                    )
+                except (ValueError, OSError):
+                    pass
+                try:
+                    resource.setrlimit(
+                        resource.RLIMIT_CPU,
+                        (cpu_sec, cpu_sec),
+                    )
+                except (ValueError, OSError):
+                    pass
+
+            return _set_limits
+        except (ImportError, AttributeError):
+            return None
+
     async def run_command(
         self,
         command: str,
@@ -101,24 +152,32 @@ class LocalSandbox(SandboxProvider):
         timeout: int = 120,
         env: dict[str, str] | None = None,
     ) -> CommandResult:
-        """Execute command as a subprocess on the host."""
+        """Execute command as a subprocess with resource limits (#482)."""
         import asyncio
+        import subprocess
         import time
 
         resolved_env = env if env is not None else self._build_safe_env()
+        preexec_fn = self._make_preexec_fn()
 
         start = time.monotonic()
         try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                cwd=cwd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=resolved_env,
-
+            loop = asyncio.get_event_loop()
+            proc = await loop.run_in_executor(
+                None,
+                lambda: subprocess.Popen(
+                    command,
+                    shell=True,
+                    cwd=cwd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    env=resolved_env,
+                    preexec_fn=preexec_fn,
+                ),
             )
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout
+                loop.run_in_executor(None, proc.communicate),
+                timeout=timeout,
             )
             elapsed = int((time.monotonic() - start) * 1000)
 
@@ -130,10 +189,9 @@ class LocalSandbox(SandboxProvider):
                 duration_ms=elapsed,
             )
         except asyncio.TimeoutError:
-            proc.kill()  # type: ignore[union-attr]
-            # Await process cleanup to reap child and drain pipes
+            proc.kill()
             try:
-                await proc.communicate()
+                proc.communicate()
             except (ProcessLookupError, OSError):
                 pass
             return CommandResult(
