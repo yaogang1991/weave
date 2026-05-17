@@ -14,13 +14,13 @@ class TestRetrySourceFixPermission:
 
     def test_retry_instruction_mentions_source_fixes(self):
         """INCREMENTAL FIX RULES should include rule 7 about source fixes."""
-        prompt = Path("agent/agent_pool.py").read_text()
+        prompt = Path("agent/agent_pool.py").read_text() + Path("agent/prompts.py").read_text()
         assert "SOURCE CODE FIXES" in prompt
         assert "#288" in prompt
 
     def test_rule_18_allows_source_fixes_on_retry(self):
         """Rule 18 should mention source code fix permission during retries."""
-        prompt = Path("agent/agent_pool.py").read_text()
+        prompt = Path("agent/prompts.py").read_text()
         # Find the rule 18 section
         rule18_start = prompt.find("18. IMPORT VERIFICATION")
         assert rule18_start > 0, "Rule 18 not found"
