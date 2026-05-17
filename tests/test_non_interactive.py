@@ -2,8 +2,8 @@
 Tests for non-interactive mode (M1.1).
 
 Covers:
-- HarnessConfig.non_interactive from environment variable
-- HarnessConfig.approval_timeout_sec from environment variable
+- WeaveConfig.non_interactive from environment variable
+- WeaveConfig.approval_timeout_sec from environment variable
 - PersonalGuardrails non-interactive: HIGH risk returns pending_approval (no stdin)
 - PersonalGuardrails interactive: HIGH risk requests confirmation
 - PersonalGuardrails.request_confirmation returns False in non-interactive mode
@@ -26,7 +26,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.config import HarnessConfig  # noqa: E402
+from core.config import WeaveConfig  # noqa: E402
 from core.models import (  # noqa: E402, F401
     GuardrailPolicy,
     PersonalGuardrailPolicy,
@@ -103,65 +103,65 @@ def non_interactive_guardrails(personal_policy, mock_tool_registry):
 
 
 # ---------------------------------------------------------------------------
-# HarnessConfig — environment variable parsing
+# WeaveConfig — environment variable parsing
 # ---------------------------------------------------------------------------
 
 
-class TestHarnessConfigFromEnv:
-    """Test HarnessConfig.non_interactive and approval_timeout_sec from env."""
+class TestWeaveConfigFromEnv:
+    """Test WeaveConfig.non_interactive and approval_timeout_sec from env."""
 
     def test_non_interactive_false_by_default(self):
         """Default: non_interactive is False when env var is unset."""
         with patch.dict(os.environ, {}, clear=True):
-            config = HarnessConfig()
+            config = WeaveConfig()
             assert config.non_interactive is False
 
     def test_non_interactive_true_lowercase(self):
-        """HARNESS_NON_INTERACTIVE=true sets non_interactive=True."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
-            config = HarnessConfig()
+        """WEAVE_NON_INTERACTIVE=true sets non_interactive=True."""
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
+            config = WeaveConfig()
             assert config.non_interactive is True
 
     def test_non_interactive_true_one(self):
-        """HARNESS_NON_INTERACTIVE=1 sets non_interactive=True."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "1"}):
-            config = HarnessConfig()
+        """WEAVE_NON_INTERACTIVE=1 sets non_interactive=True."""
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "1"}):
+            config = WeaveConfig()
             assert config.non_interactive is True
 
     def test_non_interactive_true_yes(self):
-        """HARNESS_NON_INTERACTIVE=yes sets non_interactive=True."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "yes"}):
-            config = HarnessConfig()
+        """WEAVE_NON_INTERACTIVE=yes sets non_interactive=True."""
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "yes"}):
+            config = WeaveConfig()
             assert config.non_interactive is True
 
     def test_non_interactive_false_random_string(self):
         """Random string sets non_interactive=False."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "nope"}):
-            config = HarnessConfig()
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "nope"}):
+            config = WeaveConfig()
             assert config.non_interactive is False
 
     def test_approval_timeout_default(self):
         """Default approval_timeout_sec is 300."""
         with patch.dict(os.environ, {}, clear=True):
-            config = HarnessConfig()
+            config = WeaveConfig()
             assert config.approval_timeout_sec == 300
 
     def test_approval_timeout_from_env(self):
-        """HARNESS_APPROVAL_TIMEOUT_SEC overrides default."""
-        with patch.dict(os.environ, {"HARNESS_APPROVAL_TIMEOUT_SEC": "600"}):
-            config = HarnessConfig()
+        """WEAVE_APPROVAL_TIMEOUT_SEC overrides default."""
+        with patch.dict(os.environ, {"WEAVE_APPROVAL_TIMEOUT_SEC": "600"}):
+            config = WeaveConfig()
             assert config.approval_timeout_sec == 600
 
     def test_from_env_reads_non_interactive(self):
-        """from_env() factory reads HARNESS_NON_INTERACTIVE."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
-            config = HarnessConfig.from_env()
+        """from_env() factory reads WEAVE_NON_INTERACTIVE."""
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
+            config = WeaveConfig.from_env()
             assert config.non_interactive is True
 
     def test_from_env_reads_approval_timeout(self):
-        """from_env() factory reads HARNESS_APPROVAL_TIMEOUT_SEC."""
-        with patch.dict(os.environ, {"HARNESS_APPROVAL_TIMEOUT_SEC": "120"}):
-            config = HarnessConfig.from_env()
+        """from_env() factory reads WEAVE_APPROVAL_TIMEOUT_SEC."""
+        with patch.dict(os.environ, {"WEAVE_APPROVAL_TIMEOUT_SEC": "120"}):
+            config = WeaveConfig.from_env()
             assert config.approval_timeout_sec == 120
 
 
@@ -420,8 +420,8 @@ class TestApprovalTimeoutIntegration:
     """Test approval_timeout_sec is used correctly throughout."""
 
     def test_config_passed_to_service(self):
-        """HarnessConfig.approval_timeout_sec is available."""
-        config = HarnessConfig(approval_timeout_sec=120)
+        """WeaveConfig.approval_timeout_sec is available."""
+        config = WeaveConfig(approval_timeout_sec=120)
         assert config.approval_timeout_sec == 120
 
     def test_policy_timeout_from_config(self):

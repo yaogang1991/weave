@@ -1,4 +1,4 @@
-# Harness M1 Personal Edition — Engineering Specification
+# Weave M1 Personal Edition — Engineering Specification
 
 ---
 **版本:** M1.1
@@ -8,7 +8,7 @@
 
 > **Version:** 1.1.0
 > **Status:** Published
-> **Target:** Single-user, self-hosted, CLI-driven multi-agent software development harness
+> **Target:** Single-user, self-hosted, CLI-driven multi-agent software development system
 > **Motto:** *"I can throw tasks in, the system runs to completion or recovers from failure; I only confirm high-risk actions when necessary."*
 
 ## 状态标签说明
@@ -46,7 +46,7 @@
 | 6a | **Tool risk classification** [IMPLEMENTED] | Four-layer defense: (1) tool risk classification (LOW/MEDIUM/HIGH/CRITICAL), (2) permission mode (`plan`/`default`/`accept_edits`/`auto`/`dont_ask`), (3) denied command/tool lists, (4) iteration/error limits. | P0 |
 | 6b | **Interactive confirmation (stdin)** [IMPLEMENTED] | `PersonalGuardrails.request_confirmation()` reads stdin for HIGH/CRITICAL risk actions. Works in interactive terminal sessions. | P0 |
 | 6c | **Approval ticket system** [IMPLEMENTED] — M1.1 | Persistent pending/approved/rejected/expired ticket flow replaces stdin blocking for unattended operation. `ApprovalTicket` + `ApprovalRepository` with atomic writes. | P0 |
-| 6d | **Non-interactive auto-pending** [IMPLEMENTED] — M1.1 | `HARNESS_NON_INTERACTIVE=true` or `--non-interactive`: HIGH risk actions automatically create pending tickets without blocking stdin. | P0 |
+| 6d | **Non-interactive auto-pending** [IMPLEMENTED] — M1.1 | `WEAVE_NON_INTERACTIVE=true` or `--non-interactive`: HIGH risk actions automatically create pending tickets without blocking stdin. | P0 |
 | 6e | **Whitelist auto-approval** [IMPLEMENTED] | Command prefix and regex whitelist patterns; whitelisted commands bypass confirmation even for HIGH risk. | P0 |
 | 6f | **Unified 3-state guardrail entry** [IMPLEMENTED] — M1.1 | Single `check_and_execute()` returns `allowed|blocked|pending_approval(ticket_id)`. No dual-path divergence. | P0 |
 | 6g | **Multi-tenancy guardrails** [PLANNED] | Per-user/team policy isolation. Not needed for single-user M1. | M2 |
@@ -66,9 +66,9 @@
 |---|---------|-----------|----------------|
 | 1 | **Multi-tenancy** | M1 targets a single developer on their own machine. No user isolation, no RBAC, no per-user quotas. | M3 — Team Edition |
 | 2 | **Web UI / Dashboard** | All interaction is CLI-only. The visualizer subsystem (`viz` command) exists but is read-only monitoring, not a control plane. | M2 — Web Console |
-| 3 | **Distributed execution** | Workers run on a single machine. No multi-node scheduling, no message queue (Redis/RabbitMQ), no remote agents. | M3 — Distributed Harness |
+| 3 | **Distributed execution** | Workers run on a single machine. No multi-node scheduling, no message queue (Redis/RabbitMQ), no remote agents. | M3 — Distributed Weave |
 | 4 | **Persistent database** | PostgreSQL, SQLite, or any RDBMS is not used. The JSONL event log is the sole source of truth. | M2 — Optional SQLite index for large workloads |
-| 5 | **Plugin marketplace** | Agents are registered via local YAML (`./harness/agents.yaml`) or programmatic API. No external plugin discovery. | M2 — Plugin registry |
+| 5 | **Plugin marketplace** | Agents are registered via local YAML (`./weave/agents.yaml`) or programmatic API. No external plugin discovery. | M2 — Plugin registry |
 | 6 | **Real-time collaboration** | No concurrent editing, no shared sessions, no multiplayer features. | M3 — Team Edition |
 | 7 | **Sandboxed execution** | Docker/bubblewrap sandbox configs exist in code but are not enforced in M1. Tools run directly on host. | M2 — Sandboxed workers |
 | 8 | **Billing / cost tracking** | No LLM API cost aggregation, no budget caps, no usage quotas. | M3 — Cost monitoring |
@@ -79,7 +79,7 @@
 
 ### 2.1 Overview
 
-Harness M1 uses a two-level state model:
+Weave M1 uses a two-level state model:
 
 - **Job**: The unit of user-submitted work. A Job contains a DAG (execution plan) and tracks its overall lifecycle in the queue.
 - **Run**: A single execution attempt of a Job's DAG. A Job may have multiple Runs (retries, replans).
@@ -295,16 +295,16 @@ The Orchestrator's `FailureDecision.action` directly drives Run-level state tran
 #### 3.1.1 `submit` — Submit a new task [IMPLEMENTED]
 
 ```
-Usage: harness submit "<requirement>" [OPTIONS]
+Usage: weave submit "<requirement>" [OPTIONS]
 
-Submit a user requirement to the harness. The orchestrator will generate a DAG
+Submit a user requirement to the Weave. The orchestrator will generate a DAG
 plan and queue it for execution.
 
 Arguments:
   requirement          User requirement string (quoted, required)
 
 Options:
-  --project PATH       Project directory path (loads .harness/agents.yaml)
+  --project PATH       Project directory path (loads .weave/agents.yaml)
   --timeout SEC        Overall job timeout in seconds (default: 600)
   --max-attempts N     Maximum execution attempts before dead-letter (default: 3)
   --mode MODE          Guardrail permission mode: plan|default|accept_edits|auto|dont_ask
@@ -315,14 +315,14 @@ Output (JSON):
   {"job_id": "<uuid>", "status": "queued", "message": "Job queued successfully"}
 
 Examples:
-  harness submit "Build a REST API for user authentication"
-  harness submit "Add OAuth2 support" --project ./my-project --timeout 1200 --max-attempts 5
+  weave submit "Build a REST API for user authentication"
+  weave submit "Add OAuth2 support" --project ./my-project --timeout 1200 --max-attempts 5
 ```
 
 #### 3.1.2 `status` — Query job status [IMPLEMENTED]
 
 ```
-Usage: harness status <job_id> [OPTIONS]
+Usage: weave status <job_id> [OPTIONS]
 
 Query the current status and progress of a job.
 
@@ -354,14 +354,14 @@ Output (JSON):
   }
 
 Examples:
-  harness status abc123-def456
-  harness status abc123-def456 --detail --events
+  weave status abc123-def456
+  weave status abc123-def456 --detail --events
 ```
 
 #### 3.1.3 `list` — List jobs [IMPLEMENTED]
 
 ```
-Usage: harness list [OPTIONS]
+Usage: weave list [OPTIONS]
 
 List jobs with optional filtering.
 
@@ -380,15 +380,15 @@ Output (JSON Lines):
   ...
 
 Examples:
-  harness list
-  harness list --status running --limit 10
-  harness list --status failed --since 2024-01-01T00:00:00Z
+  weave list
+  weave list --status running --limit 10
+  weave list --status failed --since 2024-01-01T00:00:00Z
 ```
 
 #### 3.1.4 `cancel` — Cancel a job [IMPLEMENTED]
 
 ```
-Usage: harness cancel <job_id> [OPTIONS]
+Usage: weave cancel <job_id> [OPTIONS]
 
 Cancel a queued, leased, or running job. Cancellation is cooperative —
 running workers check for cancellation signals between DAG levels.
@@ -409,17 +409,17 @@ Exit codes:
   2  — Job already in terminal state (E1002)
 
 Examples:
-  harness cancel abc123-def456
-  harness cancel abc123-def456 --reason "Changed requirements"
+  weave cancel abc123-def456
+  weave cancel abc123-def456 --reason "Changed requirements"
 ```
 
 #### 3.1.5 `worker` — Start a worker process [IMPLEMENTED]
 
 ```
-Usage: harness worker [OPTIONS]
+Usage: weave worker [OPTIONS]
 
 Start a worker process that polls the job queue and executes DAGs.
-This is the primary execution engine for the harness.
+This is the primary execution engine for the Weave.
 
 Options:
   --concurrency N      Max parallel DAG node executions (default: 3)
@@ -441,15 +441,15 @@ Exit codes:
   3  — Unrecoverable error (E2001)
 
 Examples:
-  harness worker
-  harness worker --concurrency 5 --poll-interval 10
-  harness worker --single --recover
+  weave worker
+  weave worker --concurrency 5 --poll-interval 10
+  weave worker --single --recover
 ```
 
 #### 3.1.6 `retry` — Retry a failed/dead-letter job [IMPLEMENTED]
 
 ```
-Usage: harness retry <job_id> [OPTIONS]
+Usage: weave retry <job_id> [OPTIONS]
 
 Manually retry a failed or dead-letter job. Creates a new Run with the same DAG.
 
@@ -464,14 +464,14 @@ Output (JSON):
   {"job_id": "<original>", "new_job_id": "<uuid>", "status": "queued", "attempt": 4, "message": "Retry queued"}
 
 Examples:
-  harness retry abc123-def456
-  harness retry abc123-def456 --reset-attempts
+  weave retry abc123-def456
+  weave retry abc123-def456 --reset-attempts
 ```
 
 #### 3.1.7 `tickets` — List approval tickets [IMPLEMENTED] — M1.1
 
 ```
-Usage: harness tickets [OPTIONS]
+Usage: weave tickets [OPTIONS]
 
 List approval tickets with optional filtering.
 
@@ -490,7 +490,7 @@ Output (JSON):
 #### 3.1.8 `approve` — Approve a pending ticket [IMPLEMENTED] — M1.1
 
 ```
-Usage: harness approve <ticket_id> [OPTIONS]
+Usage: weave approve <ticket_id> [OPTIONS]
 
 Approve a pending approval ticket, allowing the blocked tool call to proceed.
 
@@ -511,7 +511,7 @@ Exit codes:
 #### 3.1.9 `reject` — Reject a pending ticket [IMPLEMENTED] — M1.1
 
 ```
-Usage: harness reject <ticket_id> [OPTIONS]
+Usage: weave reject <ticket_id> [OPTIONS]
 
 Reject a pending approval ticket, causing the blocked tool call to fail.
 
@@ -555,7 +555,7 @@ All commands produce **structured JSON output** to stdout. Human-readable messag
     "code": "E1001",
     "message": "Job not found: abc123",
     "detail": "Searched in ./data/queue/ and ./data/queue/dead/",
-    "suggestion": "Use 'harness list' to see available jobs."
+    "suggestion": "Use 'weave list' to see available jobs."
   }
 }
 ```
@@ -669,8 +669,8 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
 | A1.1 | Submit 20 jobs with varying requirements | All 20 jobs reach a terminal state within 4 hours | [IMPLEMENTED] |
-| A1.2 | No job remains stuck in `QUEUED`, `LEASED`, or `RUNNING` | `harness list --status running` returns empty 30 min after last submission | [IMPLEMENTED] |
-| A1.3 | Worker operates without restart | Single `harness worker` process handles all 20 jobs |
+| A1.2 | No job remains stuck in `QUEUED`, `LEASED`, or `RUNNING` | `weave list --status running` returns empty 30 min after last submission | [IMPLEMENTED] |
+| A1.3 | Worker operates without restart | Single `weave worker` process handles all 20 jobs |
 | A1.4 | No manual `cancel` or `retry` needed | Zero user commands issued between submit and final status check |
 
 **Measurement:** Automatable integration test that submits 20 synthetic requirements and asserts all terminal states.
@@ -682,7 +682,7 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A2.1 | Query all jobs after batch completion | `harness list --status queued,leased,running` returns empty | [IMPLEMENTED] |
+| A2.1 | Query all jobs after batch completion | `weave list --status queued,leased,running` returns empty | [IMPLEMENTED] |
 | A2.2 | Verify terminal state distribution | Count of (succeeded + failed + canceled + dead_letter) == total submitted | [IMPLEMENTED] |
 | A2.3 | Verify no state oscillation | Each job's event log contains exactly one terminal state event | [IMPLEMENTED] |
 | A2.4 | Dead letter enforcement | Jobs failing 3 times appear in `./data/queue/dead/` with complete history | [IMPLEMENTED] |
@@ -728,8 +728,8 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Test Case | Pass Criteria |
 |---|-----------|---------------|
-| A5.1 | `harness status <job_id>` includes metrics | Response contains `progress`, `duration_ms`, `token_usage` fields | [IMPLEMENTED] |
-| A5.2 | Post-batch metrics report | Scriptable: `harness list --status all --format json | jq '.metrics'` returns aggregate stats |
+| A5.1 | `weave status <job_id>` includes metrics | Response contains `progress`, `duration_ms`, `token_usage` fields | [IMPLEMENTED] |
+| A5.2 | Post-batch metrics report | Scriptable: `weave list --status all --format json | jq '.metrics'` returns aggregate stats |
 | A5.3 | Failure rate alert | When failed job rate > 50% in last 10 jobs, worker stderr emits `ALERT` line with JSON payload |
 | A5.4 | Timeout alert | When a job exceeds 80% of `--timeout`, worker emits `ALERT: job_timeout_approaching` |
 | A5.5 | Event log size | `./data/events/` contains one `.jsonl` file per job with >= 10 events per completed job |
@@ -768,7 +768,7 @@ Worker output is **JSON Lines** (one JSON object per line, suitable for `jq` str
 
 | # | Criterion | Target |
 |---|-----------|--------|
-| N1 | **Cold start time** | `harness submit` returns within 3 seconds |
+| N1 | **Cold start time** | `weave submit` returns within 3 seconds |
 | N2 | **Worker poll latency** | Time from `submit` to `LEASED` < 10 seconds (with idle worker) |
 | N3 | **Event log write latency** | Event persistence < 10ms per event |
 | N4 | **Memory footprint** | Worker process < 512MB RSS under normal load |
@@ -882,7 +882,7 @@ Jobs are stored as JSON files in `./data/queue/`:
                                         v
                               +---------+---------+
                               |   Worker Process  |
-                              |  (harness worker) |
+                              |  (weave worker) |
                               +----+-------+------+
                                    |       |
                          +---------+       +---------+
@@ -918,11 +918,11 @@ Jobs are stored as JSON files in `./data/queue/`:
 ### B.2 File Layout
 
 ```
-harness/
+weave/
 ├── core/
 │   ├── models.py              # DAG, DAGNode, FailureDecision, etc.
 │   ├── dag_engine.py          # DAGExecutionEngine
-│   ├── config.py              # HarnessConfig, LLMConfig
+│   ├── config.py              # WeaveConfig, LLMConfig
 │   ├── llm_client.py          # LLM API client
 │   └── agent_registry.py      # AgentRegistry
 ├── orchestrator/

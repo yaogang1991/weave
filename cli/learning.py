@@ -14,9 +14,9 @@ def _make_learning_scheduler():
     from learning.scheduler import LearningScheduler
     from control_plane.repository import JobRepository
     from monitoring.metrics import MetricsCollector
-    from core.config import HarnessConfig
+    from core.config import WeaveConfig
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     memory_manager = _make_memory_manager()
     job_repo = JobRepository()
     metrics_collector = MetricsCollector(job_repo)

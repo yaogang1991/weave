@@ -203,12 +203,12 @@ No numeric error codes. Error handling:
 
 ## Configuration
 
-Configured via constructor parameters (typically from `HarnessConfig`):
+Configured via constructor parameters (typically from `WeaveConfig`):
 
-| Engine Parameter | Maps to HarnessConfig |
+| Engine Parameter | Maps to WeaveConfig |
 |-----------------|----------------------|
 | `max_parallel` | CLI `--max-parallel` flag |
-| `artifact_path` | `HarnessConfig.artifact_path` |
+| `artifact_path` | `WeaveConfig.artifact_path` |
 | `heartbeat_interval_sec` | Default `5.0` |
 | `heartbeat_miss_threshold` | Default `3` |
 | `enable_watchdog` | Default `True` |

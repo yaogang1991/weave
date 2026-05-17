@@ -115,7 +115,7 @@ class RetryPolicy(BaseModel):
 
 
 class Job(BaseModel):
-    """A unit of work submitted to the Harness control plane."""
+    """A unit of work submitted to the Weave control plane."""
 
     id: str
     requirement: str

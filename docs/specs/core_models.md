@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Single source of truth for all data models in the harness. `core/models.py` is a re-export hub that aggregates all models from domain-specific sub-modules. No other module defines data models. All `from core.models import X` statements continue to work unchanged.
+Single source of truth for all data models in the Weave. `core/models.py` is a re-export hub that aggregates all models from domain-specific sub-modules. No other module defines data models. All `from core.models import X` statements continue to work unchanged.
 
 **Domain modules:**
 

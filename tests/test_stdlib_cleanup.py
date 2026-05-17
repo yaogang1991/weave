@@ -17,7 +17,7 @@ class TestCheckStdlibShadowing:
         """Non-interactive: exits with code 1 (fail-fast), does NOT remove."""
         (tmp_path / "urllib").mkdir()
         (tmp_path / "urllib" / "__init__.py").write_text("# shadow", encoding="utf-8")
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             with pytest.raises(SystemExit) as exc_info:
                 _check_stdlib_shadowing(str(tmp_path))
             assert exc_info.value.code == 1
@@ -29,7 +29,7 @@ class TestCheckStdlibShadowing:
     def test_non_interactive_fail_fast_json(self, tmp_path, capsys):
         """Non-interactive: exits with code 1, keeps json/ directory."""
         (tmp_path / "json").mkdir()
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             with pytest.raises(SystemExit) as exc_info:
                 _check_stdlib_shadowing(str(tmp_path))
             assert exc_info.value.code == 1
@@ -39,41 +39,41 @@ class TestCheckStdlibShadowing:
         """Does not warn about directories that don't shadow stdlib."""
         (tmp_path / "myapp").mkdir()
         (tmp_path / "tests").mkdir()
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(str(tmp_path))
         assert (tmp_path / "myapp").exists()
         assert (tmp_path / "tests").exists()
 
     def test_skips_dot_dirs(self, tmp_path):
-        """Skips hidden directories (e.g., .git, .harness)."""
+        """Skips hidden directories (e.g., .git, .weave)."""
         (tmp_path / ".git").mkdir()
-        (tmp_path / ".harness").mkdir()
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        (tmp_path / ".weave").mkdir()
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(str(tmp_path))
         assert (tmp_path / ".git").exists()
-        assert (tmp_path / ".harness").exists()
+        assert (tmp_path / ".weave").exists()
 
     def test_skips_underscore_dirs(self, tmp_path):
         """Skips __pycache__ and similar."""
         (tmp_path / "__pycache__").mkdir()
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(str(tmp_path))
         assert (tmp_path / "__pycache__").exists()
 
     def test_no_action_when_no_project(self):
         """No-op when project is None."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(None)
 
     def test_no_action_when_project_missing(self):
         """No-op when project path doesn't exist."""
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing("/nonexistent/path")
 
     def test_no_action_when_clean(self, tmp_path):
         """No-op when no shadowing directories exist."""
         (tmp_path / "myproject").mkdir()
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(str(tmp_path))
 
     def test_non_interactive_fail_fast_multiple(self, tmp_path, capsys):
@@ -81,7 +81,7 @@ class TestCheckStdlibShadowing:
         (tmp_path / "urllib").mkdir()
         (tmp_path / "json").mkdir()
         (tmp_path / "collections").mkdir()
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             with pytest.raises(SystemExit) as exc_info:
                 _check_stdlib_shadowing(str(tmp_path))
             assert exc_info.value.code == 1
@@ -108,7 +108,7 @@ class TestCheckStdlibShadowing:
                 _check_stdlib_shadowing(str(tmp_path))
         # Original should be gone, quarantine should exist
         assert not (tmp_path / "urllib").exists()
-        quarantine_dirs = list((tmp_path / ".harness" / "quarantine").glob("*/*"))
+        quarantine_dirs = list((tmp_path / ".weave" / "quarantine").glob("*/*"))
         assert len(quarantine_dirs) == 1
         assert quarantine_dirs[0].name == "urllib"
 
@@ -126,7 +126,7 @@ class TestLegitimatePackageProtection:
             encoding="utf-8",
         )
         (json_dir / "encoder.py").write_text("# encoder", encoding="utf-8")
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             with pytest.raises(SystemExit) as exc_info:
                 _check_stdlib_shadowing(str(tmp_path), cleanup=True)
             assert exc_info.value.code == 1
@@ -159,11 +159,11 @@ class TestLegitimatePackageProtection:
         urllib_dir = tmp_path / "urllib"
         urllib_dir.mkdir()
         # No files at all → leftover
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(str(tmp_path), cleanup=True)
         # Original gone, moved to quarantine
         assert not urllib_dir.exists()
-        quarantine_dirs = list((tmp_path / ".harness" / "quarantine").glob("*/*"))
+        quarantine_dirs = list((tmp_path / ".weave" / "quarantine").glob("*/*"))
         assert len(quarantine_dirs) == 1
         assert quarantine_dirs[0].name == "urllib"
 
@@ -172,10 +172,10 @@ class TestLegitimatePackageProtection:
         json_dir = tmp_path / "json"
         json_dir.mkdir()
         (json_dir / "__init__.py").write_text("# pass", encoding="utf-8")
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             _check_stdlib_shadowing(str(tmp_path), cleanup=True)
         assert not json_dir.exists()
-        quarantine_dirs = list((tmp_path / ".harness" / "quarantine").glob("*/*"))
+        quarantine_dirs = list((tmp_path / ".weave" / "quarantine").glob("*/*"))
         assert len(quarantine_dirs) == 1
 
     def test_substantial_init_protected_with_cleanup(self, tmp_path, capsys):
@@ -192,7 +192,7 @@ class TestLegitimatePackageProtection:
             "    pass\n",
             encoding="utf-8",
         )
-        with patch.dict(os.environ, {"HARNESS_NON_INTERACTIVE": "true"}):
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
             with pytest.raises(SystemExit) as exc_info:
                 _check_stdlib_shadowing(str(tmp_path), cleanup=True)
             assert exc_info.value.code == 1

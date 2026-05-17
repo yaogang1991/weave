@@ -1,6 +1,6 @@
 """
 Agent Worker: the "dumb loop" that calls the LLM and executes tools.
-All intelligence lives in the model. Harness just orchestrates.
+All intelligence lives in the model. Weave just orchestrates.
 
 Enhanced with:
 - Context window management (token estimation + message truncation)
@@ -67,7 +67,7 @@ EMPTY_CALL_MAX_RETRIES = 3
 
 class AgentWorker:
     """
-    Minimal harness loop:
+    Minimal Weave loop:
     while has_tool_calls:
         call LLM with messages
         execute tool calls

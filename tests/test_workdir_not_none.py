@@ -1,5 +1,5 @@
 """
-Tests for #211: evaluator work_dir must never fall back to harness cwd.
+Tests for #211: evaluator work_dir must never fall back to Weave cwd.
 
 Ensures:
 - cmd_execute always sets project_work_dir (never None after _resolve_project_path)
@@ -24,8 +24,8 @@ class TestProjectWorkDirAlwaysSet:
             assert isinstance(result, str)
             assert Path(result).is_absolute()
 
-    def test_resolve_project_path_outside_harness(self):
-        """Cwd outside harness tree returns cwd as string."""
+    def test_resolve_project_path_outside_weave(self):
+        """Cwd outside Weave tree returns cwd as string."""
         from main import _resolve_project_path
         import tempfile
 

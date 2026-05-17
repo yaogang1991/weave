@@ -319,14 +319,14 @@ class TestNodeTimeoutConfig:
         import time, not instance creation time, so we pass it explicitly)."""
         from core.config import NodeTimeoutConfig
         import os
-        os.environ["HARNESS_NODE_TIMEOUT"] = "500"
+        os.environ["WEAVE_NODE_TIMEOUT"] = "500"
         try:
             cfg = NodeTimeoutConfig(
-                default_timeout=int(os.environ["HARNESS_NODE_TIMEOUT"]),
+                default_timeout=int(os.environ["WEAVE_NODE_TIMEOUT"]),
             )
             assert cfg.default_timeout == 500
         finally:
-            del os.environ["HARNESS_NODE_TIMEOUT"]
+            del os.environ["WEAVE_NODE_TIMEOUT"]
 
     def test_min_max(self):
         from core.config import NodeTimeoutConfig
@@ -413,8 +413,8 @@ class TestProgressCallback:
 
 class TestTimeoutValidation:
     def test_valid_config_no_issues(self):
-        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
-        config = HarnessConfig(
+        from core.config import WeaveConfig, LLMConfig, NodeTimeoutConfig
+        config = WeaveConfig(
             llm=LLMConfig(api_key="test", timeout=120),
             run_timeout_sec=1800,
             node_timeout=NodeTimeoutConfig(default_timeout=300, overrides={"generator": 600}),
@@ -423,8 +423,8 @@ class TestTimeoutValidation:
         assert issues == []
 
     def test_llm_timeout_exceeds_node_timeout(self):
-        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
-        config = HarnessConfig(
+        from core.config import WeaveConfig, LLMConfig, NodeTimeoutConfig
+        config = WeaveConfig(
             llm=LLMConfig(api_key="test", timeout=400),
             run_timeout_sec=1800,
             node_timeout=NodeTimeoutConfig(default_timeout=300),
@@ -434,8 +434,8 @@ class TestTimeoutValidation:
         assert "HTTP timeout" in issues[0]
 
     def test_node_timeout_exceeds_run_timeout(self):
-        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
-        config = HarnessConfig(
+        from core.config import WeaveConfig, LLMConfig, NodeTimeoutConfig
+        config = WeaveConfig(
             llm=LLMConfig(api_key="test", timeout=60),
             run_timeout_sec=300,
             node_timeout=NodeTimeoutConfig(default_timeout=300, overrides={"generator": 600}),
@@ -445,8 +445,8 @@ class TestTimeoutValidation:
         assert "Max node timeout" in issues[0]
 
     def test_both_violations(self):
-        from core.config import HarnessConfig, LLMConfig, NodeTimeoutConfig
-        config = HarnessConfig(
+        from core.config import WeaveConfig, LLMConfig, NodeTimeoutConfig
+        config = WeaveConfig(
             llm=LLMConfig(api_key="test", timeout=200),
             run_timeout_sec=100,
             node_timeout=NodeTimeoutConfig(default_timeout=150, overrides={"generator": 500}),

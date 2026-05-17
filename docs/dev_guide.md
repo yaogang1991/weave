@@ -1,6 +1,6 @@
 # Developer Guide
 
-How to extend, debug, and maintain the Harness.
+How to extend, debug, and maintain the Weave.
 
 ---
 
@@ -8,7 +8,7 @@ How to extend, debug, and maintain the Harness.
 
 ### 1. Register the agent
 
-Edit `core/agent_registry.py` in `_register_defaults()` (for built-in) or add to `.harness/agents.yaml` (for project-specific):
+Edit `core/agent_registry.py` in `_register_defaults()` (for built-in) or add to `.weave/agents.yaml` (for project-specific):
 
 ```python
 # Built-in agent (core/agent_registry.py)
@@ -24,7 +24,7 @@ self.register(AgentCapability(
 ```
 
 ```yaml
-# Project-specific (.harness/agents.yaml)
+# Project-specific (.weave/agents.yaml)
 agents:
   - id: security_auditor
     name: Security Auditor
@@ -146,7 +146,7 @@ def _get_workspace_backend(self, ws_type: WorkspaceIsolation) -> ExecutionBacken
 
 ### 3. Configure
 
-Add a new `WorkspaceIsolation` enum value or map risk levels in `workspace_by_risk`. Note: `HARNESS_DEFAULT_BACKEND` only accepts `local` or `worktree` (the built-in `WorkspaceIsolation` values).
+Add a new `WorkspaceIsolation` enum value or map risk levels in `workspace_by_risk`. Note: `WEAVE_DEFAULT_BACKEND` only accepts `local` or `worktree` (the built-in `WorkspaceIsolation` values).
 
 ---
 
@@ -266,13 +266,13 @@ Different agent types can use different LLM models. The `ModelRoutingConfig` map
 
 ```bash
 # Use a stronger model for planning
-export HARNESS_PLANNER_MODEL="claude-opus-4-6"
+export WEAVE_PLANNER_MODEL="claude-opus-4-6"
 
 # Use OpenAI for generation
-export HARNESS_GENERATOR_MODEL="gpt-4"
+export WEAVE_GENERATOR_MODEL="gpt-4"
 
 # Fallback chain if primary model is unavailable
-export HARNESS_MODEL_FALLBACK="claude-sonnet-4-6,gpt-4"
+export WEAVE_MODEL_FALLBACK="claude-sonnet-4-6,gpt-4"
 ```
 
 ### Via config.yaml
@@ -293,7 +293,7 @@ model_routing:
 
 ### Supported agent type keys
 
-`planner`, `generator`, `evaluator`, `orchestrator` — plus any project-specific agent IDs registered in `.harness/agents.yaml`.
+`planner`, `generator`, `evaluator`, `orchestrator` — plus any project-specific agent IDs registered in `.weave/agents.yaml`.
 
 ---
 

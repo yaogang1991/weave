@@ -16,7 +16,7 @@ The system supports multiple execution backends (local, worktree, future: Docker
 
 We chose **config-driven backend selection** (`backend/lifecycle.py` — `BackendManager`).
 
-- `HARNESS_DEFAULT_BACKEND=local|worktree` sets the default
+- `WEAVE_DEFAULT_BACKEND=local|worktree` sets the default
 - Risk-based mapping: HIGH risk → worktree (auto-isolate)
 - Per-job override: jobs can specify a preferred backend
 - Automatic fallback: worktree unavailable → local

@@ -158,7 +158,7 @@ Configuration is provided at construction time via `LLMConfig`. No file-based co
 ## Extension Points
 
 1. **Custom prompt templates**: Override `PLANNING_PROMPT_TEMPLATE`, `ADAPTATION_PROMPT_TEMPLATE`, or `REPLAN_PROMPT_TEMPLATE` class attributes to change planning behavior.
-2. **New agent types**: Add agents to `AgentRegistry` (via `.harness/agents.yaml` or `_register_defaults()`); the orchestrator auto-discovers them through `to_prompt_description()`.
+2. **New agent types**: Add agents to `AgentRegistry` (via `.weave/agents.yaml` or `_register_defaults()`); the orchestrator auto-discovers them through `to_prompt_description()`.
 3. **Plan post-processing**: Subclass `IntelligentOrchestrator` and override `_plan_to_dag()` to inject custom DAG validation or transformation.
 
 ---

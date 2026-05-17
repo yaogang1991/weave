@@ -1,5 +1,5 @@
 """
-Core exceptions for the Harness execution engine.
+Core exceptions for the Weave execution engine.
 
 Placed in core/ to avoid circular imports (core must not depend on agent/ or
 control_plane/). All modules that need these exceptions import from here.

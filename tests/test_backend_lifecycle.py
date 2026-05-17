@@ -11,13 +11,13 @@ from control_plane.backend_lifecycle import BackendLifecycleService
 
 
 class TestLoadProjectHooks:
-    """Static hook loading from .harness/config.yaml."""
+    """Static hook loading from .weave/config.yaml."""
 
     def test_loads_hooks_from_config(self, tmp_path):
         """Loads all hook types from config.yaml."""
-        harness_dir = tmp_path / ".harness"
-        harness_dir.mkdir()
-        (harness_dir / "config.yaml").write_text(
+        weave_dir = tmp_path / ".weave"
+        weave_dir.mkdir()
+        (weave_dir / "config.yaml").write_text(
             "hooks:\n  after_create: echo created\n  before_run: echo before\n"
             "  after_run: echo after\n  before_remove: echo remove\n",
             encoding="utf-8",
@@ -37,9 +37,9 @@ class TestLoadProjectHooks:
         assert hooks == {}
 
     def test_returns_empty_on_bad_yaml(self, tmp_path):
-        harness_dir = tmp_path / ".harness"
-        harness_dir.mkdir()
-        (harness_dir / "config.yaml").write_text("{{invalid yaml", encoding="utf-8")
+        weave_dir = tmp_path / ".weave"
+        weave_dir.mkdir()
+        (weave_dir / "config.yaml").write_text("{{invalid yaml", encoding="utf-8")
         hooks = BackendLifecycleService.load_project_hooks(str(tmp_path))
         assert hooks == {}
 
@@ -47,9 +47,9 @@ class TestLoadProjectHooks:
 class TestCreateBackendManager:
     """BackendManager creation from environment config."""
 
-    @patch("control_plane.backend_lifecycle.HarnessConfig")
+    @patch("control_plane.backend_lifecycle.WeaveConfig")
     def test_creates_manager_with_config(self, mock_config_cls):
-        """Creates BackendManager using HarnessConfig."""
+        """Creates BackendManager using WeaveConfig."""
         mock_config = MagicMock()
         mock_config.sandbox.runtime = "local"
         mock_config.default_backend = "local"
@@ -62,7 +62,7 @@ class TestCreateBackendManager:
             bls.create_backend_manager("/tmp/project")
             mock_bm_cls.assert_called_once()
 
-    @patch("control_plane.backend_lifecycle.HarnessConfig")
+    @patch("control_plane.backend_lifecycle.WeaveConfig")
     def test_falls_back_to_local_sandbox(self, mock_config_cls):
         """Unknown sandbox type falls back to 'local'."""
         mock_config = MagicMock()

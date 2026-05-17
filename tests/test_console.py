@@ -11,7 +11,7 @@ class TestConsolePage:
     def test_console_page_exists(self):
         resp = client.get("/console")
         assert resp.status_code == 200
-        assert "Harness Console" in resp.text
+        assert "Weave Console" in resp.text
 
     def test_console_auto_refresh_interval(self):
         """M2-D: Console must have 2-second auto-refresh."""

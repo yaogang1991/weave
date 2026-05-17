@@ -81,7 +81,7 @@ python main.py tickets --status pending
 ### Non-Interactive Mode
 
 ```bash
-export HARNESS_NON_INTERACTIVE=true
+export WEAVE_NON_INTERACTIVE=true
 python main.py worker --non-interactive
 ```
 
@@ -110,8 +110,8 @@ python main.py worker --non-interactive
 ### Multi-Model Routing (M3.1)
 
 ```bash
-export HARNESS_PLANNER_MODEL="claude-opus-4-6"
-export HARNESS_GENERATOR_MODEL="gpt-4"
+export WEAVE_PLANNER_MODEL="claude-opus-4-6"
+export WEAVE_GENERATOR_MODEL="gpt-4"
 ```
 
 ### Agent Memory (M3.2)
@@ -152,7 +152,7 @@ python main.py skills
 python main.py skill review_code --var file=src/main.py
 ```
 
-Skills are YAML-based prompt templates in `.harness/skills/` with variable substitution, similar to DAG templates but for single-agent invocations.
+Skills are YAML-based prompt templates in `.weave/skills/` with variable substitution, similar to DAG templates but for single-agent invocations.
 
 ## Security Model
 

@@ -1,5 +1,5 @@
 """
-Harness Visualizer: Real-time DAG execution monitoring.
+Weave Visualizer: Real-time DAG execution monitoring.
 
 Provides both Web UI (FastAPI + WebSocket) and CLI (rich) visualization
 for the multi-agent orchestration system.

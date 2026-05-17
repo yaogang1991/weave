@@ -1,5 +1,5 @@
 """
-Harness Visualizer Server: FastAPI + WebSocket for real-time DAG monitoring.
+Weave Visualizer Server: FastAPI + WebSocket for real-time DAG monitoring.
 
 Endpoints:
     GET  /                  → Static dashboard (HTML)
@@ -32,14 +32,14 @@ from pydantic import BaseModel as PydanticModel  # noqa: E402
 
 from visualizer.event_bridge import WebSocketEventBridge  # noqa: E402
 from session.store import SessionStore  # noqa: E402
-from core.config import HarnessConfig  # noqa: E402
+from core.config import WeaveConfig  # noqa: E402
 
 from control_plane.models import JobStatus  # noqa: E402
 from control_plane.repository import JobRepository  # noqa: E402
 from control_plane.approval import ApprovalRepository, TicketStatus  # noqa: E402
 
 
-app = FastAPI(title="Harness Visualizer", version="2.0")
+app = FastAPI(title="Weave Visualizer", version="2.0")
 bridge = WebSocketEventBridge()
 
 
@@ -106,7 +106,7 @@ async def dashboard():
     index_file = static_path / "index.html"
     if index_file.exists():
         return HTMLResponse(content=index_file.read_text(encoding="utf-8"), status_code=200)
-    return HTMLResponse(content="<h1>Harness Visualizer</h1><p>Dashboard not built yet.</p>")
+    return HTMLResponse(content="<h1>Weave Visualizer</h1><p>Dashboard not built yet.</p>")
 
 
 @app.websocket("/ws")
@@ -168,7 +168,7 @@ async def api_list_plans():
 
 def _list_sessions() -> list[dict]:
     """List all sessions from the event store."""
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
     sessions = []
 
@@ -205,7 +205,7 @@ def _list_sessions() -> list[dict]:
 
 def _get_session_data(session_id: str) -> dict:
     """Get full session data including events and DAG info."""
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
 
     events = store.get_events(session_id)
@@ -282,7 +282,7 @@ async def console_page():
     console_file = static_path / "console.html"
     if console_file.exists():
         return HTMLResponse(content=console_file.read_text(encoding="utf-8"), status_code=200)
-    return HTMLResponse(content="<h1>Harness Console</h1><p>Console not built yet.</p>")
+    return HTMLResponse(content="<h1>Weave Console</h1><p>Console not built yet.</p>")
 
 
 @app.get("/api/jobs")
@@ -513,7 +513,7 @@ async def api_alerts():
 def _get_memory_manager():
     """Create a MemoryManager from config."""
     from memory.manager import MemoryManager
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     return MemoryManager(config.memory)
 
 
@@ -625,7 +625,7 @@ def _get_learning_scheduler():
     from control_plane.repository import JobRepository
     from monitoring.metrics import MetricsCollector
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     memory_manager = _get_memory_manager()
     job_repo = JobRepository()
     metrics_collector = MetricsCollector(job_repo)

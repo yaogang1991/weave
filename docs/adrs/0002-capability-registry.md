@@ -16,7 +16,7 @@ The orchestrator needs to know which agent types are available and what they can
 We chose a **capability registry** (`AgentRegistry` in `core/agent_registry.py`).
 
 - Default agents (planner, generator, evaluator) are registered at startup via `_register_defaults()`
-- Projects extend via `.harness/agents.yaml`
+- Projects extend via `.weave/agents.yaml`
 - The registry exposes `to_prompt_description()` for the orchestrator to include in its planning prompt
 - Default agents cannot be unregistered (protected)
 

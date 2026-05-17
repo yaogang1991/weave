@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 from core.agent_registry import AgentRegistry
 from core.models import DAG, SuccessCriterion
 
@@ -23,41 +23,41 @@ from control_plane.approval import ApprovalRepository
 def _resolve_project_path(project: str | None, allow_self_modify: bool = False) -> str | None:
     """Resolve and validate the project path for mutating operations.
 
-    Prevents agents from accidentally modifying the harness source tree when
+    Prevents agents from accidentally modifying the Weave source tree when
     --project is not specified. Returns the resolved project path, or raises
     SystemExit with a clear error message.
     """
     if project:
         resolved = str(Path(project).resolve())
-        # Check if explicitly targeting harness tree
-        harness_root = Path(__file__).parent.parent.resolve()
+        # Check if explicitly targeting Weave tree
+        weave_root = Path(__file__).parent.parent.resolve()
         target = Path(resolved).resolve()
-        if (target == harness_root or harness_root in target.parents) and not allow_self_modify:
+        if (target == weave_root or weave_root in target.parents) and not allow_self_modify:
             sys.stderr.write(
-                "ERROR: --project points to the harness source tree.\n"
-                "Agents would modify harness itself, which is usually unintended.\n\n"
+                "ERROR: --project points to the Weave source tree.\n"
+                "Agents would modify Weave itself, which is usually unintended.\n\n"
                 "Use --allow-self-modify to opt in (NOT recommended for production).\n"
             )
             sys.exit(2)
         return resolved
 
     cwd = Path.cwd().resolve()
-    harness_root = Path(__file__).parent.parent.resolve()
+    weave_root = Path(__file__).parent.parent.resolve()
 
-    if cwd == harness_root or harness_root in cwd.parents:
+    if cwd == weave_root or weave_root in cwd.parents:
         if not allow_self_modify:
             sys.stderr.write(
-                "ERROR: --project not specified and cwd is inside the harness source tree.\n"
-                "Running without --project would let agents modify harness itself.\n\n"
+                "ERROR: --project not specified and cwd is inside the Weave source tree.\n"
+                "Running without --project would let agents modify Weave itself.\n\n"
                 "Pick one:\n"
                 "  (1) --project ./my-project        target an existing project\n"
                 "  (2) --allow-self-modify           explicit opt-in (NOT recommended)\n"
             )
             sys.exit(2)
-        sys.stderr.write("WARN: --allow-self-modify set; agents may modify harness source tree.\n")
+        sys.stderr.write("WARN: --allow-self-modify set; agents may modify Weave source tree.\n")
         return str(cwd)
 
-    # Outside harness tree: use cwd, but warn
+    # Outside Weave tree: use cwd, but warn
     sys.stderr.write(f"WARN: --project not given, defaulting to {cwd}\n")
     return str(cwd)
 
@@ -91,7 +91,7 @@ def _check_dirty_workspace(project: str | None) -> None:
         f"This may be from a previous incomplete run.\n"
     )
 
-    non_interactive = os.environ.get("HARNESS_NON_INTERACTIVE", "").lower() in (
+    non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in (
         "true", "1", "yes",
     )
     if non_interactive:
@@ -125,10 +125,10 @@ def _is_legitimate_package(path: Path) -> bool:
 
 
 def _quarantine_shadowing_dir(path: Path, project_path: Path) -> Path:
-    """Move a shadowing directory to .harness/quarantine/<timestamp>/<name>."""
+    """Move a shadowing directory to .weave/quarantine/<timestamp>/<name>."""
     import shutil
 
-    quarantine_base = project_path / ".harness" / "quarantine"
+    quarantine_base = project_path / ".weave" / "quarantine"
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     dest = quarantine_base / timestamp / path.name
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -192,7 +192,7 @@ def _check_stdlib_shadowing(
         msg += f"  - {path.name}/ shadows stdlib '{name}'\n"
     msg += "These will cause import failures in pytest, httpx, and other tools.\n"
 
-    non_interactive = os.environ.get("HARNESS_NON_INTERACTIVE", "").lower() in (
+    non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in (
         "true", "1", "yes",
     )
 
@@ -258,7 +258,7 @@ def load_registry(project_path: str | None = None) -> AgentRegistry:
     registry = AgentRegistry()
 
     if project_path:
-        agents_yaml = Path(project_path) / ".harness" / "agents.yaml"
+        agents_yaml = Path(project_path) / ".weave" / "agents.yaml"
         if agents_yaml.exists():
             print(f"Loading project agents from {agents_yaml}")
             registry.load_from_yaml(agents_yaml)
@@ -311,23 +311,23 @@ def _make_repository() -> JobRepository:
 
 def _make_run_service(repository: JobRepository, non_interactive: bool = False) -> RunService:
     """Create a RunService with LLM config from environment."""
-    harness_config = HarnessConfig.from_env()
+    weave_config = WeaveConfig.from_env()
     approval_repo = ApprovalRepository()
 
     llm_router = None
-    routing_cfg = harness_config.model_routing
+    routing_cfg = weave_config.model_routing
     if routing_cfg.routing or routing_cfg.fallback_chain != ["claude-sonnet-4-6"]:
         from core.llm_router import LLMRouter
-        llm_router = LLMRouter(routing_cfg, harness_config.llm)
+        llm_router = LLMRouter(routing_cfg, weave_config.llm)
 
     service = RunService(
         repository=repository,
-        llm_config=harness_config.llm,
-        default_backend=harness_config.default_backend,
-        backend_base_path=harness_config.backend_base_path,
+        llm_config=weave_config.llm,
+        default_backend=weave_config.default_backend,
+        backend_base_path=weave_config.backend_base_path,
         approval_repo=approval_repo,
         non_interactive=non_interactive,
-        approval_timeout_sec=harness_config.approval_timeout_sec,
+        approval_timeout_sec=weave_config.approval_timeout_sec,
     )
     if llm_router:
         service.llm_router = llm_router

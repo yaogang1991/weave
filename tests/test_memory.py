@@ -791,12 +791,12 @@ class TestMemoryIntegration:
     def test_memory_config_from_env(self):
         """Verify MemoryConfig reads from env vars."""
         with patch.dict(os.environ, {
-            "HARNESS_MEMORY_PATH": "/tmp/test_memory",
-            "HARNESS_MEMORY_MAX_ENTRIES": "100",
+            "WEAVE_MEMORY_PATH": "/tmp/test_memory",
+            "WEAVE_MEMORY_MAX_ENTRIES": "100",
         }):
             config = MemoryConfig.from_env() if hasattr(MemoryConfig, "from_env") else MemoryConfig(
-                base_path=os.getenv("HARNESS_MEMORY_PATH", "./data/memory"),
-                max_entries_per_agent=int(os.getenv("HARNESS_MEMORY_MAX_ENTRIES", "500")),
+                base_path=os.getenv("WEAVE_MEMORY_PATH", "./data/memory"),
+                max_entries_per_agent=int(os.getenv("WEAVE_MEMORY_MAX_ENTRIES", "500")),
             )
             assert config.max_entries_per_agent == 100
 

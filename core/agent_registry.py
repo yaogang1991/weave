@@ -37,7 +37,7 @@ class AgentRegistry:
     def _register_defaults(self) -> None:
         """
         Register Anthropic Managed Agents' 3 foundational agents.
-        These are the harness's出厂设置.
+        These are the Weave's出厂设置.
         """
         self.register(AgentCapability(
             id="planner",

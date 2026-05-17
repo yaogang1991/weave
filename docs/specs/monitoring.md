@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Local metrics aggregation and alerting for the harness control plane. `MetricsCollector` computes
+Local metrics aggregation and alerting for the Weave control plane. `MetricsCollector` computes
 operational statistics (success rate, duration percentiles, retry rates, throughput, approval
 metrics) from job and approval repositories. `MetricsReporter` renders collected metrics as JSON
 or Markdown reports. `AlertManager` evaluates configurable alert rules against live metrics and

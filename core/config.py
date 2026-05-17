@@ -1,5 +1,5 @@
 """
-Configuration management for the Harness.
+Configuration management for the Weave.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ class LLMConfig(BaseModel):
     # Maximum concurrent API calls across all parallel nodes (#300).
     # When unset (0/None), no limit.  Set to 3-5 for rate-limited APIs.
     max_concurrent_api: int = Field(
-        default_factory=lambda: int(os.getenv("HARNESS_MAX_CONCURRENT_API", "0"))
+        default_factory=lambda: int(os.getenv("WEAVE_MAX_CONCURRENT_API", "0"))
     )
 
 
@@ -170,31 +170,31 @@ class WatchdogConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> WatchdogConfig:
-        """Create from HARNESS_WATCHDOG_* environment variables."""
+        """Create from WEAVE_WATCHDOG_* environment variables."""
         overrides: dict[str, AgentWatchdogOverride] = dict(
             _DEFAULT_AGENT_WATCHDOG_OVERRIDES,
         )
-        # Allow per-agent override via HARNESS_WATCHDOG_<TYPE>_INTERVAL /
-        # HARNESS_WATCHDOG_<TYPE>_THRESHOLD (e.g. HARNESS_WATCHDOG_GENERATOR_INTERVAL)
+        # Allow per-agent override via WEAVE_WATCHDOG_<TYPE>_INTERVAL /
+        # WEAVE_WATCHDOG_<TYPE>_THRESHOLD (e.g. WEAVE_WATCHDOG_GENERATOR_INTERVAL)
         for agent_type in ("planner", "generator", "evaluator"):
-            iv = os.getenv(f"HARNESS_WATCHDOG_{agent_type.upper()}_INTERVAL")
-            tv = os.getenv(f"HARNESS_WATCHDOG_{agent_type.upper()}_THRESHOLD")
+            iv = os.getenv(f"WEAVE_WATCHDOG_{agent_type.upper()}_INTERVAL")
+            tv = os.getenv(f"WEAVE_WATCHDOG_{agent_type.upper()}_THRESHOLD")
             if iv or tv:
                 overrides[agent_type] = AgentWatchdogOverride(
                     heartbeat_interval_sec=float(iv) if iv else None,
                     heartbeat_miss_threshold=int(tv) if tv else None,
                 )
         return cls(
-            enabled=os.getenv("HARNESS_WATCHDOG_ENABLED", "true").lower()
+            enabled=os.getenv("WEAVE_WATCHDOG_ENABLED", "true").lower()
             not in ("false", "0", "no"),
             heartbeat_interval_sec=float(
-                os.getenv("HARNESS_WATCHDOG_INTERVAL", "30.0")
+                os.getenv("WEAVE_WATCHDOG_INTERVAL", "30.0")
             ),
             heartbeat_miss_threshold=int(
-                os.getenv("HARNESS_WATCHDOG_THRESHOLD", "8")
+                os.getenv("WEAVE_WATCHDOG_THRESHOLD", "8")
             ),
             alert_threshold_fraction=float(
-                os.getenv("HARNESS_WATCHDOG_ALERT_FRACTION", "0.5")
+                os.getenv("WEAVE_WATCHDOG_ALERT_FRACTION", "0.5")
             ),
             agent_overrides=overrides,
         )
@@ -222,13 +222,13 @@ class ModelRoutingConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> ModelRoutingConfig:
-        """Create routing config from HARNESS_*_MODEL environment variables."""
+        """Create routing config from WEAVE_*_MODEL environment variables."""
         routing: dict[str, ModelRoute] = {}
         for agent_type, env_var in [
-            ("planner", "HARNESS_PLANNER_MODEL"),
-            ("generator", "HARNESS_GENERATOR_MODEL"),
-            ("evaluator", "HARNESS_EVALUATOR_MODEL"),
-            ("orchestrator", "HARNESS_ORCHESTRATOR_MODEL"),
+            ("planner", "WEAVE_PLANNER_MODEL"),
+            ("generator", "WEAVE_GENERATOR_MODEL"),
+            ("evaluator", "WEAVE_EVALUATOR_MODEL"),
+            ("orchestrator", "WEAVE_ORCHESTRATOR_MODEL"),
         ]:
             model = os.getenv(env_var, "")
             if model:
@@ -237,7 +237,7 @@ class ModelRoutingConfig(BaseModel):
                 )
 
         fallback_str = os.getenv(
-            "HARNESS_MODEL_FALLBACK", "claude-sonnet-4-6"
+            "WEAVE_MODEL_FALLBACK", "claude-sonnet-4-6"
         )
         fallback_chain = [m.strip() for m in fallback_str.split(",") if m.strip()]
 
@@ -265,7 +265,7 @@ class MemoryConfig(BaseModel):
     """Configuration for the M3.2 Agent Memory system."""
     enabled: bool = True
     base_path: str = Field(
-        default_factory=lambda: os.getenv("HARNESS_MEMORY_PATH", "./data/memory")
+        default_factory=lambda: os.getenv("WEAVE_MEMORY_PATH", "./data/memory")
     )
     max_entries_per_agent: int = Field(default=500, ge=1)
     max_content_length: int = Field(default=1000, ge=100)       # Characters per entry
@@ -289,7 +289,7 @@ class LearningConfig(BaseModel):
     max_insights: int = Field(default=100, ge=1)
     confidence_threshold: float = Field(default=0.7, ge=0.0, le=1.0)
     base_path: str = Field(
-        default_factory=lambda: os.getenv("HARNESS_LEARNING_PATH", "./data/learning")
+        default_factory=lambda: os.getenv("WEAVE_LEARNING_PATH", "./data/learning")
     )
 
     # Analysis thresholds (#468)
@@ -310,7 +310,7 @@ class ImpactConfig(BaseModel):
     confidence_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     base_path: str = Field(
         default_factory=lambda: os.getenv(
-            "HARNESS_IMPACT_PATH", "./data/impact"
+            "WEAVE_IMPACT_PATH", "./data/impact"
         )
     )
 
@@ -325,15 +325,15 @@ class NodeTimeoutConfig(BaseModel):
 
     default_timeout: int = Field(
         default=int(os.getenv(
-            "HARNESS_NODE_TIMEOUT",
-            os.getenv("HARNESS_AGENT_TIMEOUT", "300"),
+            "WEAVE_NODE_TIMEOUT",
+            os.getenv("WEAVE_AGENT_TIMEOUT", "300"),
         )),
         description="Default node execution timeout in seconds",
     )
     overrides: dict[str, int] = Field(
         default_factory=lambda: {
             "generator": int(os.getenv(
-                "HARNESS_NODE_TIMEOUT_GENERATOR", "600",
+                "WEAVE_NODE_TIMEOUT_GENERATOR", "600",
             )),
         },
         description="Per-agent-type timeout overrides (agent_type -> seconds)",
@@ -354,7 +354,7 @@ class NodeTimeoutConfig(BaseModel):
         return max(values)
 
 
-class HarnessConfig(BaseModel):
+class WeaveConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
@@ -364,7 +364,7 @@ class HarnessConfig(BaseModel):
     max_context_messages: int = 50
     # M2 agent_timeout kept for backward compat; superseded by node_timeout (#360)
     agent_timeout: int = Field(
-        default_factory=lambda: int(os.getenv("HARNESS_AGENT_TIMEOUT", "300")),
+        default_factory=lambda: int(os.getenv("WEAVE_AGENT_TIMEOUT", "300")),
         description="Legacy — use node_timeout instead",
     )
     node_timeout: NodeTimeoutConfig = Field(default_factory=NodeTimeoutConfig)
@@ -374,36 +374,36 @@ class HarnessConfig(BaseModel):
     # M2.2: Backend configuration
     default_backend: str = Field(
         default_factory=lambda: os.getenv(
-            "HARNESS_DEFAULT_BACKEND",
-            os.getenv("HARNESS_WORKSPACE_ISOLATION", "local"),
+            "WEAVE_DEFAULT_BACKEND",
+            os.getenv("WEAVE_WORKSPACE_ISOLATION", "local"),
         )
     )
     backend_base_path: str = Field(
         default_factory=lambda: os.getenv(
-            "HARNESS_BACKEND_BASE_PATH", "./data/backends"
+            "WEAVE_BACKEND_BASE_PATH", "./data/backends"
         )
     )
     risk_backend_map: dict[str, str] = Field(
         default_factory=lambda: {
-            "low": os.getenv("HARNESS_BACKEND_LOW", "local"),
-            "medium": os.getenv("HARNESS_BACKEND_MEDIUM", "local"),
-            "high": os.getenv("HARNESS_BACKEND_HIGH", "worktree"),
+            "low": os.getenv("WEAVE_BACKEND_LOW", "local"),
+            "medium": os.getenv("WEAVE_BACKEND_MEDIUM", "local"),
+            "high": os.getenv("WEAVE_BACKEND_HIGH", "worktree"),
             "critical": os.getenv(
-                "HARNESS_BACKEND_CRITICAL", "worktree"
+                "WEAVE_BACKEND_CRITICAL", "worktree"
             ),
         }
     )
 
     # M1.1: Non-interactive mode configuration
     non_interactive: bool = Field(
-        default_factory=lambda: os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
+        default_factory=lambda: os.getenv("WEAVE_NON_INTERACTIVE", "").lower()
         in ("true", "1", "yes")
     )
     approval_timeout_sec: int = Field(
-        default_factory=lambda: int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300"))
+        default_factory=lambda: int(os.getenv("WEAVE_APPROVAL_TIMEOUT_SEC", "300"))
     )
     cleanup_policy: str = Field(
-        default_factory=lambda: os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
+        default_factory=lambda: os.getenv("WEAVE_CLEANUP_POLICY", "on_success"),
         pattern=r"^(on_success|always|never)$",
     )
 
@@ -425,7 +425,7 @@ class HarnessConfig(BaseModel):
     # Evaluation: auto-format before lint (opt-in, #206)
     auto_format_before_eval: bool = Field(
         default_factory=lambda: os.getenv(
-            "HARNESS_AUTO_FORMAT_BEFORE_EVAL", ""
+            "WEAVE_AUTO_FORMAT_BEFORE_EVAL", ""
         ).lower() in ("true", "1", "yes")
     )
 
@@ -436,7 +436,7 @@ class HarnessConfig(BaseModel):
     # blocking the entire DAG.  CLI --pass-threshold overrides this.
     pass_threshold: float = Field(
         default_factory=lambda: float(os.getenv(
-            "HARNESS_PASS_THRESHOLD", "7.0"
+            "WEAVE_PASS_THRESHOLD", "7.0"
         ))
     )
 
@@ -446,12 +446,12 @@ class HarnessConfig(BaseModel):
     # was too short for complex tasks on slower LLM backends.
     run_timeout_sec: int = Field(
         default_factory=lambda: int(os.getenv(
-            "HARNESS_RUN_TIMEOUT_SEC", "1800"
+            "WEAVE_RUN_TIMEOUT_SEC", "1800"
         ))
     )
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> HarnessConfig:
+    def from_yaml(cls, path: str | Path) -> WeaveConfig:
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
         instance = cls(**data)
@@ -478,15 +478,15 @@ class HarnessConfig(BaseModel):
             issues.append(
                 f"HTTP timeout ({llm_timeout}s) >= min node timeout "
                 f"({node_min}s) — LLM calls may time out before node budget "
-                f"is used. Reduce HARNESS_LLM_TIMEOUT or increase "
-                f"HARNESS_NODE_TIMEOUT."
+                f"is used. Reduce WEAVE_LLM_TIMEOUT or increase "
+                f"WEAVE_NODE_TIMEOUT."
             )
         if node_max >= run_timeout:
             issues.append(
                 f"Max node timeout ({node_max}s) >= run timeout "
                 f"({run_timeout}s) — nodes may exceed run budget. "
-                f"Increase HARNESS_RUN_TIMEOUT_SEC or reduce "
-                f"HARNESS_NODE_TIMEOUT_GENERATOR."
+                f"Increase WEAVE_RUN_TIMEOUT_SEC or reduce "
+                f"WEAVE_NODE_TIMEOUT_GENERATOR."
             )
         return issues
 
@@ -500,7 +500,7 @@ class HarnessConfig(BaseModel):
             )
 
     @classmethod
-    def from_env(cls) -> HarnessConfig:
+    def from_env(cls) -> WeaveConfig:
         """Create config from environment variables (with ~/.claude/settings-kimi.json fallback)."""
         instance = cls(
             llm=LLMConfig(
@@ -509,7 +509,7 @@ class HarnessConfig(BaseModel):
                     os.getenv("ANTHROPIC_AUTH_TOKEN", _CLAUDE_ENV.get("ANTHROPIC_AUTH_TOKEN", "")),
                 ),
                 model=os.getenv(
-                    "HARNESS_MODEL",
+                    "WEAVE_MODEL",
                     os.getenv(
                         "ANTHROPIC_DEFAULT_SONNET_MODEL",
                         _CLAUDE_ENV.get("ANTHROPIC_DEFAULT_SONNET_MODEL", "claude-sonnet-4-6"),
@@ -517,59 +517,59 @@ class HarnessConfig(BaseModel):
                 ),
                 base_url=os.getenv("ANTHROPIC_BASE_URL", _CLAUDE_ENV.get("ANTHROPIC_BASE_URL", "")),
             ),
-            event_store_path=os.getenv("HARNESS_EVENT_STORE", "./data/events"),
-            artifact_path=os.getenv("HARNESS_ARTIFACT_PATH", "./data/artifacts"),
-            agent_timeout=int(os.getenv("HARNESS_AGENT_TIMEOUT", "300")),
-            max_context_tokens=int(os.getenv("HARNESS_MAX_CONTEXT_TOKENS", "100000")),
-            non_interactive=os.getenv("HARNESS_NON_INTERACTIVE", "").lower()
+            event_store_path=os.getenv("WEAVE_EVENT_STORE", "./data/events"),
+            artifact_path=os.getenv("WEAVE_ARTIFACT_PATH", "./data/artifacts"),
+            agent_timeout=int(os.getenv("WEAVE_AGENT_TIMEOUT", "300")),
+            max_context_tokens=int(os.getenv("WEAVE_MAX_CONTEXT_TOKENS", "100000")),
+            non_interactive=os.getenv("WEAVE_NON_INTERACTIVE", "").lower()
             in ("true", "1", "yes"),
-            approval_timeout_sec=int(os.getenv("HARNESS_APPROVAL_TIMEOUT_SEC", "300")),
-            cleanup_policy=os.getenv("HARNESS_CLEANUP_POLICY", "on_success"),
+            approval_timeout_sec=int(os.getenv("WEAVE_APPROVAL_TIMEOUT_SEC", "300")),
+            cleanup_policy=os.getenv("WEAVE_CLEANUP_POLICY", "on_success"),
             model_routing=ModelRoutingConfig.from_env(),
             memory=MemoryConfig(
-                enabled=os.getenv("HARNESS_MEMORY_ENABLED", "true").lower()
+                enabled=os.getenv("WEAVE_MEMORY_ENABLED", "true").lower()
                 not in ("false", "0", "no"),
-                base_path=os.getenv("HARNESS_MEMORY_PATH", "./data/memory"),
-                max_entries_per_agent=int(os.getenv("HARNESS_MEMORY_MAX_ENTRIES", "500")),
-                max_content_length=int(os.getenv("HARNESS_MEMORY_MAX_LENGTH", "1000")),
-                default_ttl_days=int(os.getenv("HARNESS_MEMORY_TTL_DAYS", "90")),
-                retrieval_limit=int(os.getenv("HARNESS_MEMORY_RETRIEVAL_LIMIT", "10")),
-                decay_half_life_days=float(os.getenv("HARNESS_MEMORY_DECAY_DAYS", "30")),
+                base_path=os.getenv("WEAVE_MEMORY_PATH", "./data/memory"),
+                max_entries_per_agent=int(os.getenv("WEAVE_MEMORY_MAX_ENTRIES", "500")),
+                max_content_length=int(os.getenv("WEAVE_MEMORY_MAX_LENGTH", "1000")),
+                default_ttl_days=int(os.getenv("WEAVE_MEMORY_TTL_DAYS", "90")),
+                retrieval_limit=int(os.getenv("WEAVE_MEMORY_RETRIEVAL_LIMIT", "10")),
+                decay_half_life_days=float(os.getenv("WEAVE_MEMORY_DECAY_DAYS", "30")),
             ),
             learning=LearningConfig(
-                enabled=os.getenv("HARNESS_LEARNING_ENABLED", "true").lower()
+                enabled=os.getenv("WEAVE_LEARNING_ENABLED", "true").lower()
                 not in ("false", "0", "no"),
                 analysis_interval_hours=float(
-                    os.getenv("HARNESS_LEARNING_INTERVAL_HOURS", "6.0")
+                    os.getenv("WEAVE_LEARNING_INTERVAL_HOURS", "6.0")
                 ),
-                min_samples=int(os.getenv("HARNESS_LEARNING_MIN_SAMPLES", "5")),
-                max_insights=int(os.getenv("HARNESS_LEARNING_MAX_INSIGHTS", "100")),
+                min_samples=int(os.getenv("WEAVE_LEARNING_MIN_SAMPLES", "5")),
+                max_insights=int(os.getenv("WEAVE_LEARNING_MAX_INSIGHTS", "100")),
                 confidence_threshold=float(
-                    os.getenv("HARNESS_LEARNING_CONFIDENCE", "0.7")
+                    os.getenv("WEAVE_LEARNING_CONFIDENCE", "0.7")
                 ),
-                base_path=os.getenv("HARNESS_LEARNING_PATH", "./data/learning"),
+                base_path=os.getenv("WEAVE_LEARNING_PATH", "./data/learning"),
             ),
             impact=ImpactConfig(
-                enabled=os.getenv("HARNESS_IMPACT_ENABLED", "true").lower()
+                enabled=os.getenv("WEAVE_IMPACT_ENABLED", "true").lower()
                 not in ("false", "0", "no"),
-                base_path=os.getenv("HARNESS_IMPACT_PATH", "./data/impact"),
+                base_path=os.getenv("WEAVE_IMPACT_PATH", "./data/impact"),
                 coverage_threshold=float(
-                    os.getenv("HARNESS_IMPACT_COVERAGE_THRESHOLD", "0.7")
+                    os.getenv("WEAVE_IMPACT_COVERAGE_THRESHOLD", "0.7")
                 ),
                 max_predicted_files=int(
-                    os.getenv("HARNESS_IMPACT_MAX_FILES", "50")
+                    os.getenv("WEAVE_IMPACT_MAX_FILES", "50")
                 ),
                 confidence_threshold=float(
-                    os.getenv("HARNESS_IMPACT_CONFIDENCE", "0.5")
+                    os.getenv("WEAVE_IMPACT_CONFIDENCE", "0.5")
                 ),
             ),
             watchdog=WatchdogConfig.from_env(),
             mcp=MCPConfig(
                 auto_discover=(
-                    os.getenv("HARNESS_MCP_AUTO_DISCOVER", "false").lower()
+                    os.getenv("WEAVE_MCP_AUTO_DISCOVER", "false").lower()
                     in ("true", "1", "yes")
                 ),
-                connection_timeout=int(os.getenv("HARNESS_MCP_CONNECTION_TIMEOUT", "30")),
+                connection_timeout=int(os.getenv("WEAVE_MCP_CONNECTION_TIMEOUT", "30")),
             ),
         )
         instance.warn_on_timeout_issues()

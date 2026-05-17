@@ -159,7 +159,7 @@ class LearningInsight(BaseModel):
 
 | Env Var | Config Key | Default | Description |
 |---------|-----------|---------|-------------|
-| `HARNESS_LEARNING_PATH` | `learning.base_path` | `./data/learning` | Analysis state directory |
+| `WEAVE_LEARNING_PATH` | `learning.base_path` | `./data/learning` | Analysis state directory |
 | — | `learning.enabled` | `true` | Enable self-learning |
 | — | `learning.analysis_interval_hours` | `6.0` | Min hours between analyses |
 | — | `learning.min_samples` | `5` | Min executions before analysis |

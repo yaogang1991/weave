@@ -42,7 +42,7 @@ class TestFilePatternOwnership:
 
     def test_rejects_preexisting_only(self, checker, tmp_path):
         """Pattern matches ONLY pre-existing files → FAIL (#332)."""
-        # Pre-existing harness test files (not created by this node)
+        # Pre-existing Weave test files (not created by this node)
         (tmp_path / "test_main.py").write_text("x = 1")
         (tmp_path / "test_utils.py").write_text("y = 2")
 
@@ -99,7 +99,7 @@ class TestFilePatternOwnership:
         """Pattern like tests/test_*.py with nested structure."""
         tests_dir = tmp_path / "tests"
         tests_dir.mkdir()
-        # Pre-existing harness test
+        # Pre-existing Weave test
         (tests_dir / "test_harness.py").write_text("x = 1")
         # Node's own test
         (tests_dir / "test_argkit.py").write_text("y = 2")
@@ -117,7 +117,7 @@ class TestFilePatternOwnership:
         assert "test_argkit.py" in result.message
         assert "test_harness.py" not in result.message
 
-    def test_52_preexisting_harness_tests_scenario(self, checker, tmp_path):
+    def test_52_preexisting_weave_tests_scenario(self, checker, tmp_path):
         """Exact scenario from #332: 52 pre-existing harness tests."""
         tests_dir = tmp_path / "tests"
         tests_dir.mkdir()

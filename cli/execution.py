@@ -12,7 +12,7 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 from core.models import DAG, DAGNode, EventType
 from core.exceptions import PendingApprovalError
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
@@ -44,13 +44,13 @@ async def cmd_plan(args):
         print("Error: provide a requirement argument or use --file <path>", file=sys.stderr)
         sys.exit(1)
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
 
     # M3.6: Load skill registry for plan-influencing skills.
     skill_registry = None
-    skills_dir = Path(args.project) / ".harness" / "skills" if args.project else None
+    skills_dir = Path(args.project) / ".weave" / "skills" if args.project else None
     if skills_dir and skills_dir.is_dir():
         from skills.registry import SkillRegistry
         skill_registry = SkillRegistry(skills_dir=skills_dir)
@@ -127,14 +127,14 @@ async def cmd_execute(args, dag: DAG | None = None):
     )
     args.project = project
 
-    config = HarnessConfig.from_env()
+    config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = load_registry(args.project)
     tool_registry = ToolRegistry(base_cwd=args.project) if args.project else ToolRegistry()
 
     # Create session
     session_id = str(uuid.uuid4())
-    store.create_session(session_id, "harness_run")
+    store.create_session(session_id, "weave_run")
 
     # Load DAG from file if not provided directly
     if dag is None:
@@ -201,7 +201,7 @@ def _build_guardrails(args, tool_registry: ToolRegistry) -> Guardrails:
     """Create guardrails based on CLI args."""
     non_interactive = (
         getattr(args, "non_interactive", False)
-        or os.getenv("HARNESS_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+        or os.getenv("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
     )
     if non_interactive:
         policy = GuardrailPolicy(
@@ -248,7 +248,7 @@ def _build_runtime(
     """Build the runtime object graph: pool, orchestrator, evaluator, engine."""
     # Skill registry
     skill_registry = None
-    skills_dir = Path(args.project) / ".harness" / "skills" if args.project else None
+    skills_dir = Path(args.project) / ".weave" / "skills" if args.project else None
     if skills_dir and skills_dir.is_dir():
         from skills.registry import SkillRegistry
         skill_registry = SkillRegistry(skills_dir=skills_dir)
@@ -421,7 +421,7 @@ async def _execute_with_error_handling(engine, dag, store, session_id):
             print("\nAgent requested approval but no ticket was created.", flush=True)
             print("This may be a configuration issue.", flush=True)
         print(
-            "For local auto-approval: set HARNESS_NON_INTERACTIVE=true "
+            "For local auto-approval: set WEAVE_NON_INTERACTIVE=true "
             "or use --non-interactive.",
             flush=True,
         )
@@ -523,7 +523,7 @@ async def cmd_viz(args):
     host = args.host
     port = args.port
 
-    print(f"🚀 Starting Harness Visualizer at http://{host}:{port}")
+    print(f"🚀 Starting Weave Visualizer at http://{host}:{port}")
     print("Press Ctrl+C to stop")
 
     if not args.no_browser:

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from backend.lifecycle import BackendManager
 from backend.base import WorkspaceIsolation, ExecutionSandbox
-from core.config import HarnessConfig
+from core.config import WeaveConfig
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +39,19 @@ class BackendLifecycleService:
         project_path: str,
     ) -> BackendManager:
         """Create a BackendManager configured from environment."""
-        harness_config = HarnessConfig.from_env()
+        weave_config = WeaveConfig.from_env()
         sandbox_type = ExecutionSandbox(
-            harness_config.sandbox.runtime
-            if harness_config.sandbox.runtime in ("local", "docker")
+            weave_config.sandbox.runtime
+            if weave_config.sandbox.runtime in ("local", "docker")
             else "local"
         )
         return BackendManager(
-            workspace=WorkspaceIsolation(harness_config.default_backend),
+            workspace=WorkspaceIsolation(weave_config.default_backend),
             sandbox=sandbox_type,
             repo_root=str(Path(project_path).resolve()),
             base_path=self._base_path,
-            workspace_by_risk=harness_config.risk_backend_map,
-            cleanup_policy=harness_config.cleanup_policy,
+            workspace_by_risk=weave_config.risk_backend_map,
+            cleanup_policy=weave_config.cleanup_policy,
         )
 
     def setup_workspace(
@@ -113,12 +113,12 @@ class BackendLifecycleService:
 
     @staticmethod
     def load_project_hooks(project_path: str | None) -> dict[str, str]:
-        """Load lifecycle hooks from .harness/config.yaml if present."""
+        """Load lifecycle hooks from .weave/config.yaml if present."""
         hooks: dict[str, str] = {}
         if not project_path:
             return hooks
         try:
-            config_path = Path(project_path) / ".harness" / "config.yaml"
+            config_path = Path(project_path) / ".weave" / "config.yaml"
             if config_path.exists():
                 import yaml
                 with open(config_path, "r", encoding="utf-8") as f:

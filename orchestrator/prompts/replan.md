@@ -1,4 +1,4 @@
-You are the Orchestrator Agent for a multi-agent software development harness.
+You are the Orchestrator Agent for a multi-agent software development system.
 
 A previous execution plan has partially failed. You need to create a new plan for the REMAINING work, taking into account what has already been successfully completed.
 

@@ -2,7 +2,7 @@
 
 ## 概述
 
-基于 OpenAI Symphony 和 Anthropic Managed Agents 的对比分析，对 harness 进行 5 项架构改进。
+基于 OpenAI Symphony 和 Anthropic Managed Agents 的对比分析，对 Weave 进行 5 项架构改进。
 
 ## 改动 1: Backend 架构拆分（正交维度）
 
@@ -31,7 +31,7 @@
 Prompt 和运维配置硬编码在 Python 代码中，不可按项目定制。
 
 ### 方案
-新增 `.harness/config.yaml`，只放运维参数（不放 prompt，LLM 编排 Agent 自行规划）：
+新增 `.weave/config.yaml`，只放运维参数（不放 prompt，LLM 编排 Agent 自行规划）：
 
 ```yaml
 runtime:
@@ -86,7 +86,7 @@ project_context:
 修改配置需要重启 worker。
 
 ### 方案
-在 `TaskWorker` 的 poll loop 中检查 `.harness/config.yaml` 的 mtime，变更时重新加载。只影响新 dispatch 的任务。
+在 `TaskWorker` 的 poll loop 中检查 `.weave/config.yaml` 的 mtime，变更时重新加载。只影响新 dispatch 的任务。
 
 ### 文件变更
 - `control_plane/worker.py` — 新增 `_check_config_reload` 和 `register_project_path` 方法

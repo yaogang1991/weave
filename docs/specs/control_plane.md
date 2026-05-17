@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provides the job queue, run tracking, approval ticket system, execution service, and asynchronous worker that together form the control plane for the harness. Manages the full lifecycle of a job: submission, lease acquisition, DAG planning and execution, retry/dead-letter handling, approval gating for high-risk tool calls, and graceful worker shutdown.
+Provides the job queue, run tracking, approval ticket system, execution service, and asynchronous worker that together form the control plane for the Weave. Manages the full lifecycle of a job: submission, lease acquisition, DAG planning and execution, retry/dead-letter handling, approval gating for high-risk tool calls, and graceful worker shutdown.
 
 Sources: `control_plane/models.py`, `control_plane/repository.py`, `control_plane/service.py`, `control_plane/worker.py`, `control_plane/approval.py`, `control_plane/hooks.py`, `control_plane/execution_factory.py`, `control_plane/job_lifecycle.py`, `control_plane/run_lifecycle.py`, `control_plane/job_result.py`, `control_plane/backend_lifecycle.py`, `control_plane/worker_executor.py`, `control_plane/worker_recovery.py`
 
@@ -468,7 +468,7 @@ Error categories used in `error_category` field: `""`, `"timeout"`, `"eval_faile
 
 | Dependency | Module | Usage |
 |---|---|---|
-| `LLMConfig`, `HarnessConfig` | `core.config` | LLM and harness configuration. |
+| `LLMConfig`, `WeaveConfig` | `core.config` | LLM and Weave configuration. |
 | `DAGExecutionEngine` | `core.dag_engine` | DAG execution. |
 | `AgentRegistry` | `core.agent_registry` | Agent type discovery. |
 | `IntelligentOrchestrator` | `orchestrator.intelligent_orchestrator` | DAG planning. |

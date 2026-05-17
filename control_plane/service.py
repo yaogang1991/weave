@@ -69,7 +69,7 @@ def _scan_existing_files(
     ``__pycache__``, ``data/``, ``.git``, and common non-source dirs.
     """
     _SKIP_DIRS = frozenset((
-        "__pycache__", ".git", ".harness", "data", "node_modules",
+        "__pycache__", ".git", ".weave", "data", "node_modules",
         ".venv", "venv", ".mypy_cache", ".pytest_cache", ".tox",
     ))
     _CONFIG_NAMES = frozenset((
@@ -255,7 +255,7 @@ class RunService:
         # Create session
         session_id = str(uuid.uuid4())
         store = SessionStore(self.event_store_path)
-        store.create_session(session_id, "harness_run")
+        store.create_session(session_id, "weave_run")
 
         # Create Run record
         run = self.repository.create_run(job_id, session_id)
@@ -269,7 +269,7 @@ class RunService:
             if not job.project_path:
                 raise ValueError(
                     "project_path is required for job execution. "
-                    "Refusing to use cwd as target — agents may modify harness itself. "
+                    "Refusing to use cwd as target — agents may modify Weave itself. "
                     "Submit jobs with --project /path/to/target."
                 )
             project_root = Path(job.project_path).resolve()
