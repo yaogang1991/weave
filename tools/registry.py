@@ -12,6 +12,9 @@ from typing import Any, Callable
 
 from core.models import ToolResult
 from tools.command_runner import ToolCommandRunner
+from tools.schemas import TOOL_SCHEMAS
+from tools.validators import validate_bash_command
+from tools.ast_utils import extract_python_signatures
 
 # Maximum file size to read/search (10 MB)
 _MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -114,124 +117,17 @@ class ToolRegistry:
         return None
 
     def _register_builtin_tools(self):
-        self.register("read", self._tool_read, {
-            "name": "read",
-            "description": (
-                "Read file contents. Returns text line-by-line. "
-                "Default limit is 2000 lines starting from offset."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string", "description": "Path to file"},
-                    "offset": {"type": "integer", "description": "Start line (0-based, default 0)"},
-                    "limit": {"type": "integer", "description": "Max lines (default 2000)"},
-                },
-                "required": ["file_path"],
-            },
-        })
-
-        self.register("write", self._tool_write, {
-            "name": "write",
-            "description": "Create or overwrite a file.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string"},
-                    "content": {"type": "string"},
-                },
-                "required": ["file_path", "content"],
-            },
-        })
-
-        self.register("edit", self._tool_edit, {
-            "name": "edit",
-            "description": (
-                "Replace old_string with new_string in a file. "
-                "Only replaces the first occurrence. "
-                "Returns the line number where the replacement was made."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "file_path": {"type": "string"},
-                    "old_string": {"type": "string"},
-                    "new_string": {"type": "string"},
-                },
-                "required": ["file_path", "old_string", "new_string"],
-            },
-        })
-
-        self.register("bash", self._tool_bash, {
-            "name": "bash",
-            "description": (
-                "Execute a bash command in the project workspace. "
-                "Commands run with cwd=PROJECT_ROOT by default. "
-                "Use relative paths from PROJECT_ROOT (e.g. 'python -m pytest tests/test_x.py'). "
-                "Do NOT guess absolute paths or cd into unknown directories."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "Command to execute (runs in PROJECT_ROOT)",
-                    },
-                    "timeout": {"type": "integer", "default": 120},
-                    "cwd": {
-                        "type": "string",
-                        "description": (
-                            "Optional cwd relative to PROJECT_ROOT. "
-                            "Must stay within project root. "
-                            "Usually leave empty."
-                        ),
-                    },
-                },
-                "required": ["command"],
-            },
-        })
-
-        self.register("glob", self._tool_glob, {
-            "name": "glob",
-            "description": "Find files matching a pattern.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pattern": {"type": "string", "description": "Glob pattern like '**/*.py'"},
-                    "path": {"type": "string", "description": "Base directory"},
-                    "max_results": {"type": "integer", "default": 1000},
-                },
-                "required": ["pattern"],
-            },
-        })
-
-        self.register("grep", self._tool_grep, {
-            "name": "grep",
-            "description": "Search for text in files. Skips binary and large files.",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "pattern": {"type": "string"},
-                    "path": {"type": "string"},
-                    "file_pattern": {"type": "string", "description": "e.g. '*.py'"},
-                    "max_results": {"type": "integer", "default": 200},
-                },
-                "required": ["pattern"],
-            },
-        })
-
-        self.register("git", self._tool_git, {
-            "name": "git",
-            "description": "Execute git commands (status, diff, commit, branch, etc.)",
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "command": {"type": "string", "description": "Git subcommand"},
-                    "args": {"type": "array", "items": {"type": "string"}, "default": []},
-                },
-                "required": ["command"],
-            },
-        })
+        tool_map = {
+            "read": self._tool_read,
+            "write": self._tool_write,
+            "edit": self._tool_edit,
+            "bash": self._tool_bash,
+            "glob": self._tool_glob,
+            "grep": self._tool_grep,
+            "git": self._tool_git,
+        }
+        for name, handler in tool_map.items():
+            self.register(name, handler, TOOL_SCHEMAS[name])
 
     def register(self, name: str, handler: Callable, schema: dict):
         """Register or replace a tool. Schema keyed by name prevents duplicates."""
@@ -292,76 +188,8 @@ class ToolRegistry:
             )
 
     def _validate_bash_command(self, command: str) -> str | None:
-        """Validate bash command against deny patterns (#493).
-
-        Checks for dangerous operations including destructive filesystem
-        commands, network exfiltration, reverse shells, and privilege
-        escalation. Uses regex for robust matching against obfuscation.
-        """
-        import re
-
-        normalized = command.lower().strip()
-
-        # Remove common obfuscation: quotes, backslashes, $'' syntax
-        cleaned = re.sub(r"[\'\"\\]", "", normalized)
-        # Collapse whitespace
-        cleaned = re.sub(r"\s+", " ", cleaned)
-
-        deny_patterns = [
-            # Destructive filesystem
-            r"rm\s+(-[a-z]*f[a-z]*\s+/|-[a-z]*f[a-z]*\s+/*)",
-            r"rm\s+-[a-z]*[rf][a-z]*\s+/",
-            r"rm\s+(-[rf]\s+)+.*/(etc|usr|var|home|boot|sys|proc)",
-            r"r\s*m\s+.*-[a-z]*r[a-z]*f",  # quoted obfuscation
-            r"chmod\s+-[a-z]*r\s+(777|a+x|u\+s)",
-            r"chown\s+.*:.*\s+/",
-            r"dd\s+.*of=/dev/",
-            r"mkfs",
-            r"shred\s+/",
-            r">\s*/dev/sd",
-            # System control
-            r"\bshutdown\b",
-            r"\breboot\b",
-            r"\binit\s+[06]",
-            r"\b(systemctl|service)\s+(stop|disable|mask)\s+",
-            # Fork bomb
-            r":\(\)\{.*:\|:&",
-            # Reverse shells / network exfiltration
-            r"/dev/tcp/",
-            r"/dev/udp/",
-            r"nc\s+.*-[a-z]*e[a-z]*\s",
-            r"ncat\s+.*-[a-z]*e[a-z]*\s",
-            r"bash\s+-i\s+",
-            r"\b(curl|wget)\s+.*\|\s*(ba)?sh\b",
-            r"\b(curl|wget)\s+.*-d\s+@",
-            r"\b(curl|wget)\s+.*--data\b.*@\.?",
-            # Credential / secret access
-            r"/etc/shadow",
-            r"/etc/passwd",
-            r"\.ssh/id_[rd]sa",
-            r"\.ssh/id_ed25519",
-            r"\.aws/credentials",
-            r"\.aws/config",
-            r"\.env\b",
-            r"\.gitconfig",
-            r"\.netrc",
-            # Environment variable dump
-            r"\b(print)?env\b(?!\s+PATH\b)(?!\s+HOME\b)",
-            r"\bexport\b.*>\s",
-            # Privilege escalation
-            r"\bsudo\s+",
-            r"\bsu\s+",
-            r"\bpkexec\b",
-            # Package installation (supply chain risk)
-            r"\bpip\s+install\s+.*(--user|-e)\b",
-            r"\bnpm\s+install\s+-g\b",
-            r"\bcargo\s+install\b",
-        ]
-
-        for pattern in deny_patterns:
-            if re.search(pattern, cleaned):
-                return pattern
-        return None
+        """Validate bash command against deny patterns (#493)."""
+        return validate_bash_command(command)
 
     def _resolve_safe_cwd(self, requested_cwd: str | None = None) -> Path:
         """Resolve and validate cwd within project root."""
@@ -456,109 +284,8 @@ class ToolRegistry:
 
     @staticmethod
     def _extract_python_signatures(path: Path) -> str:
-        """Extract class/function signatures and docstrings from a Python file.
-
-        Returns a condensed version suitable for understanding the API without
-        reading every implementation detail.  For large files this prevents
-        API context overflow (#349).
-        """
-        import ast
-
-        try:
-            source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            return f"(could not read {path.name})"
-
-        try:
-            tree = ast.parse(source)
-        except SyntaxError:
-            # Fall back to first 100 lines if AST parsing fails
-            lines = source.splitlines()[:100]
-            return (
-                f"# {path.name} (first 100 lines — "
-                f"file has syntax errors)\n"
-                + "\n".join(lines)
-            )
-
-        src_lines = source.splitlines()
-        total_lines = len(src_lines)
-        parts = [
-            f"# {path.name} — signatures only "
-            f"(file is {total_lines} lines, "
-            f"{path.stat().st_size} bytes; "
-            f"use offset/limit to read specific sections)\n",
-        ]
-
-        def _get_def_lines(node):
-            """Extract just the def/class signature lines (up to colon)."""
-            start = node.lineno - 1
-            # end_lineno points to last line of the entire block;
-            # we want just the signature (lines up to and including ':')
-            end = min(
-                getattr(node, "end_lineno", start + 10) - 1,
-                start + 10,  # cap at 10 lines for signature
-            )
-            raw = src_lines[start:end]
-            # Find the line with the closing ')' + ':'
-            sig = []
-            for line in raw:
-                sig.append(line)
-                stripped = line.rstrip()
-                if stripped.endswith(":") and "(" in "".join(sig):
-                    break
-            return "\n".join(sig)
-
-        def _get_docstring(node):
-            """Extract first-line docstring if present."""
-            if (
-                node.body
-                and isinstance(node.body[0], ast.Expr)
-                and isinstance(node.body[0].value, ast.Constant)
-                and isinstance(node.body[0].value.value, str)
-            ):
-                return node.body[0].value.value[:200]
-            return None
-
-        for node in ast.iter_child_nodes(tree):
-            if isinstance(
-                node,
-                (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
-            ):
-                sig = _get_def_lines(node)
-
-                if isinstance(node, ast.ClassDef):
-                    parts.append(f"\n{sig}")
-                    doc = _get_docstring(node)
-                    if doc:
-                        parts.append(f'    """{doc}"""')
-                    for item in node.body:
-                        if isinstance(
-                            item,
-                            (ast.FunctionDef, ast.AsyncFunctionDef),
-                        ):
-                            method_sig = _get_def_lines(item)
-                            parts.append(f"    {method_sig}")
-                            mdoc = _get_docstring(item)
-                            if mdoc:
-                                parts.append(
-                                    f'        """{mdoc}"""'
-                                )
-                else:
-                    parts.append(f"\n{sig}")
-                    doc = _get_docstring(node)
-                    if doc:
-                        parts.append(f'    """{doc}"""')
-
-            elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                line = src_lines[node.lineno - 1]
-                parts.append(line)
-
-        result = "\n".join(parts)
-        # Safety cap: if signature extraction is still huge, truncate
-        max_sig = 4096
-        if len(result) > max_sig:
-            result = result[:max_sig] + "\n... (truncated signatures)"
-        return result
+        """Extract class/function signatures and docstrings from a Python file."""
+        return extract_python_signatures(path)
 
     def _tool_write(self, file_path: str, content: str) -> ToolResult:
         try:
