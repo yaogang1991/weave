@@ -119,7 +119,8 @@ class TestRegressionRestore:
         await engine._execute_single_node(dag, "gen_1")
 
         # After first attempt: files should be good, best attempt captured
-        assert node.status == NodeStatus.FAILED
+        # With immutable nodes, use dag.nodes to get updated state (#486)
+        assert dag.nodes["gen_1"].status == NodeStatus.FAILED
         best = engine._best_attempts.get("gen_1")
         assert best is not None
         assert best["score"] == 6.7
@@ -137,18 +138,17 @@ class TestRegressionRestore:
             metadata={"lint_new_issues": ["E999"], "lint_all_issues": ["E999"]},
         )
 
-        node.status = NodeStatus.RETRYING
-        node.error = ""
-        node.retry_count = 0
+        # Reset node for retry using immutable update (#486)
+        dag.update_node("gen_1", status=NodeStatus.RETRYING, error="", retry_count=0)
 
         await engine._execute_single_node(dag, "gen_1")
 
         # After regression: files should be restored to best attempt
-        assert node.status == NodeStatus.FAILED  # Still failed but...
+        assert dag.nodes["gen_1"].status == NodeStatus.FAILED  # Still failed but...
         # Files restored from snapshot
         assert (tmp_path / "main.py").read_text() == "def hello(): return 'hello'\n"
         # output_artifacts restored to best
-        assert "main.py" in node.output_artifacts
+        assert "main.py" in dag.nodes["gen_1"].output_artifacts
 
     @pytest.mark.asyncio
     async def test_regression_removes_extra_files(self, tmp_path):
@@ -217,9 +217,8 @@ class TestRegressionRestore:
             metadata={"lint_new_issues": ["E999"], "lint_all_issues": ["E999"]},
         )
 
-        node.status = NodeStatus.RETRYING
-        node.error = ""
-        node.retry_count = 0
+        # Reset node for retry using immutable update (#486)
+        dag.update_node("gen_1", status=NodeStatus.RETRYING, error="", retry_count=0)
 
         await engine._execute_single_node(dag, "gen_1")
 
@@ -231,5 +230,6 @@ class TestRegressionRestore:
             "extra_module.py should have been deleted during regression restore"
         )
         # 3. output_artifacts should be restored to best (without extra_module.py)
-        assert "extra_module.py" not in (node.output_artifacts or [])
-        assert "main.py" in node.output_artifacts
+        updated_node = dag.nodes["gen_1"]
+        assert "extra_module.py" not in (updated_node.output_artifacts or [])
+        assert "main.py" in updated_node.output_artifacts
