@@ -29,7 +29,7 @@ class TestAutoFixUnused:
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\nimport json\n\nx = 1\n", encoding="utf-8")
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             # First call: autoflake in-place (modifies the file)
             # Second call: flake8 (returns clean)
             mock_run.return_value = MagicMock(returncode=0, stdout="")
@@ -53,7 +53,7 @@ class TestAutoFixUnused:
                 code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
             return MagicMock(returncode=0, stdout="")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert len(changed) == 1
@@ -64,7 +64,7 @@ class TestAutoFixUnused:
         code_file = tmp_path / "clean.py"
         code_file.write_text("import os\n\nos.path.exists('.')\n", encoding="utf-8")
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
@@ -75,7 +75,7 @@ class TestAutoFixUnused:
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=FileNotFoundError):
+        with patch("evaluator.runner.subprocess.run", side_effect=FileNotFoundError):
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert changed == []
@@ -86,7 +86,7 @@ class TestAutoFixUnused:
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
 
-        with patch("evaluator.engine.subprocess.run",
+        with patch("evaluator.runner.subprocess.run",
                     side_effect=subprocess.TimeoutExpired("autoflake", 30)):
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
@@ -102,7 +102,7 @@ class TestAutoFixUnused:
                 code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
             return MagicMock(returncode=0, stdout="")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine._run_lint(["mod.py"], tmp_path)
 
         assert len(engine._last_autofixed) == 1
@@ -126,7 +126,7 @@ class TestAutoFixUnused:
                 f2.write_text("y = 2\n", encoding="utf-8")  # changed
             return MagicMock(returncode=0, stdout="")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             changed = engine._auto_fix_unused([str(f1), str(f2)], tmp_path)
 
         assert len(changed) == 1

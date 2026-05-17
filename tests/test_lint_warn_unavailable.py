@@ -25,7 +25,7 @@ def evaluator(tmp_store):
 class TestLintWarnWhenUnavailable:
     """When no linter is installed, lint becomes WARN instead of FAIL."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_no_linter_returns_warn(self, mock_run, evaluator, tmp_path):
         """Both flake8 and ruff missing → WARN, not FAIL."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
@@ -46,7 +46,7 @@ class TestLintWarnWhenUnavailable:
         assert "lint skipped" in msg.lower()
         assert "No linter available" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_lint_with_real_issues_still_fails(self, mock_run, evaluator, tmp_path):
         """When linter runs and finds issues, it still fails."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
@@ -63,7 +63,7 @@ class TestLintWarnWhenUnavailable:
         assert not passed
         assert auto
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_lint_clean_still_passes(self, mock_run, evaluator, tmp_path):
         """When linter runs and finds nothing, it passes."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
@@ -80,7 +80,7 @@ class TestLintWarnWhenUnavailable:
         assert passed
         assert auto
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_no_linter_in_evaluate_stage(self, mock_run, evaluator, tmp_path):
         """Full evaluate_stage: no linter → WARN, overall still passes."""
         (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
@@ -105,7 +105,7 @@ class TestLintWarnWhenUnavailable:
         assert "WARN" in result.feedback
         assert "lint skipped" in result.feedback.lower()
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_no_files_to_lint_passes(self, mock_run, evaluator, tmp_path):
         """No output_artifacts → lint passes by default."""
         passed, msg, auto = evaluator._check_criterion(

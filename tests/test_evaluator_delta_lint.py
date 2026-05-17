@@ -73,7 +73,7 @@ class TestLintIssue:
 
 
 class TestDeltaLint:
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_existing_lint_not_counted_as_failure(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -90,14 +90,14 @@ class TestDeltaLint:
         ]
 
         # git diff returns empty (no changed lines for this file)
-        with patch("evaluator.engine.get_changed_lines", return_value={}):
+        with patch("evaluator.runner.get_changed_lines", return_value={}):
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
 
         # Without git diff info, all issues are potential failures
         # (fallback behavior — can't distinguish)
         assert not passed
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_new_issue_on_changed_line_is_failure(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -115,7 +115,7 @@ class TestDeltaLint:
 
         # git diff shows line 10 was changed by agent
         with patch(
-            "evaluator.engine.get_changed_lines",
+            "evaluator.runner.get_changed_lines",
             return_value={"code.py": {10}},
         ):
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
@@ -124,7 +124,7 @@ class TestDeltaLint:
         assert "1 new issue" in msg
         assert "E501" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_existing_issue_on_unchanged_line_is_ignored(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -142,7 +142,7 @@ class TestDeltaLint:
 
         # Line 33 was NOT changed by agent
         with patch(
-            "evaluator.engine.get_changed_lines",
+            "evaluator.runner.get_changed_lines",
             return_value={"code.py": {50, 51}},  # only lines 50-51 changed
         ):
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
@@ -150,7 +150,7 @@ class TestDeltaLint:
         assert passed
         assert "pre-existing" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_mixed_new_and_existing(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -171,7 +171,7 @@ class TestDeltaLint:
 
         # Only line 589 was changed
         with patch(
-            "evaluator.engine.get_changed_lines",
+            "evaluator.runner.get_changed_lines",
             return_value={"code.py": {589}},
         ):
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
@@ -180,7 +180,7 @@ class TestDeltaLint:
         assert "1 new issue" in msg
         assert "1 existing ignored" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_no_git_diff_falls_back_to_all_issues(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -198,7 +198,7 @@ class TestDeltaLint:
 
         # get_changed_lines returns empty dict (git not available)
         with patch(
-            "evaluator.engine.get_changed_lines",
+            "evaluator.runner.get_changed_lines",
             return_value={},
         ):
             passed, msg = evaluator._run_lint(["code.py"], tmp_path)
@@ -206,7 +206,7 @@ class TestDeltaLint:
         assert not passed
         assert "delta unavailable" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_lint_clean_still_passes(
         self, mock_run, evaluator, tmp_path,
     ):

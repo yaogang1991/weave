@@ -34,7 +34,7 @@ class TestPytestTimeout:
 
     def test_run_tests_timeout_returns_actionable_error(self, engine, work_dir):
         """_run_tests returns a clear error when subprocess times out."""
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(
                 cmd=["pytest"], timeout=60,
             )
@@ -46,7 +46,7 @@ class TestPytestTimeout:
 
     def test_run_tests_timeout_mentions_teardown(self, engine, work_dir):
         """Timeout message mentions proper teardown for fixing the issue."""
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(
                 cmd=["pytest"], timeout=60,
             )
@@ -63,7 +63,7 @@ class TestPytestTimeout:
         (work_dir / "tests").mkdir(parents=True, exist_ok=True)
         (work_dir / "tests" / "test_core.py").write_text("def test_ok(): pass\n")
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(
                 cmd=["pytest", "--cov"], timeout=60,
             )
@@ -82,7 +82,7 @@ class TestPytestTimeout:
         mock_result.stdout = "FAILED test_dummy.py::test_fail - AssertionError"
         mock_result.stderr = ""
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = mock_result
             passed, msg = engine._run_tests(work_dir, "test_dummy.py")
 
@@ -95,7 +95,7 @@ class TestPytestTimeout:
         test_file = tmp_path / "test_hanging.py"
         test_file.write_text("def test_hang(): import time; time.sleep(999)\n")
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.side_effect = subprocess.TimeoutExpired(
                 cmd=["pytest"], timeout=60,
             )

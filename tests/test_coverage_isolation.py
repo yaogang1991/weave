@@ -76,7 +76,7 @@ class TestCoverageFileIsolation:
             captured_env.update(kwargs.get("env", {}))
             return original_run(cmd, **{k: v for k, v in kwargs.items() if k != "env"})
 
-        with patch("evaluator.engine.subprocess.run", side_effect=mock_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=mock_run):
             passed, msg = engine._run_tests(
                 work_dir, str(test_file), eval_id="sess-x_impl_mod",
             )
@@ -102,7 +102,7 @@ class TestCoverageFileIsolation:
             captured_env.update(kwargs.get("env", {}))
             return original_run(cmd, **{k: v for k, v in kwargs.items() if k != "env"})
 
-        with patch("evaluator.engine.subprocess.run", side_effect=mock_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=mock_run):
             passed, msg, auto = engine._check_coverage(
                 work_dir, 50,
                 output_artifacts=["mymod/core.py"],
@@ -137,7 +137,7 @@ class TestCoverageFileIsolation:
             result.returncode = 0
             return result
 
-        with patch("evaluator.engine.subprocess.run", side_effect=capture_env):
+        with patch("evaluator.runner.subprocess.run", side_effect=capture_env):
             engine.evaluate_stage(
                 session_id="sess-par",
                 stage_name="impl_a",

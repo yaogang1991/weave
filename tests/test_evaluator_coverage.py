@@ -19,7 +19,7 @@ def evaluator(tmp_path):
 class TestCoverageParsing:
     """Verify TOTAL line parsing across output formats."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_pass_when_above_target(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -35,7 +35,7 @@ class TestCoverageParsing:
         assert passed
         assert "80%" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_fail_when_below_target(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -46,7 +46,7 @@ class TestCoverageParsing:
         assert not passed
         assert "60.0%" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_wide_format_with_branch_column(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -57,7 +57,7 @@ class TestCoverageParsing:
         assert passed
         assert "91.7%" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_decimal_coverage(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -72,7 +72,7 @@ class TestCoverageParsing:
 class TestCoverageParseFailure:
     """Regression tests for #152: parse failure must not return PASS."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_no_total_line_returns_warn(self, mock_run, evaluator, tmp_path):
         """Tests pass but no TOTAL → WARN (unverifiable), not PASS."""
         (tmp_path / "test_module.py").write_text("def test_x(): pass\n")
@@ -89,7 +89,7 @@ class TestCoverageParseFailure:
         assert "could not be parsed" in msg
         assert "not verified" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_stderr_included_in_feedback(self, mock_run, evaluator, tmp_path):
         """stderr tail should appear in feedback for debugging."""
         (tmp_path / "test_module.py").write_text("def test_x(): pass\n")
@@ -104,7 +104,7 @@ class TestCoverageParseFailure:
         assert passed  # passed but unverifiable → WARN
         assert "pytest-cov" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_tests_fail_and_no_total(self, mock_run, evaluator, tmp_path):
         """Tests fail + no TOTAL → FAIL with combined message."""
         mock_run.return_value = MagicMock(
@@ -116,7 +116,7 @@ class TestCoverageParseFailure:
         assert not passed
         assert "Tests failed" in msg
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_exception_returns_fail(self, mock_run, evaluator, tmp_path):
         """Unexpected exception → FAIL with error message."""
         mock_run.side_effect = RuntimeError("boom")
@@ -124,7 +124,7 @@ class TestCoverageParseFailure:
         assert not passed
         assert "error" in msg.lower()
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_total_line_without_percentage(self, mock_run, evaluator, tmp_path):
         """TOTAL line present but no % value → WARN (unverifiable)."""
         (tmp_path / "test_module.py").write_text("def test_x(): pass\n")

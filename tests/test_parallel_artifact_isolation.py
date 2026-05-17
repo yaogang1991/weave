@@ -121,7 +121,7 @@ class TestEvaluatorArtifactScope:
             r.stderr = ""
             return r
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             _, msg_b = engine._run_lint(["b.py"], tmp_path)
 
         # Must NOT mention a.py or c.py

@@ -19,7 +19,7 @@ class TestCoverageParseTolerance:
         engine = EvaluatorEngine(MagicMock())
         (tmp_path / "test_module.py").write_text("def test_x(): pass\n")
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             # pytest+coverage runs with returncode 0 (tests pass) but no TOTAL line
             mock_run.return_value = MagicMock(
                 returncode=0,
@@ -39,7 +39,7 @@ class TestCoverageParseTolerance:
         """When tests fail AND coverage can't be parsed, evaluation should fail."""
         engine = EvaluatorEngine(MagicMock())
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=1,
                 stdout="1 failed\n",
@@ -54,7 +54,7 @@ class TestCoverageParseTolerance:
         """Normal coverage parsing still works correctly."""
         engine = EvaluatorEngine(MagicMock())
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout="Name        Stmts   Miss  Cover\n"
@@ -71,7 +71,7 @@ class TestCoverageParseTolerance:
         """Coverage below target returns False."""
         engine = EvaluatorEngine(MagicMock())
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0,
                 stdout="TOTAL  20  10  50%\n",
@@ -97,7 +97,7 @@ class TestCoverageInEvaluationStage:
             SuccessCriterion(type=CriterionType.COVERAGE, target=80, description="coverage"),
         ]
 
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             def fake_run(cmd, **kwargs):
                 if "pytest" in cmd and "--cov" in cmd:
                     # Coverage run: tests pass but no TOTAL line

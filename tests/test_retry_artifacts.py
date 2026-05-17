@@ -53,7 +53,7 @@ class TestRetryArtifactPreservation:
 class TestCoverageScope:
     """Verify coverage check doesn't scan globally when artifacts empty."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_coverage_no_artifacts_fails_gracefully(self, mock_run, evaluator, work_dir):
         """Without output_artifacts, coverage is unverifiable → WARN (#152, #165)."""
         mock_run.return_value = MagicMock(
