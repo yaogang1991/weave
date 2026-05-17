@@ -7,8 +7,8 @@ paths, etc.) cause immediate abort instead of wasting retry budget.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from core.models import DAG, DAGNode, NodeStatus, FailureDecision
-from orchestrator.intelligent_orchestrator import (
+from core.models import DAG, DAGNode, NodeStatus
+from orchestrator.intelligent_orchestrator import (  # noqa: F401
     IntelligentOrchestrator,
     _is_infrastructure_error,
     INFRASTRUCTURE_ERROR_PATTERNS,

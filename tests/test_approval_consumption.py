@@ -4,7 +4,6 @@ Verifies that consuming an approved ticket:
 - Does NOT modify the reason field
 - Writes consumed_by_run_id and consumed_by_node_id
 """
-import pytest
 
 from control_plane.approval import ApprovalRepository, TicketStatus
 

@@ -5,7 +5,6 @@ When a generator node has file_exists/file_pattern success_criteria, the
 task description is prepended with a CRITICAL constraint listing the exact
 file paths the LLM must create.
 """
-import pytest
 
 from core.models import DAGNode, NodeStatus, SuccessCriterion, CriterionType
 from agent.agent_pool import _inject_file_path_constraints

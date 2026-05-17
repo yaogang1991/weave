@@ -4,7 +4,6 @@ Tests for #275: watchdog generator threshold increased for long file writes.
 Generator nodes writing 6+ test files need more time before the watchdog
 kills them. The heartbeat miss threshold and interval have been increased.
 """
-import pytest
 
 from core.config import WatchdogConfig, _DEFAULT_AGENT_WATCHDOG_OVERRIDES
 

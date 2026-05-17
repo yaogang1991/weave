@@ -2,10 +2,9 @@
 Tests for agent/worker.py — AgentWorker loop, context management, retry, artifact tracking.
 """
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, call  # noqa: F401
 
-from core.models import ToolResult, EventType
-from core.config import LLMConfig
+from core.models import ToolResult
 from agent.worker import AgentWorker
 
 

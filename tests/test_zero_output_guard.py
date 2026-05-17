@@ -11,15 +11,13 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import CriterionType, SuccessCriterion
 from evaluator.checkers.file_exists import FileExistsChecker
-from evaluator.models import CheckResult, EvaluationContext
+from evaluator.models import EvaluationContext
 
 
 # ---------------------------------------------------------------------------

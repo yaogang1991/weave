@@ -1,7 +1,7 @@
 """Tests for file ownership contract model and plan validator conflict detection (#272)."""
 import pytest
 
-from core.models import (
+from core.models import (  # noqa: F401
     FileAccessPolicy,
     FileOwnershipContract,
     ConflictResolution,

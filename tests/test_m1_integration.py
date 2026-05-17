@@ -14,20 +14,19 @@ Each test uses JobRepository with a temporary directory to ensure isolation.
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 # Ensure project root is on sys.path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from control_plane.models import Job, JobStatus, Run, RunStatus, RetryPolicy
+from control_plane.models import Job, JobStatus, Run, RunStatus, RetryPolicy  # noqa: F401
 from control_plane.repository import JobRepository
 from control_plane.worker import TaskWorker, WorkerConfig
 
@@ -299,7 +298,7 @@ class TestReplanFlow:
             return MagicMock()  # Return a mock DAG
 
         # Simulate failure that triggers replan
-        job = tmp_repo.create_job(
+        tmp_repo.create_job(  # noqa: F841
             requirement="Trigger replan",
             retry_policy=RetryPolicy(max_attempts=3, backoff_sec=5),
         )

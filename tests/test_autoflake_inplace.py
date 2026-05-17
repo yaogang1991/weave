@@ -8,7 +8,6 @@ where the generator regenerates files with the same unused imports.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from core.config import LLMConfig
 from evaluator.engine import EvaluatorEngine
 from session.store import SessionStore
 

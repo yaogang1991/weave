@@ -3,7 +3,6 @@ Tests for #238: stdlib module name shadowing prevention.
 
 Verifies check_stdlib_conflict utility and PlanValidator stdlib detection.
 """
-import pytest
 
 from orchestrator.plan_validator import PlanValidator, check_stdlib_conflict
 

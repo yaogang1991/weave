@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-import time
+import time  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -27,14 +27,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.config import HarnessConfig
-from core.models import (
+from core.models import (  # noqa: F401
     GuardrailPolicy,
     PersonalGuardrailPolicy,
     PermissionMode,
     RiskLevel,
     ToolResult,
 )
-from guardrails.policy import Guardrails, GuardrailResult, PersonalGuardrails
+from guardrails.policy import GuardrailResult, PersonalGuardrails
 
 # Inline WorkerConfig to avoid pulling heavy control_plane dependencies
 class WorkerConfig:
@@ -439,7 +439,6 @@ class TestNonBlocking:
 
     def test_request_confirmation_returns_immediately(self, non_interactive_guardrails):
         """Non-interactive request_confirmation returns without waiting."""
-        import time
         start = time.monotonic()
         result = non_interactive_guardrails.request_confirmation(
             "bash", {"command": "rm -rf /"}
@@ -450,7 +449,6 @@ class TestNonBlocking:
 
     def test_evaluate_returns_immediately(self, non_interactive_guardrails):
         """Non-interactive evaluate returns immediately for HIGH risk."""
-        import time
         start = time.monotonic()
         result = non_interactive_guardrails.evaluate("bash", {"command": "rm -rf /"})
         elapsed = time.monotonic() - start

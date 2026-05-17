@@ -1,11 +1,11 @@
 """
 Tests for core/dag_engine.py — DAG execution, evaluator integration, failure handling.
 """
-import asyncio
+import asyncio  # noqa: F401
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock
 
-from core.models import (
+from core.models import (  # noqa: F401
     DAG, DAGNode, NodeStatus, ExecutionEvent,
     FailureDecision, HandoffArtifact, EvaluationResult,
 )
@@ -144,7 +144,7 @@ class TestEvaluatorIntegration:
     async def test_eval_fails_marks_retrying(self):
         dag = _make_linear_dag(criteria=["tests pass"])
         dag.nodes["a"].max_retries = 2
-        call_count = 0
+        _call_count = 0  # noqa: F841
 
         async def exec_fn(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": ["impl.py"]}
@@ -201,7 +201,7 @@ class TestHandoffArtifacts:
             return {"status": "completed", "summary": f"{node.id} done", "artifacts": [f"{node.id}_file.py"]}
 
         engine = DAGExecutionEngine(capturing_executor, _noop_failure_handler)
-        result = await engine.execute(dag)
+        await engine.execute(dag)  # noqa: F841
         assert len(received_artifacts) == 1
         assert received_artifacts[0].from_agent == "generator"
         assert received_artifacts[0].file_paths == ["a_file.py"]

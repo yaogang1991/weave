@@ -2,7 +2,6 @@
 
 import pytest
 import yaml
-from pathlib import Path
 
 from core.models import Skill, SkillVariable
 from skills.registry import SkillRegistry

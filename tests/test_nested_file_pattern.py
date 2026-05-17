@@ -6,7 +6,6 @@ to recursive matching when the initial pattern doesn't find files in
 nested subdirectory structures.
 """
 import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from evaluator.checkers.file_exists import FileExistsChecker

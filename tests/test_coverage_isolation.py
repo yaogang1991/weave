@@ -4,7 +4,6 @@ Verifies that each evaluation gets a unique COVERAGE_FILE env variable,
 preventing parallel nodes from corrupting each other's coverage data.
 """
 
-import os
 import sys
 import subprocess
 from pathlib import Path
@@ -16,7 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from evaluator.engine import EvaluatorEngine
-from core.models import (
+from core.models import (  # noqa: F401
     CriterionType,
     EvaluationResult,
     SuccessCriterion,

@@ -12,12 +12,11 @@ Validates:
 - get_execution_summary includes new status counts
 """
 
-import asyncio
+import asyncio  # noqa: F401
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from datetime import datetime, timezone
 
-from core.models import (
+from core.models import (  # noqa: F401
     DAG, DAGNode, DAGEdge, NodeStatus, EvalStatus, EvaluationResult,
     HandoffArtifact, SuccessCriterion, CriterionType,
 )

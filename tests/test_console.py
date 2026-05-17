@@ -1,5 +1,4 @@
 """Web Console API tests -- M2-D."""
-import pytest
 from fastapi.testclient import TestClient
 
 from visualizer.server import app

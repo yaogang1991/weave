@@ -3,7 +3,7 @@ Tests for core/models.py — DAG models, node status, evaluation results.
 """
 import pytest
 
-from core.models import (
+from core.models import (  # noqa: F401
     DAG, DAGNode, DAGEdge, NodeStatus,
     HandoffArtifact, EvaluationResult, FailureDecision,
     EventType, RiskLevel, PermissionMode,

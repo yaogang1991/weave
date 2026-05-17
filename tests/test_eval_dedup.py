@@ -4,10 +4,9 @@ Tests for #145: evaluator deduplication via handoff of auto-eval results.
 Verifies that auto-evaluation results are passed to downstream evaluator
 agent nodes and that the evaluator prompt guides supplementary review.
 """
-import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock  # noqa: F401
 
-from core.models import DAG, DAGNode, NodeStatus, HandoffArtifact
+from core.models import DAG, DAGNode, NodeStatus, HandoffArtifact  # noqa: F401
 
 
 class TestAutoEvalResultStorage:
@@ -37,7 +36,7 @@ class TestAutoEvalHandoff:
     def test_eval_result_handoff_to_evaluator(self):
         """Downstream evaluator node receives auto-eval results."""
         from core.dag_engine import DAGExecutionEngine
-        import asyncio
+        import asyncio  # noqa: F401
 
         dag = DAG(reasoning="test")
         gen_node = DAGNode(
@@ -453,7 +452,6 @@ class TestRegressionRestoreEvalResult:
         3. Node exhausts retries (max_retries=2) -> auto_eval_result cleared
         """
         from core.dag_engine import DAGExecutionEngine
-        from unittest.mock import MagicMock
         import asyncio
 
         def make_eval_result(passed, score, feedback=""):
@@ -542,7 +540,6 @@ class TestRegressionRestoreEvalResult:
         4. Downstream evaluator receives the 8.0 result
         """
         from core.dag_engine import DAGExecutionEngine
-        from unittest.mock import MagicMock
         import asyncio
 
         def make_eval_result(passed, score, feedback=""):

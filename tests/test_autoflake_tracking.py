@@ -1,5 +1,5 @@
 """Tests for autoflake change tracking in evaluator lint (issue #133)."""
-import subprocess
+import subprocess  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 

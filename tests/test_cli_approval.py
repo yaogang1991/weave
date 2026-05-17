@@ -3,11 +3,8 @@
 Verifies that cmd_execute wires up approval_repo and the
 PendingApprovalError message is informative.
 """
-import io
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 
 class TestCLIApprovalWiring:

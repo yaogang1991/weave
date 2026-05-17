@@ -258,7 +258,7 @@ class TestExpiredTicketPushesJobToFailure:
         """An expired ticket for a RUNNING job causes it to be queued for retry."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=10)
-        ticket = _create_pending_ticket(tmp_approval_repo, job.id, expires_at=expired_time)
+        _create_pending_ticket(tmp_approval_repo, job.id, expires_at=expired_time)  # noqa: F841
 
         await worker._recover_pending_tickets()
 
@@ -274,7 +274,7 @@ class TestExpiredTicketPushesJobToFailure:
         """An expired ticket for a RUNNING job causes it to be queued for retry."""
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=10)
-        ticket = _create_pending_ticket(tmp_approval_repo, job.id, expires_at=expired_time)
+        _create_pending_ticket(tmp_approval_repo, job.id, expires_at=expired_time)  # noqa: F841
 
         await worker._recover_pending_tickets()
 
@@ -293,7 +293,7 @@ class TestExpiredTicketPushesJobToFailure:
         tmp_repo.update_job(job)
 
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=10)
-        ticket = _create_pending_ticket(tmp_approval_repo, job.id, expires_at=expired_time)
+        _create_pending_ticket(tmp_approval_repo, job.id, expires_at=expired_time)  # noqa: F841
 
         await worker._recover_pending_tickets()
 
@@ -414,7 +414,7 @@ class TestResumeAfterApproval:
         )
 
         job = _create_job(tmp_repo, JobStatus.RUNNING)
-        run1 = _create_run(tmp_repo, job.id, RunStatus.RUNNING)
+        _create_run(tmp_repo, job.id, RunStatus.RUNNING)  # noqa: F841
         run2 = _create_run(tmp_repo, job.id, RunStatus.RUNNING)
 
         result = await service.resume_after_approval(job.id, "ticket_123")
@@ -435,7 +435,7 @@ class TestResumeAfterApproval:
 
         job = _create_job(tmp_repo, JobStatus.RUNNING)
         # Create a succeeded run, not running
-        run = _create_run(tmp_repo, job.id, RunStatus.SUCCEEDED)
+        _create_run(tmp_repo, job.id, RunStatus.SUCCEEDED)  # noqa: F841
 
         result = await service.resume_after_approval(job.id, "ticket_123")
 
@@ -569,12 +569,12 @@ class TestKill9RestartRecovery:
         job1 = repo.create_job(requirement="Job with expired ticket")
         job1.status = JobStatus.RUNNING
         repo.update_job(job1)
-        run1 = repo.create_run(job1.id, "sess_1")
+        repo.create_run(job1.id, "sess_1")  # noqa: F841
 
         job2 = repo.create_job(requirement="Job with valid ticket")
         job2.status = JobStatus.RUNNING
         repo.update_job(job2)
-        run2 = repo.create_run(job2.id, "sess_2")
+        repo.create_run(job2.id, "sess_2")  # noqa: F841
 
         job3 = repo.create_job(requirement="Job already succeeded but ticket pending")
         job3.status = JobStatus.SUCCEEDED
@@ -663,7 +663,7 @@ class TestKill9RestartRecovery:
         job = repo.create_job(requirement="Test job")
         job.status = JobStatus.RUNNING
         repo.update_job(job)
-        run = repo.create_run(job.id, "sess_1")
+        repo.create_run(job.id, "sess_1")  # noqa: F841
 
         # Ticket expired long ago
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=600)
@@ -744,13 +744,13 @@ class TestListTicketsFiltering:
 
     def test_filter_by_tool_name(self, tmp_approval_repo: ApprovalRepository):
         """list_tickets filters correctly by tool_name."""
-        ticket1 = tmp_approval_repo.create_ticket(
+        tmp_approval_repo.create_ticket(  # noqa: F841
             job_id="job_1", tool_name="bash", args={"command": "ls"}, risk_level="high"
         )
         ticket2 = tmp_approval_repo.create_ticket(
             job_id="job_1", tool_name="edit", args={"file_path": "x.py"}, risk_level="high"
         )
-        ticket3 = tmp_approval_repo.create_ticket(
+        tmp_approval_repo.create_ticket(  # noqa: F841
             job_id="job_2", tool_name="bash", args={"command": "pwd"}, risk_level="medium"
         )
 
@@ -784,10 +784,10 @@ class TestListTicketsFiltering:
         ticket1 = tmp_approval_repo.create_ticket(
             job_id="job_A", tool_name="bash", args={"command": "ls"}, risk_level="high"
         )
-        ticket2 = tmp_approval_repo.create_ticket(
+        tmp_approval_repo.create_ticket(  # noqa: F841
             job_id="job_B", tool_name="bash", args={"command": "pwd"}, risk_level="high"
         )
-        ticket3 = tmp_approval_repo.create_ticket(
+        tmp_approval_repo.create_ticket(  # noqa: F841
             job_id="job_A", tool_name="edit", args={"file_path": "x.py"}, risk_level="high"
         )
 

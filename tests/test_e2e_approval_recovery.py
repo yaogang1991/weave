@@ -197,7 +197,7 @@ class TestE2EApprovalRecovery:
         approval_repo.approve_ticket(t4.id)
 
         # 执行恢复
-        expired = approval_repo.expire_tickets()
+        approval_repo.expire_tickets()  # noqa: F841
         pending = approval_repo.list_tickets(status=TicketStatus.PENDING)
         orphans = [
             t for t in pending

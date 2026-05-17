@@ -6,7 +6,6 @@ filtered out before calling flake8 to avoid E999 SyntaxError.
 """
 import pytest
 from unittest.mock import MagicMock, patch
-from pathlib import Path
 
 from evaluator.engine import EvaluatorEngine
 

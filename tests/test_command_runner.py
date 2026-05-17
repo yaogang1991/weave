@@ -4,8 +4,7 @@ Tests for #179 PR 1: ToolCommandRunner interface and SyncSandboxAdapter.
 Verifies the sync command runner protocol, adapter behavior, and
 ToolRegistry integration with sandbox runners.
 """
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from tools.command_runner import (
     ToolCommandResult,

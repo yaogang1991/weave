@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.base import ExecutionBackend, WorkspaceIsolation
+from backend.base import WorkspaceIsolation
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.lifecycle import BackendManager

@@ -4,9 +4,8 @@ Verifies that empty/missing tool_call_id values are replaced with
 generated IDs to prevent 'tool_call_id is not found' API errors.
 """
 import uuid
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch  # noqa: F401
 
-import pytest
 
 
 class TestToolCallIdDefense:
@@ -16,7 +15,6 @@ class TestToolCallIdDefense:
         from agent.worker import AgentWorker
         from core.config import LLMConfig
         from session.store import SessionStore
-        from unittest.mock import MagicMock
 
         store = MagicMock(spec=SessionStore)
         with patch("agent.worker.LLMClient"):
@@ -25,7 +23,7 @@ class TestToolCallIdDefense:
 
     def test_empty_id_replaced(self):
         """Tool call with empty id gets a generated one."""
-        worker = self._make_worker()
+        self._make_worker()  # noqa: F841
         tc = {"id": "", "name": "read", "arguments": {"file_path": "x.py"}}
 
         # Simulate the defensive check from worker.run()

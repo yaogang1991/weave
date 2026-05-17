@@ -35,7 +35,7 @@ class TestTimeoutConfiguration:
         config = _make_config(timeout=60)
         with patch("core.llm_client.OpenAI") as mock_openai:
             mock_openai.return_value = MagicMock()
-            client = LLMClient(config)
+            LLMClient(config)  # noqa: F841
 
             call_args = mock_openai.call_args
             timeout = call_args.kwargs.get("timeout")
@@ -50,7 +50,7 @@ class TestTimeoutConfiguration:
         config = _make_config(provider="anthropic", timeout=90)
         with patch("core.llm_client.anthropic.Anthropic") as mock_anth:
             mock_anth.return_value = MagicMock()
-            client = LLMClient(config)
+            LLMClient(config)  # noqa: F841
 
             call_args = mock_anth.call_args
             timeout = call_args.kwargs.get("timeout")

@@ -99,7 +99,7 @@ class TestPlanValidatorFeatureComplexity:
         }
         validator = PlanValidator()
         validator.validate(plan)
-        warnings_text = " ".join(validator.warnings)
+        " ".join(validator.warnings)  # noqa: F841
         assert any("feature" in w.lower() or "complex" in w.lower() for w in validator.warnings), \
             f"Expected complexity warning, got: {validator.warnings}"
 

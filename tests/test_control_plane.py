@@ -13,7 +13,6 @@ Covers:
 from __future__ import annotations
 
 import json
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -647,7 +646,7 @@ class TestAtomicWrites:
 
     def test_no_tmp_files_left_behind(self, tmp_repo: JobRepository, tmp_path: Path):
         """Ensure that successful writes do not leave .tmp files."""
-        job = tmp_repo.create_job("No tmp")
+        tmp_repo.create_job("No tmp")  # noqa: F841
         tmp_files = list((tmp_path / "jobs").glob("*.tmp"))
         assert len(tmp_files) == 0, f"Unexpected .tmp files: {tmp_files}"
 

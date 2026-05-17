@@ -7,7 +7,6 @@ Verifies that:
    output_artifacts
 4. Evaluator only sees the current node's artifacts
 """
-from pathlib import Path
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest

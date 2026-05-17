@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.lifecycle import BackendManager
-from backend.base import WorkspaceIsolation
 
 
 # ============================================================================
@@ -246,7 +245,7 @@ class TestWorktreeBackendLifecycle:
         if not backend.is_available():
             pytest.skip("git worktree not available")
 
-        work_dir = backend.setup("job-1", "run-1")
+        backend.setup("job-1", "run-1")  # noqa: F841
 
         # Preserve first
         backend.preserve("job-1", "run-1")
@@ -316,7 +315,7 @@ class TestBackendManagerLifecycle:
                 "setup",
                 return_value=tmp_path / "mock" / "worktree",
             ) as mock_setup:
-                work_dir = manager.setup(
+                manager.setup(  # noqa: F841
                     "job-1", "run-1", risk_level="high"
                 )
                 mock_setup.assert_called_once()
@@ -356,9 +355,9 @@ class TestBackendManagerLifecycle:
             workspace="local", base_path=str(tmp_path)
         )
 
-        dir1 = manager.setup("job-1", "run-1")
-        dir2 = manager.setup("job-1", "run-2")
-        dir3 = manager.setup("job-2", "run-3")
+        manager.setup("job-1", "run-1")  # noqa: F841
+        manager.setup("job-1", "run-2")  # noqa: F841
+        manager.setup("job-2", "run-3")  # noqa: F841
 
         # All should be tracked
         active = manager.get_active_runs()

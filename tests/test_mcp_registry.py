@@ -1,6 +1,5 @@
 """Tests for MCP tool registration in ToolRegistry (M3.6)."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from core.models import MCPToolInfo, ToolResult

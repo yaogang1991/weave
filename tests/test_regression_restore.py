@@ -5,10 +5,8 @@ When a retry scores worse than the best attempt, the engine restores the
 best attempt's file contents and artifact list instead of using the worse
 result.
 """
-import os
 import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock
 
 from core.dag_engine import DAGExecutionEngine
 

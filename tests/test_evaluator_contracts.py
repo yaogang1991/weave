@@ -4,13 +4,11 @@ Evaluator contract tests: system-level quality gate verification.
 Part of #178 PR 5: protect evaluator behavior from future regressions.
 Tests exercise the public evaluator contract, not private helpers.
 """
-import pytest
-from pathlib import Path
 from unittest.mock import MagicMock
 
 from core.models import CriterionType, SuccessCriterion
 from evaluator.engine import EvaluatorEngine
-from evaluator.models import CheckResult, CheckSeverity, EvaluationContext
+from evaluator.models import CheckResult
 from evaluator.compat import normalize_criteria, parse_string_criterion
 
 

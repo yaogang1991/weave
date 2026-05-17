@@ -3,7 +3,6 @@ Tests for #178 PR 1: CriterionChecker abstraction.
 
 Verifies pluggable checker registration, dispatch, and fallback behavior.
 """
-import pytest
 from pathlib import Path
 from unittest.mock import MagicMock
 

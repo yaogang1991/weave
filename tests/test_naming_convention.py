@@ -11,7 +11,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from orchestrator.prompts import PromptRegistry
 from agent.agent_pool import WorkerAgent
 

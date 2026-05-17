@@ -12,7 +12,6 @@ Coverage:
 from __future__ import annotations
 
 import itertools
-import urllib.request
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 

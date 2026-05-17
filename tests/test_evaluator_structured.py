@@ -8,8 +8,6 @@ Verifies:
 - TESTS_PASS uses fixed pytest command (shell=False)
 """
 import json
-import os
-import tempfile
 
 import pytest
 

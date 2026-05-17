@@ -79,7 +79,6 @@ class TestBuildRuntimeContext:
         built by _execute_inner (no duplicate method definitions or calls).
         """
         import asyncio
-        from core.models import HandoffArtifact
 
         agent = self._make_agent(base_cwd="/tmp/project")
 

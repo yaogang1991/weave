@@ -1,10 +1,10 @@
 """Tests for per-node workspace isolation and auto-serialization (#176, #272)."""
-import asyncio
+import asyncio  # noqa: F401
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from core.models import (
+from core.models import (  # noqa: F401
     DAG,
     DAGNode,
     DAGEdge,

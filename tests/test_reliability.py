@@ -15,7 +15,6 @@ import asyncio
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
@@ -23,7 +22,7 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.models import (
+from core.models import (  # noqa: F401
     DAG,
     DAGNode,
     NodeStatus,
@@ -34,7 +33,11 @@ from core.models import (
 )
 from core.dag_engine import DAGExecutionEngine
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
-from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
+from control_plane.models import (
+    JobStatus,
+    RunStatus,
+    RetryPolicy,
+)
 from control_plane.repository import JobRepository
 from control_plane.service import RunService, _classify_error
 
@@ -124,7 +127,7 @@ class TestTimeoutMechanisms:
         )
 
         # Simulate a slow execution by making _execute_plan_and_run sleep
-        original_execute = run_service._execute_plan_and_run
+        _original_execute = run_service._execute_plan_and_run  # noqa: F841
 
         async def slow_execute(*args, **kwargs):
             await asyncio.sleep(10)  # Will exceed 1s timeout
@@ -376,7 +379,7 @@ class TestReplanClosedLoop:
         )
         engine._compute_backoff = lambda rc: 0.01
 
-        result = await engine.execute(dag)
+        await engine.execute(dag)  # noqa: F841
         assert replan_called is True
         assert replan_failed_id == "a"
 
@@ -619,7 +622,7 @@ class TestRunServiceFailureHandling:
 
         # Run 1: attempt=0, fails -> QUEUED, attempt=1
         _prepare_job_for_run(tmp_repo, job.id)
-        run1 = await run_service.run_job(job.id)
+        await run_service.run_job(job.id)  # noqa: F841
         job_after_1 = tmp_repo.get_job(job.id)
         assert job_after_1 is not None
         assert job_after_1.status == JobStatus.QUEUED
@@ -627,7 +630,7 @@ class TestRunServiceFailureHandling:
 
         # Run 2: attempt=1, fails -> QUEUED, attempt=2
         _prepare_job_for_run(tmp_repo, job.id)
-        run2 = await run_service.run_job(job.id)
+        await run_service.run_job(job.id)  # noqa: F841
         job_after_2 = tmp_repo.get_job(job.id)
         assert job_after_2 is not None
         assert job_after_2.status == JobStatus.QUEUED
@@ -635,7 +638,7 @@ class TestRunServiceFailureHandling:
 
         # Run 3: attempt=2, fails -> DEAD_LETTER (attempt == max_attempts)
         _prepare_job_for_run(tmp_repo, job.id)
-        run3 = await run_service.run_job(job.id)
+        await run_service.run_job(job.id)  # noqa: F841
         job_after_3 = tmp_repo.get_job(job.id)
         assert job_after_3 is not None
         assert job_after_3.status == JobStatus.DEAD_LETTER

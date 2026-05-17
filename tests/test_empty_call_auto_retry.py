@@ -9,8 +9,7 @@ models produce empty args under concurrent load (64 empty calls in R16).
 import pytest
 from unittest.mock import MagicMock
 
-from core.models import ToolResult, EventType
-from core.config import LLMConfig
+from core.models import ToolResult
 from agent.worker import AgentWorker, EMPTY_CALL_MAX_RETRIES, DEGENERATE_CALL_LIMIT
 
 

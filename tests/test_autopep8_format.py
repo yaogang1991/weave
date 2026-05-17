@@ -9,11 +9,10 @@ Covers:
 - returncode != 0 handling
 - Different-directory same-name files produce distinct paths
 """
-import subprocess
+import subprocess  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from evaluator.engine import EvaluatorEngine
 from tools.registry import ToolRegistry
