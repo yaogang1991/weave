@@ -30,9 +30,15 @@ class ArtifactHandoffService:
     dependency warnings — all packaged as HandoffArtifact instances.
     """
 
-    def __init__(self, memory_manager: Any | None = None, session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        memory_manager: Any | None = None,
+        session_id: str | None = None,
+        isolation_guard: Any | None = None,
+    ) -> None:
         self._memory_manager = memory_manager
         self._session_id = session_id
+        self._isolation_guard = isolation_guard
 
     def collect(
         self,
@@ -90,6 +96,23 @@ class ArtifactHandoffService:
         # Soft dependency warning
         if failed_soft:
             self._add_soft_dep_warning(artifacts, dag, node_id, failed_soft)
+
+        # #511 isolation layer: scan handoffs for injection patterns
+        if self._isolation_guard and artifacts:
+            scan = self._isolation_guard.scan_handoffs(
+                artifacts, from_node_id="upstream", to_node_id=node_id,
+            )
+            if scan.injected:
+                logger.warning(
+                    "Isolation guard flagged %d/%d handoff artifacts for node %s "
+                    "(#511): risk=%s patterns=%s",
+                    scan.injected_artifact_count,
+                    scan.total_artifact_count,
+                    node_id,
+                    scan.risk_level,
+                    scan.patterns_matched,
+                )
+                return scan.sanitized_artifacts
 
         return artifacts
 
