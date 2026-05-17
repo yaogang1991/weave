@@ -90,45 +90,71 @@ class SessionStore:
         )
 
         for event in events:
-            self._apply_event(state, event)
+            state = self._apply_event(state, event)
 
         return state
 
-    def _apply_event(self, state: SessionState, event: Event) -> None:
+    def _apply_event(self, state: SessionState, event: Event) -> SessionState:
+        """Apply event and return a new SessionState (immutable)."""
+        updates: dict = {}
+
         if event.type == EventType.SESSION_START:
-            state.status = "running"
+            updates["status"] = "running"
         elif event.type == EventType.SESSION_IDLE:
-            state.status = "idle"
+            updates["status"] = "idle"
         elif event.type == EventType.SESSION_END:
-            state.status = "completed"
+            updates["status"] = "completed"
         elif event.type == EventType.SESSION_ERROR:
-            state.status = "error"
-            state.metrics.errors.append(event.payload.get("error", "Unknown"))
+            updates["status"] = "error"
+            new_errors = list(state.metrics.errors) + [
+                event.payload.get("error", "Unknown")
+            ]
+            updates["metrics"] = state.metrics.model_copy(
+                update={"errors": new_errors}
+            )
         elif event.type == EventType.WORKFLOW_STAGE_START:
-            state.current_stage = event.payload.get("stage_name")
-            state.status = "running"
+            updates["current_stage"] = event.payload.get("stage_name")
+            updates["status"] = "running"
         elif event.type == EventType.WORKFLOW_STAGE_END:
             stage_name = event.payload.get("stage_name")
-            if stage_name and stage_name not in state.stages_completed:
-                state.stages_completed.append(stage_name)
-            state.current_stage = None
-            state.status = "idle"
+            new_completed = list(state.stages_completed)
+            if stage_name and stage_name not in new_completed:
+                new_completed.append(stage_name)
+            updates["stages_completed"] = new_completed
+            updates["current_stage"] = None
+            updates["status"] = "idle"
         elif event.type == EventType.AGENT_MESSAGE:
             msg = AgentMessage(**event.payload)
-            state.context_window.append(msg)
-            # Trim context window
+            new_window = list(state.context_window) + [msg]
             max_ctx = 50  # configurable
-            if len(state.context_window) > max_ctx:
-                state.context_window = state.context_window[-max_ctx:]
+            if len(new_window) > max_ctx:
+                new_window = new_window[-max_ctx:]
+            updates["context_window"] = new_window
         elif event.type == EventType.AGENT_TOOL_USE:
-            state.metrics.total_tool_calls += 1
+            updates["metrics"] = state.metrics.model_copy(
+                update={"total_tool_calls": state.metrics.total_tool_calls + 1}
+            )
         elif event.type == EventType.TOOL_EXEC_END:
-            state.metrics.total_duration_ms += event.payload.get("duration_ms", 0)
+            updates["metrics"] = state.metrics.model_copy(
+                update={
+                    "total_duration_ms": (
+                        state.metrics.total_duration_ms
+                        + event.payload.get("duration_ms", 0)
+                    )
+                }
+            )
         elif event.type == EventType.EVAL_RESULT:
             if not event.payload.get("passed", False):
-                state.metrics.errors.append(
+                new_errors = list(state.metrics.errors) + [
                     f"Stage {state.current_stage} failed eval"
+                ]
+                updates["metrics"] = state.metrics.model_copy(
+                    update={"errors": new_errors}
                 )
+
+        if not updates:
+            return state
+        return state.model_copy(update=updates)
 
     def list_sessions(self) -> list[str]:
         return [f.stem for f in self.base_path.glob("*.jsonl")]
