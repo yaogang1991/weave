@@ -13,8 +13,31 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 import logging
+import warnings
 
 logger = logging.getLogger(__name__)
+
+
+def _get_non_interactive_env() -> str:
+    """Read non-interactive env var with backwards compatibility (#543).
+
+    Supports both WEAVE_NON_INTERACTIVE (current) and
+    HARNESS_NON_INTERACTIVE (deprecated). Emits DeprecationWarning
+    when only the old name is set.
+    """
+    new_val = os.environ.get("WEAVE_NON_INTERACTIVE")
+    old_val = os.environ.get("HARNESS_NON_INTERACTIVE")
+
+    if new_val is not None:
+        return new_val
+    if old_val is not None:
+        warnings.warn(
+            "HARNESS_NON_INTERACTIVE is deprecated, use WEAVE_NON_INTERACTIVE",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return old_val
+    return ""
 
 
 def _load_claude_settings() -> dict[str, str]:
@@ -396,7 +419,7 @@ class WeaveConfig(BaseModel):
 
     # M1.1: Non-interactive mode configuration
     non_interactive: bool = Field(
-        default_factory=lambda: os.getenv("WEAVE_NON_INTERACTIVE", "").lower()
+        default_factory=lambda: _get_non_interactive_env().lower()
         in ("true", "1", "yes")
     )
     approval_timeout_sec: int = Field(
@@ -521,7 +544,7 @@ class WeaveConfig(BaseModel):
             artifact_path=os.getenv("WEAVE_ARTIFACT_PATH", "./data/artifacts"),
             agent_timeout=int(os.getenv("WEAVE_AGENT_TIMEOUT", "300")),
             max_context_tokens=int(os.getenv("WEAVE_MAX_CONTEXT_TOKENS", "100000")),
-            non_interactive=os.getenv("WEAVE_NON_INTERACTIVE", "").lower()
+            non_interactive=_get_non_interactive_env().lower()
             in ("true", "1", "yes"),
             approval_timeout_sec=int(os.getenv("WEAVE_APPROVAL_TIMEOUT_SEC", "300")),
             cleanup_policy=os.getenv("WEAVE_CLEANUP_POLICY", "on_success"),

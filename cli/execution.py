@@ -5,14 +5,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import os
 import sys
 import uuid
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.config import WeaveConfig
+from core.config import WeaveConfig, _get_non_interactive_env
 from core.models import DAG, DAGNode, EventType
 from core.exceptions import PendingApprovalError
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
@@ -201,7 +200,7 @@ def _build_guardrails(args, tool_registry: ToolRegistry) -> Guardrails:
     """Create guardrails based on CLI args."""
     non_interactive = (
         getattr(args, "non_interactive", False)
-        or os.getenv("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+        or _get_non_interactive_env().lower() in ("true", "1", "yes")
     )
     if non_interactive:
         policy = GuardrailPolicy(

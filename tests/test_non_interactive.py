@@ -165,6 +165,50 @@ class TestWeaveConfigFromEnv:
             assert config.approval_timeout_sec == 120
 
 
+class TestHarnessBackwardsCompat:
+    """HARNESS_NON_INTERACTIVE still works with deprecation warning (#543)."""
+
+    def test_harness_env_var_works(self):
+        """HARNESS_NON_INTERACTIVE=true sets non_interactive=True."""
+        with patch.dict(os.environ, {
+            "HARNESS_NON_INTERACTIVE": "true",
+        }, clear=False):
+            # Remove WEAVE_NON_INTERACTIVE if present
+            os.environ.pop("WEAVE_NON_INTERACTIVE", None)
+            import warnings
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                config = WeaveConfig()
+                assert config.non_interactive is True
+                # Should emit DeprecationWarning
+                dep_warnings = [
+                    x for x in w if issubclass(x.category, DeprecationWarning)
+                ]
+                assert len(dep_warnings) == 1
+                assert "HARNESS_NON_INTERACTIVE" in str(dep_warnings[0].message)
+
+    def test_weave_env_var_takes_precedence(self):
+        """WEAVE_NON_INTERACTIVE takes precedence over HARNESS_NON_INTERACTIVE."""
+        with patch.dict(os.environ, {
+            "WEAVE_NON_INTERACTIVE": "false",
+            "HARNESS_NON_INTERACTIVE": "true",
+        }):
+            config = WeaveConfig()
+            assert config.non_interactive is False
+
+    def test_from_env_harness_backwards_compat(self):
+        """from_env() also supports HARNESS_NON_INTERACTIVE."""
+        with patch.dict(os.environ, {
+            "HARNESS_NON_INTERACTIVE": "true",
+        }, clear=False):
+            os.environ.pop("WEAVE_NON_INTERACTIVE", None)
+            import warnings
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                config = WeaveConfig.from_env()
+                assert config.non_interactive is True
+
+
 # ---------------------------------------------------------------------------
 # PersonalGuardrails — non-interactive evaluate
 # ---------------------------------------------------------------------------
