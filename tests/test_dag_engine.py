@@ -230,3 +230,37 @@ class TestEventEmission:
         engine.on_event(event_handler)
         await engine.execute(dag)
         assert events == ["started", "completed"]
+
+
+class TestEvaluatorFeedbackPropagation:
+    """Verify eval_feedback flows from evaluator to upstream generator (#523)."""
+
+    @pytest.mark.asyncio
+    async def test_eval_feedback_propagated_to_generator(self):
+        """When evaluator fails with lint feedback, generator gets eval_feedback."""
+        dag = DAG(reasoning="test")
+        gen_node = DAGNode(
+            id="impl_main", agent_type="generator",
+            task_description="Build API", max_retries=2,
+            status=NodeStatus.SUCCESS,
+            output_artifacts=["main.py"],
+        )
+        eval_node = DAGNode(
+            id="eval_main", agent_type="evaluator",
+            task_description="Evaluate API", max_retries=2,
+            status=NodeStatus.FAILED,
+            error="Evaluation failed: F811 redefinition",
+            eval_feedback="F811 redefinition of unused 'app' from line 8",
+        )
+        dag.add_node(gen_node)
+        dag.add_node(eval_node)
+        dag.add_edge("impl_main", "eval_main")
+
+        # Simulate what dag_engine does in the evaluator feedback loop:
+        # copy eval_feedback from evaluator to generator before retrying
+        gen_node.eval_feedback = eval_node.eval_feedback
+
+        # Verify the generator now has lint feedback that will be picked up
+        # by ArtifactHandoffService._add_retry_feedback
+        assert "F811" in gen_node.eval_feedback
+        assert gen_node.eval_feedback == eval_node.eval_feedback

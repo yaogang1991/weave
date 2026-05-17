@@ -436,7 +436,7 @@ class DAGExecutionEngine:
                                             details={
                                                 "reason": "evaluator_failed",
                                                 "evaluator": failed_id,
-                                                "feedback": node.eval_feedback[:1000],
+                                                "feedback": node.eval_feedback[:3000],
                                             },
                                         ))
                                         # Retry generator with feedback.
@@ -445,6 +445,7 @@ class DAGExecutionEngine:
                                         gen_node.retry_count = gen_node.max_retries - 1
                                         gen_node.status = NodeStatus.RETRYING
                                         gen_node.error = ""
+                                        gen_node.eval_feedback = node.eval_feedback
                                         await self._node_executor.execute_node(dag, target_id)
 
                                         if self._is_terminal_success(dag.nodes[target_id].status):

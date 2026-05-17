@@ -251,6 +251,25 @@ class ArtifactHandoffService:
                 "4. If re-exports are needed, use lazy imports: "
                 "def __getattr__(name): ...\n"
             )
+        if _has_lint_error(feedback):
+            naming_guidance += (
+                "\nLINT ERROR DETECTED: Your code has flake8 "
+                "lint errors.\n"
+                "1. READ the specific error codes and line numbers "
+                "in the feedback above\n"
+                "2. Use the EDIT tool to fix ONLY the reported "
+                "issues — do NOT rewrite entire files\n"
+                "3. Common fixes:\n"
+                "   - F811 (redefinition): Remove the duplicate "
+                "definition, keep only one\n"
+                "   - F401 (unused import): Remove the unused "
+                "import line\n"
+                "   - E302/E303 (blank lines): Add/remove "
+                "blank lines as specified\n"
+                "   - E501 (line too long): Break long lines\n"
+                "4. After editing, verify: flake8 --max-line-length=100 "
+                "<file>\n"
+            )
 
         retry_hint = (
             f"RETRY ATTEMPT #{node.retry_count}: Your previous "
@@ -360,3 +379,9 @@ def _has_init_import_error(feedback: str) -> bool:
         "__init__" in feedback
         and ("import_check" in feedback or "ImportError" in feedback)
     )
+
+
+def _has_lint_error(feedback: str) -> bool:
+    """Detect lint errors (flake8 codes like F811, F401, E302, etc.)."""
+    import re
+    return bool(re.search(r"\b[FWE]\d{3}\b", feedback))
