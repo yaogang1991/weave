@@ -43,7 +43,7 @@ class TestAutoflakeTracking:
                 return r
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint([str(f)], tmp_path)
 
         assert engine._last_autofixed == ["mod.py"]
@@ -64,7 +64,7 @@ class TestAutoflakeTracking:
             r.stderr = ""
             return r
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint([str(f)], tmp_path)
 
         assert engine._last_autofixed == []
@@ -91,7 +91,7 @@ class TestAutoflakeTracking:
                 return r
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint([str(f)], tmp_path)
 
         assert engine._last_autofixed == []
@@ -126,7 +126,7 @@ class TestAutoflakeTracking:
                 return r
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint([str(f)], tmp_path)
 
         assert not passed
@@ -154,7 +154,7 @@ class TestAutoflakeTracking:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run_change):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run_change):
             engine._run_lint([str(f1)], tmp_path)
         assert engine._last_autofixed == ["a.py"]
 
@@ -165,7 +165,7 @@ class TestAutoflakeTracking:
         def fake_run_noop(cmd, **kwargs):
             return MagicMock(returncode=0, stdout="", stderr="")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run_noop):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run_noop):
             engine._run_lint([str(f2)], tmp_path)
         assert engine._last_autofixed == []
 
@@ -194,7 +194,7 @@ class TestAutofixEventEmission:
         from core.models import SuccessCriterion, CriterionType
         crit = SuccessCriterion(type=CriterionType.LINT, description="lint check")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine.evaluate_stage(
                 session_id="test-session",
                 stage_name="test-stage",
@@ -227,7 +227,7 @@ class TestAutofixEventEmission:
         from core.models import SuccessCriterion, CriterionType
         crit = SuccessCriterion(type=CriterionType.LINT, description="lint check")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine.evaluate_stage(
                 session_id="test-session",
                 stage_name="test-stage",

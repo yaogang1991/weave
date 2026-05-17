@@ -73,7 +73,7 @@ class TestFindTestFiles:
 class TestTestScopingIntegration:
     """Integration tests that pytest is scoped to relevant files."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_tests_pass_scoped_to_artifact_tests(self, mock_run, tmp_path):
         """_check_criterion for TESTS_PASS passes scoped test paths to _run_tests."""
         (tmp_path / "tests").mkdir()

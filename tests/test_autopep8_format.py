@@ -41,7 +41,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -63,7 +63,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -84,7 +84,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -105,7 +105,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -131,7 +131,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine._run_lint(["target.py"], tmp_path)
 
         assert order == ["autoflake", "autopep8", "flake8"]
@@ -156,7 +156,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -187,7 +187,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine._run_lint(["pkg/a.py", "a.py"], tmp_path)
 
         assert sorted(engine._last_auto_formatted) == ["a.py", "pkg/a.py"]
@@ -212,7 +212,7 @@ class TestAutopep8Format:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine._run_lint(["target.py"], tmp_path)
 
 

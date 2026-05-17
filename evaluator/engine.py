@@ -13,9 +13,6 @@ runs a fixed ``python -m pytest`` via subprocess with shell=False.
 from __future__ import annotations
 
 import logging
-import re
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -26,9 +23,26 @@ from core.models import (
     EventType,
     SuccessCriterion,
 )
-from evaluator.compat import normalize_criteria, parse_string_criterion
-from evaluator.lint.parser import LintIssue, parse_flake8_output, get_changed_lines
+from evaluator.artifact import resolve_artifact_path, scope_artifacts_to_criteria
+from evaluator.compat import normalize_criteria
+from evaluator.lint.parser import LintIssue, parse_flake8_output  # noqa: F401 — backward compat
 from evaluator.models import CheckResult, CheckSeverity, EvaluationContext
+from evaluator.runner import (
+    auto_fix_unused,
+    auto_format_apply,
+    check_coverage,
+    check_files_exist,
+    check_files_exist_loose,
+    check_no_critical,
+    detect_shadowing_test_inits,
+    extract_percentage,
+    find_test_files,
+    import_smoke_test,
+    isolated_env,
+    run_lint,
+    run_tests,
+    safe_eval_id,
+)
 from session.store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -44,8 +58,7 @@ class EvaluatorEngine:
     """
 
     # Hard criteria that can never be downgraded from FAIL to WARN,
-    # even when the overall score meets pass_threshold.  These represent
-    # fundamental correctness checks that must always pass (#194 review).
+    # even when the overall score meets pass_threshold.
     HARD_CRITERIA: set[CriterionType] = {
         CriterionType.FILE_EXISTS,
         CriterionType.FILE_PATTERN,
@@ -62,9 +75,6 @@ class EvaluatorEngine:
     ):
         self.session_store = session_store
         self.auto_format_before_eval = auto_format_before_eval
-        # When set, score >= threshold means overall pass even if some
-        # criteria fail (reported as WARNING instead of FAIL).  None = strict
-        # mode (all criteria must pass, same as before #194).
         if pass_threshold is not None:
             if pass_threshold <= 0:
                 raise ValueError(
@@ -103,11 +113,7 @@ class EvaluatorEngine:
         criterion_type: CriterionType,
         checker: Any,
     ) -> None:
-        """Register a pluggable criterion checker (#178).
-
-        When a checker is registered for a CriterionType, it takes priority
-        over the built-in dispatch in _check_criterion.
-        """
+        """Register a pluggable criterion checker (#178)."""
         self._checkers[criterion_type] = checker
 
     def _try_registered_checker(
@@ -115,11 +121,7 @@ class EvaluatorEngine:
         crit: SuccessCriterion,
         context: EvaluationContext,
     ) -> tuple[bool, str, bool] | None:
-        """Dispatch to a registered checker if one exists for this type.
-
-        Returns the 3-tuple (passed, msg, was_auto) if a checker handled it,
-        or None if no checker is registered for this criterion type.
-        """
+        """Dispatch to a registered checker if one exists for this type."""
         checker = self._checkers.get(crit.type)
         if checker is None:
             return None
@@ -149,19 +151,13 @@ class EvaluatorEngine:
 
         structured = normalize_criteria(criteria)
 
-        # Scope artifacts to node-owned files (#320, #395).
-        # When success_criteria specify exact files (file_exists) or patterns
-        # (file_pattern), only lint/check those files — not files created by
-        # sibling generator nodes running in parallel.  Additionally, when
-        # owned_files is provided, use it to filter artifacts that the node
-        # is not responsible for (#395).
-        output_artifacts = self._scope_artifacts_to_criteria(
+        output_artifacts = scope_artifacts_to_criteria(
             output_artifacts, structured, Path(eval_dir) if eval_dir else None,
             owned_files=owned_files,
         )
 
         results: dict[str] = {}
-        hard_labels: set[str] = set()  # labels for hard (non-overrideable) criteria
+        hard_labels: set[str] = set()
         score = 0.0
         feedback_parts: list[str] = []
         uncheckable: list[str] = []
@@ -183,25 +179,16 @@ class EvaluatorEngine:
         all_auto_passed = all(results.values())
         has_uncheckable = len(uncheckable) > 0
 
-        # Threshold-based passing (#194):
-        # When pass_threshold is set, score >= threshold allows overall pass
-        # even if some auto-checked criteria fail.  Failed criteria are
-        # reported as WARNING instead of FAIL.
-        # Hard criteria (FILE_EXISTS, TESTS_PASS, PATTERN_PRESENT) can never
-        # be overridden — if any hard criterion fails, overall result is FAIL.
+        # Threshold-based passing (#194)
         failed_auto = [
             label for label, ok in results.items() if not ok
         ]
         failed_hard = [label for label in failed_auto if label in hard_labels]
-        threshold_pass = False  # Track whether pass is via threshold override
+        threshold_pass = False
         if self.pass_threshold is not None and not all_auto_passed:
-            # Hard criteria veto threshold override
             if failed_hard:
                 overall_passed = False
             elif score >= self.pass_threshold:
-                # Downgrade SOFT failed criteria from FAIL to WARN in feedback.
-                # Hard criteria failures are left as FAIL (should not happen here
-                # since failed_hard check above would have caught them).
                 soft_failed = [l for l in failed_auto if l not in hard_labels]
                 feedback_parts_new: list[str] = []
                 for part in feedback_parts:
@@ -219,18 +206,13 @@ class EvaluatorEngine:
         else:
             overall_passed = all_auto_passed
 
-        # Mandatory artifact verification (#234): verify output_artifacts
-        # actually exist on disk. Prevents false positives when a generator
-        # reports creating files that were never actually written.
-        # Uses loose path resolution (#375) to match FileExistsChecker's
-        # stem-based glob fallback — avoids false FAIL when the generator
-        # writes to a slightly different path than reported in artifacts.
+        # Mandatory artifact verification (#234)
         if output_artifacts and eval_dir:
             eval_root = Path(eval_dir)
             phantom = []
             resolved_artifacts = []
             for art in output_artifacts:
-                resolved = self._resolve_artifact_path(art, eval_root)
+                resolved = resolve_artifact_path(art, eval_root)
                 if resolved is None:
                     phantom.append(art)
                 else:
@@ -243,14 +225,9 @@ class EvaluatorEngine:
                     f"artifact(s) not found on disk: {phantom}"
                 )
             elif resolved_artifacts != list(output_artifacts):
-                # Update artifacts with resolved paths so downstream checks
-                # (import smoke test, etc.) use the correct filesystem paths.
                 output_artifacts = resolved_artifacts
 
-        # Zero-output guard (#372): generator with empty artifacts must fail
-        # when FILE_EXISTS criteria are present, regardless of individual
-        # criterion results (which may pass vacuously with no files to check).
-        # Only triggers on explicit empty list (not None which means untracked).
+        # Zero-output guard (#372)
         if (output_artifacts is not None
                 and len(output_artifacts) == 0
                 and any(
@@ -263,12 +240,9 @@ class EvaluatorEngine:
                 "but FILE_EXISTS criteria present"
             )
 
-        # Import smoke test (#344): try importing each generated .py source
-        # file to catch ImportError, NameError, and SyntaxError that flake8
-        # misses (e.g., hallucinated stdlib function arguments that only fail
-        # at runtime).  Only checks source files, not test files.
+        # Import smoke test (#344)
         if output_artifacts and eval_dir:
-            import_errors = self._import_smoke_test(
+            import_errors = import_smoke_test(
                 output_artifacts, Path(eval_dir),
             )
             if import_errors:
@@ -344,216 +318,8 @@ class EvaluatorEngine:
         return result
 
     # ------------------------------------------------------------------
-    # Import smoke test (#344)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _import_smoke_test(
-        artifacts: list[str],
-        eval_dir: Path,
-    ) -> list[tuple[str, str]]:
-        """Try importing each generated .py source file.
-
-        Returns a list of (file_path, error_message) for files that fail
-        to import.  Only checks source files (skips test files and
-        non-Python files).  Catches ImportError, NameError, SyntaxError,
-        and other module-load-time failures that flake8 cannot detect.
-        """
-        errors: list[tuple[str, str]] = []
-        for art in artifacts:
-            p = Path(art)
-            if p.suffix != ".py":
-                continue
-            # Skip test files — they may have test-specific imports.
-            # Only check directory parts for "tests"/"test" dirs, and
-            # the filename for "test_" prefix.  Do NOT match directory
-            # names starting with "test_" (e.g., pytest's tmp_path).
-            parts = p.parts
-            if (
-                any(part in ("tests", "test") for part in parts[:-1])
-                or p.name.startswith("test_")
-            ):
-                continue
-            full = p if p.is_absolute() else eval_dir / p
-            if not full.is_file():
-                continue
-            # Convert file path to module path: a/b/c.py → a.b.c
-            rel = p if not p.is_absolute() else p.relative_to(eval_dir)
-            module = str(rel.with_suffix("")).replace("/", ".").replace(
-                "\\", ".",
-            )
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-c", f"import {module}"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    cwd=str(eval_dir),
-                )
-                if result.returncode != 0:
-                    err = result.stderr.strip().split("\n")[-1]
-                    errors.append((art, err))
-            except subprocess.TimeoutExpired:
-                errors.append((art, "import timed out (10s)"))
-            except Exception as exc:
-                errors.append((art, str(exc)))
-        return errors
-
-    # ------------------------------------------------------------------
     # Dispatch — returns 3-tuple (passed, msg, was_auto)
     # ------------------------------------------------------------------
-
-    # ------------------------------------------------------------------
-    # Artifact path resolution (#375)
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _resolve_artifact_path(
-        artifact: str,
-        eval_root: Path,
-    ) -> Path | None:
-        """Resolve an artifact path on disk, using loose fallback.
-
-        Mirrors the resolution logic in FileExistsChecker._check_file_exists
-        to avoid false mismatches between FILE_EXISTS criteria (which use
-        stem-based glob fallback) and artifact_verification (which previously
-        only checked exact paths).
-
-        Returns the resolved absolute Path, or None if not found.
-        """
-        p = Path(artifact)
-        full = p if p.is_absolute() else eval_root / p
-
-        # Exact match
-        if full.is_file():
-            return full
-
-        # Fallback: loose glob by stem (mirrors FileExistsChecker)
-        stem = p.stem
-        if stem and len(stem) >= 3:
-            matches = list(eval_root.glob(f"**/*{stem}*"))
-            matches = [m for m in matches if m.is_file()]
-            if matches:
-                return matches[0]
-
-        return None
-
-    @staticmethod
-    def _scope_artifacts_to_criteria(
-        output_artifacts: list[str] | None,
-        criteria: list[SuccessCriterion],
-        work_dir: Path | None,
-        owned_files: list[str] | None = None,
-    ) -> list[str] | None:
-        """Filter output_artifacts to only files the node is supposed to own.
-
-        When success_criteria include file_exists or file_pattern entries,
-        only return artifacts matching those specifications. This prevents
-        cross-node lint contamination when parallel generator nodes share
-        the same workspace (#320).
-
-        When owned_files is provided, artifacts are further filtered to only
-        include files the node is responsible for, preventing cross-node lint
-        pollution (#395).
-
-        If no file-based criteria exist and owned_files is not provided,
-        return artifacts unchanged.
-        """
-        if not output_artifacts:
-            return output_artifacts
-
-        # Filter by owned_files first (#395): when the DAG node declares
-        # which files it owns, remove any artifact not in that list.  This
-        # prevents cross-node lint pollution where evaluator flags lint in
-        # files created by sibling generator nodes.
-        if owned_files:
-            owned_set = set(owned_files)
-            filtered = []
-            for art in output_artifacts:
-                art_rel = art
-                if work_dir:
-                    try:
-                        p = Path(art)
-                        if p.is_absolute():
-                            art_rel = str(p.relative_to(work_dir))
-                    except ValueError:
-                        pass
-                if any(
-                    art_rel == own
-                    or art_rel.endswith("/" + own)
-                    or own.endswith("/" + art_rel)
-                    for own in owned_set
-                ):
-                    filtered.append(art)
-            if filtered:
-                if len(filtered) < len(output_artifacts):
-                    logger.info(
-                        "Scoped artifacts from %d to %d based on owned_files (#395)",
-                        len(output_artifacts), len(filtered),
-                    )
-                output_artifacts = filtered
-            else:
-                # owned_files didn't match any artifact — keep originals
-                # to avoid false negatives when owned_files is stale
-                pass
-
-        # Collect expected file paths/patterns from criteria
-        expected_paths: list[str] = []
-        expected_patterns: list[str] = []
-        for crit in criteria:
-            if crit.type == CriterionType.FILE_EXISTS and crit.path:
-                expected_paths.append(crit.path)
-            elif crit.type == CriterionType.FILE_PATTERN and crit.pattern:
-                expected_patterns.append(crit.pattern)
-
-        # No file-based criteria → no scoping possible, return as-is
-        if not expected_paths and not expected_patterns:
-            return output_artifacts
-
-        # Expand patterns to concrete file matches
-        expected_files: set[str] = set(expected_paths)
-        if expected_patterns and work_dir:
-            for pattern in expected_patterns:
-                for match in work_dir.glob(pattern):
-                    if match.is_file():
-                        try:
-                            expected_files.add(str(match.relative_to(work_dir)))
-                        except ValueError:
-                            expected_files.add(str(match))
-
-        # Filter artifacts to only expected files
-        scoped = []
-        for art in output_artifacts:
-            # Normalize: try relative path
-            art_rel = art
-            if work_dir:
-                try:
-                    p = Path(art)
-                    if p.is_absolute():
-                        art_rel = str(p.relative_to(work_dir))
-                except ValueError:
-                    pass
-            # Match against expected files (prefix match for directories)
-            for expected in expected_files:
-                if art_rel == expected or art_rel.endswith("/" + expected) or expected.endswith("/" + art_rel):
-                    scoped.append(art)
-                    break
-            else:
-                # Also check if artifact is directly in expected_paths
-                if art in expected_paths or any(art.endswith("/" + e) for e in expected_paths):
-                    scoped.append(art)
-
-        if scoped:
-            if len(scoped) < len(output_artifacts):
-                logger.info(
-                    "Scoped artifacts from %d to %d based on criteria (#320)",
-                    len(output_artifacts), len(scoped),
-                )
-            return scoped
-
-        # If scoping removed everything (e.g. patterns don't match yet),
-        # fall back to original artifacts to avoid false negatives
-        return output_artifacts
 
     def _check_criterion(
         self,
@@ -577,21 +343,26 @@ class EvaluatorEngine:
             if crit.test_path:
                 test_targets = crit.test_path
             elif output_artifacts:
-                test_targets = self._find_test_files(output_artifacts, Path(work_dir))
+                test_targets = find_test_files(output_artifacts, Path(work_dir))
             if not test_targets:
                 return True, (
                     "No test files found to run — tests not verified. "
                     "Consider adding test files or adjusting criteria."
                 ), False
-            passed, msg = self._run_tests(Path(work_dir), test_targets, eval_id)
+            passed, msg = run_tests(Path(work_dir), test_targets, eval_id)
             return passed, msg, True
 
         if crit.type == CriterionType.LINT:
             if not output_artifacts:
                 return True, "No files to lint (passed by default)", True
-            passed, msg = self._run_lint(output_artifacts, Path(work_dir))
+            passed, msg, autofixed, formatted, new_issues, all_issues = run_lint(
+                output_artifacts, Path(work_dir), self.auto_format_before_eval,
+            )
+            self._last_autofixed = autofixed
+            self._last_auto_formatted = formatted
+            self._last_lint_new_issues = new_issues
+            self._last_lint_all_issues = all_issues
             # When no linter is available, treat as uncheckable (WARN)
-            # rather than hard FAIL — missing tool != bad code (#200).
             if not passed and "No linter available" in msg:
                 return True, (
                     f"Lint skipped: {msg}. "
@@ -601,641 +372,85 @@ class EvaluatorEngine:
 
         if crit.type == CriterionType.COVERAGE:
             target = int(crit.target) if crit.target else 80
-            return self._check_coverage(
+            return check_coverage(
                 Path(work_dir), target, output_artifacts, eval_id,
             )
 
         if crit.type == CriterionType.NO_CRITICAL:
-            passed, msg = self._check_no_critical(Path(work_dir), output_artifacts)
+            passed, msg = check_no_critical(Path(work_dir), output_artifacts)
             return passed, msg, True
 
-        # CUSTOM + any unknown type → pass with warning (manual review recommended)
+        # CUSTOM + any unknown type -> pass with warning
         return True, (
             f"Cannot auto-verify: {crit.description}. "
             f"Assumed passed — manual review recommended."
         ), False
 
     # ------------------------------------------------------------------
-    # Internal checkers — all return 2-tuple (bool, str)
+    # Backward-compat static/instance methods that delegate to runner
     # ------------------------------------------------------------------
+
     @staticmethod
     def _safe_eval_id(eval_id: str) -> str:
-        """Sanitize eval_id for use as a filename component."""
-        import re as _re
-        return _re.sub(r"[^a-zA-Z0-9_\-]", "_", eval_id)
+        return safe_eval_id(eval_id)
 
     def _isolated_env(self, eval_id: str = "", work_dir: Path | None = None) -> dict[str, str]:
-        """Build env with a unique COVERAGE_FILE to prevent parallel node contention (#260).
+        return isolated_env(eval_id, work_dir)
 
-        Uses an absolute path so that coverage data is written to the work
-        directory regardless of the subprocess cwd.
-        """
-        import os
-        env = os.environ.copy()
-        if eval_id:
-            safe_id = self._safe_eval_id(eval_id)
-            if work_dir:
-                env["COVERAGE_FILE"] = str(work_dir / f".coverage.{safe_id}")
-            else:
-                env["COVERAGE_FILE"] = f".coverage.{safe_id}"
-        return env
-
-    def _find_test_files(
-        self,
-        output_artifacts: list[str],
-        work_dir: Path,
-    ) -> list[str]:
-        """Find test files relevant to the current artifacts.
-
-        1. Test files already in output_artifacts.
-        2. Test files matching source artifact names (e.g. parser.py → test_parser.py).
-        This prevents pytest from collecting leftover test files from previous runs (#249).
-        """
-        test_files: list[str] = []
-
-        # Direct test files from artifacts
-        for a in output_artifacts:
-            name = Path(a).name.lower()
-            if "test" in name and name.endswith(".py"):
-                full = work_dir / a if not Path(a).is_absolute() else Path(a)
-                if full.exists():
-                    test_files.append(a)
-
-        # Infer test files from source artifact stems
-        source_stems: list[str] = []
-        for a in output_artifacts:
-            name = Path(a).name
-            lower = name.lower()
-            if lower.endswith(".py") and "test" not in lower:
-                source_stems.append(Path(a).stem)
-
-        if source_stems:
-            # Search for test files in common locations
-            search_dirs = [work_dir, work_dir / "tests"]
-            for search_dir in search_dirs:
-                if not search_dir.is_dir():
-                    continue
-                for tf in search_dir.glob("test_*.py"):
-                    stem = tf.stem  # e.g. "test_parser"
-                    module_name = stem[5:]  # strip "test_"
-                    if module_name in source_stems:
-                        rel = str(tf.relative_to(work_dir)) if tf.is_relative_to(work_dir) else str(tf)
-                        if rel not in test_files:
-                            test_files.append(rel)
-
-        return test_files
+    def _find_test_files(self, output_artifacts: list[str], work_dir: Path) -> list[str]:
+        return find_test_files(output_artifacts, work_dir)
 
     def _run_tests(self, work_dir: Path, test_path: str | list[str] | None = None, eval_id: str = "") -> tuple[bool, str]:
-        """Run pytest with a fixed command. Never executes arbitrary commands."""
-        # Detect __init__.py in test subdirs that shadow project packages (#221).
-        # Report as diagnostic warning rather than deleting files.
-        shadow_warnings = self._detect_shadowing_test_inits(work_dir)
-        try:
-            cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
-            if test_path:
-                if isinstance(test_path, list):
-                    cmd.extend(str(work_dir / t) if not Path(t).is_absolute() else t for t in test_path)
-                else:
-                    cmd.append(test_path)
-            result = subprocess.run(
-                cmd,
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace",
-                timeout=60,
-                cwd=str(work_dir) if work_dir.is_dir() else None,
-                env=self._isolated_env(eval_id, work_dir),
-            )
-            passed = result.returncode == 0
-            if passed:
-                if shadow_warnings:
-                    return passed, (
-                        "Tests passed\n\nWARNING: Shadowing test __init__.py files detected "
-                        "(may cause ModuleNotFoundError):\n"
-                        + "\n".join(f"  - {w}" for w in shadow_warnings)
-                    )
-                return passed, "Tests passed"
-            # Extract specific failure lines for actionable feedback
-            failure_lines = []
-            for line in result.stdout.split("\n"):
-                if any(kw in line for kw in ("FAILED", "AssertionError", "Error:", "error")):
-                    failure_lines.append(line)
-            detail = "\n".join(failure_lines[-20:]) if failure_lines else result.stdout[-500:]
-            msg = f"Tests failed:\n{detail}"
-            if shadow_warnings:
-                msg += (
-                    "\n\nWARNING: Shadowing test __init__.py files detected "
-                    "(may cause ModuleNotFoundError):\n"
-                    + "\n".join(f"  - {w}" for w in shadow_warnings)
-                )
-            return passed, msg
-        except subprocess.TimeoutExpired:
-            return False, (
-                "Tests timed out after 60s — likely a background thread or process leak. "
-                "Ensure all threads use daemon=True and add proper cleanup in test teardown "
-                "(e.g. @pytest.fixture with yield + stop() call)."
-            )
-        except FileNotFoundError:
-            return False, "pytest not installed"
-        except Exception as e:
-            return False, f"Test execution error: {e}"
+        return run_tests(work_dir, test_path, eval_id)
 
     @staticmethod
     def _detect_shadowing_test_inits(work_dir: Path) -> list[str]:
-        """Detect __init__.py in tests/<pkg>/ that shadows root <pkg>/ (#221).
-
-        Returns a list of diagnostic messages instead of deleting files.
-        Generator agents sometimes create ``tests/configlib/__init__.py``
-        which shadows the root ``configlib/`` package, causing
-        ModuleNotFoundError when pytest tries to import the package.
-        """
-        warnings: list[str] = []
-        tests_dir = work_dir / "tests"
-        if not tests_dir.is_dir():
-            return warnings
-        for init_file in tests_dir.glob("*/__init__.py"):
-            pkg_name = init_file.parent.name
-            root_pkg = work_dir / pkg_name / "__init__.py"
-            if root_pkg.is_file():
-                warnings.append(
-                    f"tests/{pkg_name}/__init__.py shadows root {pkg_name}/ package"
-                )
-                logger.warning(
-                    "Shadowing detected: tests/%s/__init__.py shadows %s/ package",
-                    pkg_name, pkg_name,
-                )
-        return warnings
+        return detect_shadowing_test_inits(work_dir)
 
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
-        """Dry-run autofix then delta-lint resolved target files.
-
-        Phase 1 (dry-run): detect auto-fixable issues (F401/F841, E501)
-        without modifying files in-place, avoiding cross-node corruption
-        when parallel DAG nodes share the same work directory (#159).
-
-        Phase 2 (verify): Run flake8, parse output into LintIssue list,
-        then use git diff to determine which lines the agent changed.
-        Only issues on changed lines count as failures (#150).
-
-        If git is not available, falls back to all issues → failure
-        (same as pre-#150 behavior).
-        """
-        self._last_autofixed = []
-        self._last_auto_formatted = []
-        self._last_lint_new_issues = []
-        self._last_lint_all_issues = []
-
-        resolved = []
-        for t in targets:
-            p = work_dir / t
-            if p.is_file() and p.suffix == ".py":
-                resolved.append(str(p))
-            elif p.is_dir():
-                for f in p.glob("*.py"):
-                    resolved.append(str(f))
-            elif Path(t).is_file() and Path(t).suffix == ".py":
-                resolved.append(str(Path(t)))
-        if not resolved:
-            return True, "No targets to lint"
-
-        # Auto-fix unused imports/variables via autoflake --in-place (#283).
-        # Previously used --check (dry-run only), which left F401 issues for
-        # the generator to fix on retry — but retries often reintroduce the
-        # same imports.  Fixing in-place before scoring eliminates this cycle.
-        autofix_suggestions: list[str] = []
-        autofixed_files = self._auto_fix_unused(resolved, work_dir)
-        self._last_autofixed = autofixed_files
-        if autofixed_files:
-            logger.info(
-                "autoflake removed unused imports from %d file(s): %s",
-                len(autofixed_files), autofixed_files,
-            )
-
-        # Apply autopep8 in-place formatting to fix whitespace issues
-        # (E203, E303, W291, W293, W605, E302) before flake8 runs.
-        # This eliminates ~80% of retry-causing formatting issues (#206).
-        formatted_files = self._auto_format_apply(resolved, work_dir)
-        self._last_auto_formatted = formatted_files
-        if formatted_files:
-            logger.info(
-                "autopep8 formatted %d file(s): %s",
-                len(formatted_files), formatted_files,
-            )
-
-        # Run flake8 (or ruff fallback)
-        lint_stdout = ""
-        try:
-            result = subprocess.run(
-                [sys.executable, "-m", "flake8"] + resolved
-                + ["--max-line-length=100"],
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=60,
-            )
-            lint_stdout = result.stdout
-        except FileNotFoundError:
-            try:
-                result = subprocess.run(
-                    ["ruff", "check"] + resolved,
-                    capture_output=True, text=True,
-                    encoding="utf-8", errors="replace", timeout=60,
-                )
-                lint_stdout = result.stdout
-            except FileNotFoundError:
-                return False, "No linter available (install flake8 or ruff)"
-        except Exception as e:
-            return False, f"Lint error: {e}"
-
-        if result.returncode == 0:
-            msg = "Lint clean"
-            if self._last_autofixed:
-                msg = (
-                    f"Autoflake auto-fixed: {', '.join(self._last_autofixed)}"
-                    f"\n{msg}"
-                )
-            if autofix_suggestions:
-                msg = (
-                    f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
-                    f"\n{msg}"
-                )
-            return True, msg
-
-        # Parse all lint issues
-        all_issues = parse_flake8_output(lint_stdout)
-        if not all_issues:
-            # Could not parse (unexpected format) — treat as before
-            msg = f"Lint issues:\n{lint_stdout[:500]}"
-            if self._last_autofixed:
-                msg = (
-                    f"Autoflake auto-fixed: {', '.join(self._last_autofixed)}"
-                    f"\n{msg}"
-                )
-            if autofix_suggestions:
-                msg = (
-                    f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
-                    f"\n{msg}"
-                )
-            self._last_lint_all_issues = []
-            self._last_lint_new_issues = []
-            return False, msg
-
-        # Delta lint: use git diff to find changed lines (#150)
-        rel_targets = []
-        for r in resolved:
-            try:
-                rel_targets.append(str(Path(r).relative_to(work_dir)))
-            except ValueError:
-                rel_targets.append(Path(r).name)
-
-        changed = get_changed_lines(rel_targets, work_dir)
-
-        # Store issues for regression tracking (#151)
-        self._last_lint_all_issues = [
-            f"{i.path}:{i.line}:{i.code}" for i in all_issues
-        ]
-
-        if changed:
-            # Only issues on changed lines are "new"
-            new_issues: list[LintIssue] = []
-            existing_issues: list[LintIssue] = []
-            for issue in all_issues:
-                issue_path = issue.path
-                # Normalize to relative for comparison
-                try:
-                    issue_path = str(
-                        Path(issue.path).relative_to(work_dir),
-                    )
-                except ValueError:
-                    pass
-                changed_lines = changed.get(issue_path, set())
-                if issue.line in changed_lines:
-                    new_issues.append(issue)
-                else:
-                    existing_issues.append(issue)
-
-            self._last_lint_new_issues = [
-                f"{i.path}:{i.line}:{i.code}" for i in new_issues
-            ]
-
-            if not new_issues:
-                msg = "Lint clean (all issues are pre-existing)"
-            else:
-                new_lines = [
-                    f"  - {i.path}:{i.line} {i.code} {i.message}"
-                    for i in new_issues
-                ]
-                msg = (
-                    f"Lint failed: {len(new_issues)} new issue(s)"
-                )
-                if existing_issues:
-                    msg += (
-                        f", {len(existing_issues)} existing ignored"
-                    )
-                msg += "\nNEW:\n" + "\n".join(new_lines)
-                if existing_issues:
-                    existing_lines = [
-                        f"  - {i.path}:{i.line} {i.code} {i.message}"
-                        for i in existing_issues[:10]
-                    ]
-                    msg += (
-                        "\nIGNORED_EXISTING:\n"
-                        + "\n".join(existing_lines)
-                    )
-                    if len(existing_issues) > 10:
-                        msg += (
-                            f"\n  ... and {len(existing_issues) - 10} more"
-                        )
-        else:
-            # No git diff available — all issues are potential failures
-            new_issues = all_issues
-            lines = [
-                f"  - {i.path}:{i.line} {i.code} {i.message}"
-                for i in all_issues
-            ]
-            msg = "Lint issues (delta unavailable):\n" + "\n".join(lines)
-            self._last_lint_new_issues = self._last_lint_all_issues
-
-        if autofix_suggestions:
-            msg = (
-                f"Autofix suggestions: {'; '.join(autofix_suggestions[:3])}"
-                f"\n{msg}"
-            )
-
-        if self._last_autofixed:
-            msg = (
-                f"Autoflake auto-fixed: {', '.join(self._last_autofixed)}"
-                f"\n{msg}"
-            )
-
-        return len(new_issues) == 0, msg
+        passed, msg, autofixed, formatted, new_issues, all_issues = run_lint(
+            targets, work_dir, self.auto_format_before_eval,
+        )
+        self._last_autofixed = autofixed
+        self._last_auto_formatted = formatted
+        self._last_lint_new_issues = new_issues
+        self._last_lint_all_issues = all_issues
+        return passed, msg
 
     def _auto_fix_unused(self, resolved: list[str], work_dir: Path) -> list[str]:
-        """Remove unused imports and variables via autoflake --in-place (#283).
-
-        Runs before autopep8 and flake8 so that trivial F401/F841 issues are
-        eliminated before scoring.  This prevents the retry loop where the
-        generator regenerates files with the same unused imports.
-
-        Returns list of relative paths of files that were actually modified.
-        Silently skips if autoflake is not installed or times out.
-        """
-        if not resolved:
-            return []
-
-        before: dict[str, str] = {}
-        for fpath in resolved:
-            try:
-                before[fpath] = Path(fpath).read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                pass
-
-        try:
-            subprocess.run(
-                [
-                    sys.executable, "-m", "autoflake",
-                    "--in-place",
-                    "--remove-all-unused-imports",
-                    "--remove-unused-variables",
-                ] + resolved,
-                capture_output=True, text=True, timeout=30,
-            )
-        except FileNotFoundError:
-            logger.debug("autoflake not installed, skipping unused import fix")
-            return []
-        except subprocess.TimeoutExpired:
-            logger.warning("autoflake timed out, skipping unused import fix")
-            return []
-        except Exception as exc:
-            logger.warning("autoflake error: %s", exc)
-            return []
-
-        changed: list[str] = []
-        for fpath, content_before in before.items():
-            try:
-                content_after = Path(fpath).read_text(encoding="utf-8", errors="replace")
-                if content_after != content_before:
-                    try:
-                        rel = str(Path(fpath).relative_to(work_dir))
-                    except ValueError:
-                        rel = Path(fpath).name
-                    changed.append(rel)
-            except OSError:
-                pass
-        return changed
+        return auto_fix_unused(resolved, work_dir)
 
     def _auto_format_apply(self, resolved: list[str], work_dir: Path) -> list[str]:
-        """Apply autopep8 in-place formatting to fix whitespace issues (#206).
-
-        Runs before flake8 so that auto-fixable formatting errors (E203, E303,
-        W291, W293, W605, E302) are eliminated, preventing unnecessary
-        retries.  Only targets files in the resolved list (current node's
-        files), making it safe for parallel DAG execution.
-
-        Returns list of relative paths of files that were actually modified.
-        Silently skips if autopep8 is not installed or times out.
-        Disabled by default; requires auto_format_before_eval=True.
-        """
-        if not self.auto_format_before_eval or not resolved:
-            return []
-
-        before: dict[str, str] = {}
-        for fpath in resolved:
-            try:
-                before[fpath] = Path(fpath).read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                pass
-
-        try:
-            result = subprocess.run(
-                [
-                    sys.executable, "-m", "autopep8",
-                    "--in-place",
-                    "--select=E203,E303,W291,W293,W605,E302",
-                ] + resolved,
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode != 0:
-                logger.debug(
-                    "autopep8 skipped (rc=%d): %s",
-                    result.returncode, result.stderr[-500:],
-                )
-                return []
-        except FileNotFoundError:
-            logger.debug("autopep8 not installed, skipping auto-format")
-            return []
-        except subprocess.TimeoutExpired:
-            logger.warning("autopep8 timed out, skipping auto-format")
-            return []
-        except Exception as exc:
-            logger.warning("autopep8 error: %s", exc)
-            return []
-
-        changed: list[str] = []
-        for fpath, content_before in before.items():
-            try:
-                content_after = Path(fpath).read_text(encoding="utf-8", errors="replace")
-                if content_after != content_before:
-                    try:
-                        rel = str(Path(fpath).relative_to(work_dir))
-                    except ValueError:
-                        rel = Path(fpath).name
-                    changed.append(rel)
-            except OSError:
-                pass
-        return changed
+        return auto_format_apply(resolved, work_dir, self.auto_format_before_eval)
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
-        missing = [f for f in files if not (base / f).exists()]
-        passed = len(missing) == 0
-        return passed, f"Missing: {missing}" if missing else "All required files present"
+        return check_files_exist(files, base)
 
     def _check_files_exist_loose(self, patterns: list[str], base: Path) -> tuple[bool, str]:
-        """Loose file matching: exact, glob by name, or substring match."""
-        missing = []
-        for pattern in patterns:
-            # 1. Exact match
-            if (base / pattern).exists():
-                continue
-            # 2. Glob by filename
-            name = Path(pattern).name
-            if list(base.glob(f"**/{name}")):
-                continue
-            # 3. Substring match (without extension)
-            stem = Path(pattern).stem
-            if len(stem) >= 3 and list(base.glob(f"**/*{stem}*")):
-                continue
-            missing.append(pattern)
-        passed = len(missing) == 0
-        return passed, f"Missing: {missing}" if missing else "Required files found (loose match)"
+        return check_files_exist_loose(patterns, base)
 
-    def _check_coverage(
-        self,
-        work_dir: Path,
-        target: int,
-        output_artifacts: list[str] | None = None,
-        eval_id: str = "",
-    ) -> tuple[bool, str, bool]:
-        """Check test coverage against target percentage.
-
-        Returns (passed, message, was_auto_verified).
-        When coverage output cannot be parsed, returns was_auto_verified=False
-        so the caller emits WARN instead of PASS (#152).
-        """
-        try:
-            cmd = [
-                sys.executable, "-m", "pytest", "-v",
-                "--tb=short", "--cov-report=term-missing",
-            ]
-
-            # Scope test collection to relevant test files only (#249).
-            # Without this, pytest collects leftover test files from previous
-            # runs that import modules no longer in the workspace.
-            test_targets: list[str] | None = None
-            if output_artifacts:
-                test_targets = self._find_test_files(output_artifacts, work_dir)
-
-            if not test_targets and output_artifacts:
-                return (
-                    False,
-                    "No test files found for coverage check — "
-                    "cannot verify coverage without scoped tests.",
-                    False,
-                )
-
-            if test_targets:
-                for t in test_targets:
-                    p = Path(t)
-                    cmd.append(str(work_dir / p) if not p.is_absolute() else str(p))
-
-            # Limit coverage scope to packages inferred from output artifacts
-            if output_artifacts:
-                cov_targets = set()
-                for a in output_artifacts:
-                    parts = Path(a).parts
-                    if len(parts) > 1:
-                        cov_targets.add(str(Path(*parts[:2])))
-                if cov_targets:
-                    for t in cov_targets:
-                        cmd.append(f"--cov={t}")
-                else:
-                    # No package-level targets found; scope to work_dir
-                    cmd.append(f"--cov={work_dir}")
-            else:
-                # output_artifacts empty: run tests without coverage to avoid
-                # scanning historical files that may have import errors (#165).
-                cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
-
-            result = subprocess.run(
-                cmd,
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=60,
-                cwd=str(work_dir) if work_dir.is_dir() else None,
-                env=self._isolated_env(eval_id, work_dir),
-            )
-
-            # Parse TOTAL line via regex — handles both compact and wide formats:
-            #   TOTAL  123  4  97%
-            #   TOTAL  123  4  5  97.5%
-            for line in result.stdout.split("\n"):
-                stripped = line.strip()
-                if stripped.startswith("TOTAL"):
-                    m = re.search(r"(\d+(?:\.\d+)?)%", stripped)
-                    if m:
-                        cov = float(m.group(1))
-                        return (
-                            cov >= target,
-                            f"Coverage: {cov}% (target: {target}%)",
-                            True,
-                        )
-
-            # Could not parse TOTAL line — coverage target is unverifiable.
-            # Return was_auto_verified=False so evaluate_stage emits WARN
-            # instead of PASS/FAIL (see #152).
-            stdout_tail = result.stdout[-500:] if result.stdout else ""
-            stderr_tail = result.stderr[-500:] if result.stderr else ""
-            if result.returncode == 0:
-                if not output_artifacts:
-                    return True, (
-                        f"Coverage could not be verified: no output_artifacts "
-                        f"to scope coverage. Tests passed but coverage target "
-                        f"{target}% was not verified."
-                    ), False
-                return True, (
-                    f"Coverage could not be parsed; tests passed but coverage "
-                    f"target {target}% was not verified. "
-                    f"stdout_tail=...{stdout_tail} "
-                    f"stderr_tail=...{stderr_tail}"
-                ), False
-            return False, (
-                f"Tests failed and coverage report could not be parsed. "
-                f"stdout_tail=...{stdout_tail} "
-                f"stderr_tail=...{stderr_tail}"
-            ), True
-        except subprocess.TimeoutExpired:
-            return False, (
-                "Coverage check timed out after 60s — likely a background thread leak. "
-                "Use daemon threads and proper test teardown."
-            ), True
-        except Exception as e:
-            return False, f"Coverage check error: {e}", True
+    def _check_coverage(self, work_dir: Path, target: int, output_artifacts: list[str] | None = None, eval_id: str = "") -> tuple[bool, str, bool]:
+        return check_coverage(work_dir, target, output_artifacts, eval_id)
 
     def _check_no_critical(self, path: Path, artifacts: list[str] | None = None) -> tuple[bool, str]:
-        targets = artifacts or []
-        if not targets:
-            return True, "No artifacts to check"
-        issues = []
-        for fname in targets:
-            fpath = path / fname
-            if not fpath.exists():
-                continue
-            try:
-                content = fpath.read_text(encoding="utf-8", errors="replace")
-                for marker in ["TODO", "FIXME", "XXX", "HACK"]:
-                    if marker in content:
-                        issues.append(f"{fname}: {marker}")
-            except Exception:
-                pass
-        passed = len(issues) == 0
-        return passed, f"Found markers: {issues}" if issues else "No critical markers found"
+        return check_no_critical(path, artifacts)
 
     def _extract_percentage(self, text: str) -> int | None:
-        match = re.search(r'(\d+)%', text)
-        return int(match.group(1)) if match else None
+        return extract_percentage(text)
+
+    @staticmethod
+    def _import_smoke_test(artifacts: list[str], eval_dir: Path) -> list[tuple[str, str]]:
+        return import_smoke_test(artifacts, eval_dir)
+
+    @staticmethod
+    def _resolve_artifact_path(artifact: str, eval_root: Path) -> Path | None:
+        return resolve_artifact_path(artifact, eval_root)
+
+    @staticmethod
+    def _scope_artifacts_to_criteria(
+        output_artifacts: list[str] | None,
+        criteria: list[SuccessCriterion],
+        work_dir: Path | None,
+        owned_files: list[str] | None = None,
+    ) -> list[str] | None:
+        return scope_artifacts_to_criteria(output_artifacts, criteria, work_dir, owned_files)

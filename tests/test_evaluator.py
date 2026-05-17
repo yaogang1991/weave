@@ -36,14 +36,14 @@ class TestCriterionChecking:
         assert evaluator._extract_percentage("no percentage here") is None
         assert evaluator._extract_percentage("need 95% coverage") == 95
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_tests_pass(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="2 passed")
         passed, msg = evaluator._run_tests(tmp_path)
         assert passed
         assert "passed" in msg.lower()
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_tests_fail(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=1, stdout="1 failed")
         passed, msg = evaluator._run_tests(tmp_path)
@@ -51,7 +51,7 @@ class TestCriterionChecking:
 
     def test_tests_pass_uses_shell_false(self, evaluator, tmp_path):
         """Verify _run_tests never uses shell=True."""
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="ok")
             evaluator._run_tests(tmp_path)
             _, kwargs = mock_run.call_args
@@ -62,14 +62,14 @@ class TestCriterionChecking:
             assert args[1] == "-m"
             assert args[2] == "pytest"
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_lint_clean(self, mock_run, evaluator, tmp_path):
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.return_value = MagicMock(returncode=0, stdout="")
         passed, msg = evaluator._run_lint(["code.py"], tmp_path)
         assert passed
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_lint_dirty(self, mock_run, evaluator, tmp_path):
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.return_value = MagicMock(returncode=1, stdout="E501 line too long")
@@ -80,7 +80,7 @@ class TestCriterionChecking:
     def test_lint_uses_shell_false(self, evaluator, tmp_path):
         """Verify _run_lint never uses shell=True."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             evaluator._run_lint(["code.py"], tmp_path)
             args = mock_run.call_args[0][0]
@@ -92,7 +92,7 @@ class TestCriterionChecking:
         recursively scanning directories."""
         (tmp_path / "a.py").write_text("import os\n", encoding="utf-8")
         (tmp_path / "b.py").write_text("import sys\n", encoding="utf-8")
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             evaluator._run_lint(["a.py", "b.py"], tmp_path)
             calls = mock_run.call_args_list
@@ -107,7 +107,7 @@ class TestCriterionChecking:
     def test_lint_continues_without_autoflake(self, evaluator, tmp_path):
         """If autoflake is not installed (FileNotFoundError), flake8 still runs."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             # autoflake → not found, autopep8 → not found, flake8 → success
             mock_run.side_effect = [
                 FileNotFoundError("autoflake not found"),
@@ -121,7 +121,7 @@ class TestCriterionChecking:
     def test_lint_autoflake_error_still_runs_flake8(self, evaluator, tmp_path):
         """If autoflake raises an unexpected error, flake8 still runs."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.side_effect = [
                 RuntimeError("autoflake crashed"),
                 RuntimeError("autopep8 crashed"),
@@ -134,7 +134,7 @@ class TestCriterionChecking:
     def test_lint_autoflake_then_flake8_on_same_targets(self, evaluator, tmp_path):
         """Autoflake in-place and flake8 verify the same resolved files (#283)."""
         (tmp_path / "code.py").write_text("import os\n", encoding="utf-8")
-        with patch("evaluator.engine.subprocess.run") as mock_run:
+        with patch("evaluator.runner.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="")
             evaluator._run_lint(["code.py"], tmp_path)
             calls = mock_run.call_args_list
@@ -195,7 +195,7 @@ class TestCriterionChecking:
         )
         assert result.passed
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_coverage_no_total_line_fails(self, mock_run, evaluator, tmp_path):
         """If pytest returns 0 but stdout has no TOTAL line, coverage is
         unverifiable — returns auto=False so evaluate_stage emits WARN (#152)."""
@@ -210,7 +210,7 @@ class TestCriterionChecking:
 
 
 class TestEvaluateStage:
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_all_pass(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="OK\nTOTAL    100%")
         result = evaluator.evaluate_stage(
@@ -220,7 +220,7 @@ class TestEvaluateStage:
         assert result.passed
         assert result.score > 0
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_coverage_unparseable_emits_warn_not_pass(self, mock_run, evaluator, tmp_path):
         """Coverage parse failure should produce WARN, not PASS (#152)."""
         mock_run.return_value = MagicMock(
@@ -255,7 +255,7 @@ class TestEvaluateStage:
         assert result.passed
         assert "manual review" in result.feedback.lower()
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_mix_pass_and_uncheckable(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="OK")
         result = evaluator.evaluate_stage(
@@ -328,7 +328,7 @@ class TestShadowInitDetection:
         warnings = EvaluatorEngine._detect_shadowing_test_inits(tmp_path)
         assert warnings == []
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_shadowing_warning_in_test_failure_feedback(self, mock_run, evaluator, tmp_path):
         """Shadowing diagnostic is appended to test failure feedback."""
         # Set up shadowing structure
@@ -347,7 +347,7 @@ class TestShadowInitDetection:
         # File must still exist — no deletion
         assert shadow_file.exists()
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_shadowing_warning_in_test_pass_feedback(self, mock_run, evaluator, tmp_path):
         """Shadowing diagnostic is included even when tests pass."""
         (tmp_path / "configlib").mkdir()

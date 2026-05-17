@@ -147,7 +147,7 @@ class TestFilePatternSemantics:
 class TestTestsPassSemantics:
     """TESTS_PASS: pytest execution against scoped test files."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_pass_all_tests_pass(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=0, stdout="2 passed")
         r = evaluator.evaluate_stage("s1", "impl", [
@@ -155,7 +155,7 @@ class TestTestsPassSemantics:
         ], str(tmp_path))
         assert r.passed
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_fail_tests_fail(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(returncode=1,
                                           stdout="FAILED test_x - AssertionError")
@@ -175,7 +175,7 @@ class TestTestsPassSemantics:
         assert r.passed
         assert "WARN" in r.feedback
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_timeout_actionable_feedback(self, mock_run, evaluator, tmp_path):
         import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="pytest", timeout=60)
@@ -303,7 +303,7 @@ class TestTestFileExistsSemantics:
 class TestCoverageSemantics:
     """COVERAGE: test coverage percentage target check."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_pass_above_target(self, mock_run, evaluator, tmp_path):
         _file(tmp_path / "test_app.py")
         _file(tmp_path / "app.py")
@@ -317,7 +317,7 @@ class TestCoverageSemantics:
         ], str(tmp_path), output_artifacts=["app.py"])
         assert r.passed
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_fail_below_target(self, mock_run, evaluator, tmp_path):
         mock_run.return_value = MagicMock(
             returncode=0,
@@ -345,7 +345,7 @@ class TestCoverageSemantics:
 class TestLintSemantics:
     """LINT: no new lint issues on changed lines."""
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_pass_clean(self, mock_run, evaluator, tmp_path):
         _file(tmp_path / "app.py", "x = 1\n")
         mock_run.return_value = MagicMock(returncode=0, stdout="")
@@ -360,7 +360,7 @@ class TestLintSemantics:
         ], str(tmp_path), output_artifacts=[])
         assert r.passed
 
-    @patch("evaluator.engine.subprocess.run")
+    @patch("evaluator.runner.subprocess.run")
     def test_warn_no_linter_available(self, mock_run, evaluator, tmp_path):
         """No flake8/ruff → WARN (not hard FAIL)."""
         _file(tmp_path / "app.py")
@@ -636,7 +636,7 @@ class TestFalseFailPrevention:
                 return MagicMock(returncode=0, stdout="", stderr="")
             raise FileNotFoundError("no flake8")
 
-        with patch("evaluator.engine.subprocess.run", side_effect=_mock_run):
+        with patch("evaluator.runner.subprocess.run", side_effect=_mock_run):
             r = ev.evaluate_stage("s1", "impl", [
                 SuccessCriterion(type=CriterionType.LINT, description="lint"),
             ], str(tmp_path), output_artifacts=["app.py"])
