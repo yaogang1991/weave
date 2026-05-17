@@ -52,19 +52,17 @@ class ToolRegistry:
         self._tools: dict[str, Callable] = {}
         self._schemas: dict[str, dict] = {}
         self.sandbox_runner: ToolCommandRunner | None = sandbox_runner
-        self.base_cwd = Path(base_cwd).resolve() if base_cwd else None
+        self.base_cwd = Path(base_cwd).resolve() if base_cwd else Path.cwd().resolve()
         self._ownership_context: dict[str, list[str]] | None = None  # owned/forbidden/shared
         self._register_builtin_tools()
 
     def _resolve_path(self, file_path: str) -> Path:
         """Resolve path relative to configured base working directory.
 
-        When base_cwd is set, enforces containment: resolved path must
-        stay under base_cwd to prevent escape from the backend workspace.
+        Always enforces containment: resolved path must stay under
+        base_cwd to prevent path traversal (#500).
         """
         path = Path(file_path)
-        if self.base_cwd is None:
-            return path if path.is_absolute() else path.resolve()
         resolved = (self.base_cwd / path).resolve()
         if not (resolved == self.base_cwd or self.base_cwd in resolved.parents):
             raise ValueError(f"Path escapes workspace: {file_path}")
@@ -352,7 +350,7 @@ class ToolRegistry:
 
     def _resolve_safe_cwd(self, requested_cwd: str | None = None) -> Path:
         """Resolve and validate cwd within project root."""
-        project_root = self.base_cwd.resolve() if self.base_cwd else Path.cwd().resolve()
+        project_root = self.base_cwd.resolve()
         if requested_cwd:
             # Resolve relative paths against project_root, not process cwd
             req = Path(requested_cwd).expanduser()
@@ -812,7 +810,7 @@ class ToolRegistry:
                 encoding="utf-8",
                 errors="replace",
                 timeout=60,
-                cwd=str(self.base_cwd) if self.base_cwd else None,
+                cwd=str(self.base_cwd),
             )
             output = result.stdout
             if result.stderr:
