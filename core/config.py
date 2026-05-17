@@ -366,6 +366,9 @@ class NodeTimeoutConfig(BaseModel):
             "generator": int(os.getenv(
                 "WEAVE_NODE_TIMEOUT_GENERATOR", "600",
             )),
+            "evaluator": int(os.getenv(
+                "WEAVE_NODE_TIMEOUT_EVALUATOR", "480",
+            )),
         },
         description="Per-agent-type timeout overrides (agent_type -> seconds)",
     )
