@@ -24,4 +24,5 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "asyncio: mark async tests",
+    "integration: real LLM API call tests (run with -m integration)",
 ]
