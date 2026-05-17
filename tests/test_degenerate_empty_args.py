@@ -206,3 +206,49 @@ def test_degenerate_constant_value():
 
     assert DEGENERATE_CALL_LIMIT == 3
     assert DEGENERATE_CALL_LIMIT < EMPTY_TOOL_CALL_LIMIT
+
+
+def test_empty_args_skips_llm_retries():
+    """Completely empty args {} skip the 3× LLM retry cycle (#541).
+
+    Without the fix, each iteration would try up to 4 LLM calls
+    (1 initial + 3 retries). With the fix, empty-args responses
+    break out of the retry loop immediately, so each iteration
+    only makes 1 LLM call.
+    """
+    from agent.worker import DEGENERATE_CALL_LIMIT, EMPTY_CALL_MAX_RETRIES
+
+    worker = _make_worker()
+    worker.llm = MagicMock()
+
+    empty_response = {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [_empty_args_write_call()],
+    }
+    worker.llm.call.return_value = empty_response
+
+    tool_executor = MagicMock()
+
+    list(worker.run(
+        session_id="test",
+        system_prompt="You are a test agent.",
+        user_message="Write hello.py",
+        tools=[{"name": "write", "type": "function", "function": {}}],
+        tool_executor=tool_executor,
+        max_iterations=50,
+    ))
+
+    call_count = len(worker.llm.call.call_args_list)
+    # With early termination, each iteration makes only 1 LLM call
+    # (not EMPTY_CALL_MAX_RETRIES + 1 = 4). Total calls should be
+    # close to DEGENERATE_CALL_LIMIT (3 iterations × 1 call each).
+    # Allow some margin for boundary effects.
+    max_expected = DEGENERATE_CALL_LIMIT + 2
+    assert call_count <= max_expected, (
+        f"Expected ~{DEGENERATE_CALL_LIMIT} LLM calls with early termination, "
+        f"got {call_count} (retries not being skipped?)"
+    )
+    # Without the fix, would be ~(DEGENERATE_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1))
+    # = 3 * 4 = 12 calls
+    assert EMPTY_CALL_MAX_RETRIES == 3  # sanity check
