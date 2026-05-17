@@ -104,6 +104,7 @@ class MemoryManager:
         self.store = MemoryStore(config.base_path)
         self.session_store = session_store
         self._session_id = session_id
+        self._embedding_provider = self._init_embedding_provider(config)
 
     def _emit_event(self, event_type: str, payload: dict[str, Any]) -> None:
         """Emit an event to the session store if available."""
@@ -114,6 +115,19 @@ class MemoryManager:
                     self.session_store.emit_event(sid, event_type, payload)
             except Exception as e:
                 logger.debug("Failed to emit memory event: %s", e)
+
+    @staticmethod
+    def _init_embedding_provider(config: Any) -> Any | None:
+        """Create embedding provider from config (#508 P2)."""
+        if not getattr(config, "semantic_search_enabled", False):
+            return None
+        try:
+            from memory.embedding import create_embedding_provider
+            provider_type = getattr(config, "embedding_provider", "local_hash")
+            return create_embedding_provider(provider_type)
+        except Exception as e:
+            logger.debug("Embedding provider init failed: %s", e)
+            return None
 
     # -- Storing memories --
 
@@ -234,9 +248,31 @@ class MemoryManager:
         task_description: str,
         session_id: str | None = None,
     ) -> list[MemoryEntry]:
-        """Retrieve relevant memories for an agent and task."""
-        # Fetch more than needed so task-specific re-ranking has a bigger pool
+        """Retrieve relevant memories for an agent and task.
+
+        Uses hybrid retrieval: semantic search (if embedding provider
+        available) combined with keyword-based relevance scoring (#508 P2).
+        """
         fetch_limit = self.config.retrieval_limit * 3
+
+        # Semantic search path (#508 P2)
+        semantic_entries: dict[str, float] = {}
+        if self._embedding_provider and task_description:
+            try:
+                results = self.store.semantic_search(
+                    query=task_description,
+                    embedding_provider=self._embedding_provider,
+                    agent_type=agent_type,
+                    session_id=session_id,
+                    limit=fetch_limit,
+                    min_similarity=0.1,
+                )
+                for entry, score in results:
+                    semantic_entries[entry.id] = score
+            except Exception as e:
+                logger.debug("Semantic search failed, falling back to keyword: %s", e)
+
+        # Keyword-based retrieval
         entries = self.store.get_relevant(
             agent_type=agent_type,
             session_id=session_id,
@@ -248,9 +284,17 @@ class MemoryManager:
         now = datetime.now(timezone.utc)
         query_tokens = set(re.findall(r"\w+", task_description.lower()))
         for entry in entries:
-            entry.relevance_score = _compute_relevance(
+            keyword_score = _compute_relevance(
                 entry, query_tokens, now, self.config.decay_half_life_days,
             )
+            # Blend semantic and keyword scores (#508 P2)
+            sem_score = semantic_entries.get(entry.id, 0.0)
+            if semantic_entries:
+                # Weighted blend: 60% semantic, 40% keyword
+                entry.relevance_score = 0.6 * sem_score + 0.4 * keyword_score
+            else:
+                entry.relevance_score = keyword_score
+
             # Update access stats and persist
             entry.access_count += 1
             entry.last_accessed_at = now
