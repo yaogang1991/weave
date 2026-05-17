@@ -184,6 +184,79 @@ class TestDockerSandboxMVP:
         assert "python" in sandbox._image.lower()
 
 
+class TestDockerSandboxResourceLimits:
+    """Verify DockerSandbox includes resource limits in docker args (#483)."""
+
+    def test_default_memory_limit(self):
+        sandbox = DockerSandbox()
+        assert sandbox._memory_limit == "512m"
+
+    def test_default_cpu_limit(self):
+        sandbox = DockerSandbox()
+        assert sandbox._cpu_limit == 1.0
+
+    def test_custom_memory_limit(self):
+        sandbox = DockerSandbox(memory_limit="1g")
+        assert sandbox._memory_limit == "1g"
+
+    def test_custom_cpu_limit(self):
+        sandbox = DockerSandbox(cpu_limit=2.0)
+        assert sandbox._cpu_limit == 2.0
+
+    def test_build_docker_args_includes_memory(self):
+        """Docker args include --memory flag (#483)."""
+        sandbox = DockerSandbox(memory_limit="256m")
+        args = sandbox._build_docker_args("echo hi", "/workspace")
+        assert "--memory" in args
+        mem_idx = args.index("--memory")
+        assert args[mem_idx + 1] == "256m"
+
+    def test_build_docker_args_includes_cpus(self):
+        """Docker args include --cpus flag (#483)."""
+        sandbox = DockerSandbox(cpu_limit=0.5)
+        args = sandbox._build_docker_args("echo hi", "/workspace")
+        assert "--cpus" in args
+        cpus_idx = args.index("--cpus")
+        assert args[cpus_idx + 1] == "0.5"
+
+    def test_build_docker_args_includes_network_none(self):
+        """Docker args include --network none by default."""
+        sandbox = DockerSandbox()
+        args = sandbox._build_docker_args("echo hi", "/workspace")
+        net_idx = args.index("--network")
+        assert args[net_idx + 1] == "none"
+
+
+class TestBackendManagerSandboxConfig:
+    """Verify BackendManager passes config to DockerSandbox (#483)."""
+
+    def test_backend_manager_passes_sandbox_config(self):
+        """BackendManager passes sandbox_config to DockerSandbox."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.DOCKER,
+            sandbox_config={
+                "image": "python:3.11-slim",
+                "memory_limit": "1g",
+                "cpu_limit": 2.0,
+            },
+        )
+        assert isinstance(manager.sandbox, DockerSandbox)
+        assert manager.sandbox._image == "python:3.11-slim"
+        assert manager.sandbox._memory_limit == "1g"
+        assert manager.sandbox._cpu_limit == 2.0
+
+    def test_backend_manager_uses_defaults_without_config(self):
+        """BackendManager uses defaults when no sandbox_config provided."""
+        manager = BackendManager(
+            workspace=WorkspaceIsolation.LOCAL,
+            sandbox=ExecutionSandbox.DOCKER,
+        )
+        assert isinstance(manager.sandbox, DockerSandbox)
+        assert manager.sandbox._memory_limit == "512m"
+        assert manager.sandbox._cpu_limit == 1.0
+
+
 class TestSyncAdapterWithDockerSandbox:
     """Integration: SyncSandboxAdapter wrapping DockerSandbox."""
 

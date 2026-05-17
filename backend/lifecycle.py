@@ -68,6 +68,7 @@ class BackendManager:
         base_path: str = "./data/backends",
         workspace_by_risk: dict[str, str] | None = None,
         cleanup_policy: str = "on_success",
+        sandbox_config: dict | None = None,
     ):
         self.workspace_type = WorkspaceIsolation(workspace)
         self.sandbox_type = ExecutionSandbox(sandbox)
@@ -80,6 +81,7 @@ class BackendManager:
             "critical": "worktree",
         }
         self.cleanup_policy = cleanup_policy
+        self._sandbox_config = sandbox_config or {}
         _VALID_POLICIES = ("always", "on_success", "never")
         if self.cleanup_policy not in _VALID_POLICIES:
             raise ValueError(
@@ -114,7 +116,12 @@ class BackendManager:
         if self.sandbox_type == ExecutionSandbox.LOCAL:
             return LocalSandbox()
         elif self.sandbox_type == ExecutionSandbox.DOCKER:
-            return DockerSandbox()
+            return DockerSandbox(
+                image=self._sandbox_config.get("image", "python:3.12-slim"),
+                network_mode=self._sandbox_config.get("network_mode", "none"),
+                memory_limit=self._sandbox_config.get("memory_limit", "512m"),
+                cpu_limit=self._sandbox_config.get("cpu_limit", 1.0),
+            )
         else:
             raise ValueError(f"Unknown sandbox type: {self.sandbox_type}")
 

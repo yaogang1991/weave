@@ -1,0 +1,25 @@
+# Dockerfile.sandbox — Minimal execution environment for agent sandboxing (#483).
+#
+# Used by DockerSandbox to run agent subprocesses in isolated containers.
+# Provides Python 3.12 with common dev tools, no network access by default.
+#
+# Build: docker build -f Dockerfile.sandbox -t weave-sandbox .
+# Run (via DockerSandbox): docker run --rm --network none -v $(pwd):/workspace weave-sandbox
+
+FROM python:3.12-slim
+
+# Install common dev tools without network access at runtime
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for sandbox execution
+RUN useradd -m -s /bin/bash sandbox
+USER sandbox
+WORKDIR /workspace
+
+# Default command (overridden by DockerSandbox._build_docker_args)
+CMD ["bash"]

@@ -219,7 +219,7 @@ class LocalSandbox(SandboxProvider):
 
 
 class DockerSandbox(SandboxProvider):
-    """Execute commands in a Docker container (#179 PR4).
+    """Execute commands in a Docker container (#179 PR4, #483).
 
     Provides process, network, and filesystem isolation by running commands
     inside a Docker container with the workspace mounted as a volume.
@@ -228,6 +228,7 @@ class DockerSandbox(SandboxProvider):
     - network_mode=none (no network access)
     - Only workspace directory is mounted
     - No host environment variables leaked by default
+    - Resource limits enforced via --memory and --cpus (#483)
     """
 
     sandbox_type = ExecutionSandbox.DOCKER
@@ -236,9 +237,13 @@ class DockerSandbox(SandboxProvider):
         self,
         image: str = "python:3.12-slim",
         network_mode: str = "none",
+        memory_limit: str = "512m",
+        cpu_limit: float = 1.0,
     ) -> None:
         self._image = image
         self._network_mode = network_mode
+        self._memory_limit = memory_limit
+        self._cpu_limit = cpu_limit
 
     async def run_command(
         self,
@@ -297,11 +302,18 @@ class DockerSandbox(SandboxProvider):
         cwd: str,
         env: dict[str, str] | None = None,
     ) -> list[str]:
-        """Build the docker run argument list (no shell, no injection risk)."""
+        """Build the docker run argument list (no shell, no injection risk).
+
+        Includes resource limits from SandboxConfig (#483):
+        - --memory: OOM kill when exceeded
+        - --cpus: CPU time cap
+        """
         args = [
             "docker", "run", "--rm",
             "-v", f"{cwd}:/workspace",
             "--network", self._network_mode,
+            "--memory", self._memory_limit,
+            "--cpus", str(self._cpu_limit),
             "-w", "/workspace",
         ]
 
