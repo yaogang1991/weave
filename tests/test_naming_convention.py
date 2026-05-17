@@ -11,8 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from orchestrator.prompts import PromptRegistry
-from agent.agent_pool import WorkerAgent
+from orchestrator.prompts import PromptRegistry  # noqa: E402
+from agent.agent_pool import WorkerAgent  # noqa: E402
 
 
 class TestPlannerNamingConvention:

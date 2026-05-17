@@ -22,15 +22,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from control_plane.approval import ApprovalRepository
-from core.models import (
+from control_plane.approval import ApprovalRepository  # noqa: E402
+from core.models import (  # noqa: E402
     GuardrailPolicy,
     PermissionMode,
     PersonalGuardrailPolicy,
     RiskLevel,
     ToolResult,
 )
-from guardrails.policy import GuardrailResult, Guardrails, PersonalGuardrails
+from guardrails.policy import GuardrailResult, Guardrails, PersonalGuardrails  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

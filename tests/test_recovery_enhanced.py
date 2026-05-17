@@ -26,11 +26,11 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from control_plane.models import Job, JobStatus, Run, RunStatus, RetryPolicy
-from control_plane.repository import JobRepository
-from control_plane.approval import ApprovalRepository, ApprovalTicket, TicketStatus
-from control_plane.service import RunService
-from control_plane.worker import TaskWorker, WorkerConfig
+from control_plane.models import Job, JobStatus, Run, RunStatus, RetryPolicy  # noqa: E402
+from control_plane.repository import JobRepository  # noqa: E402
+from control_plane.approval import ApprovalRepository, ApprovalTicket, TicketStatus  # noqa: E402
+from control_plane.service import RunService  # noqa: E402
+from control_plane.worker import TaskWorker, WorkerConfig  # noqa: E402
 
 
 # =============================================================================

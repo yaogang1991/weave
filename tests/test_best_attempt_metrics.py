@@ -15,8 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.dag_engine import DAGExecutionEngine
-from core.models import (
+from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from core.models import (  # noqa: E402
     DAG,
     DAGNode,
     EvaluationResult,

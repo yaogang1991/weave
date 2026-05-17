@@ -20,14 +20,16 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from control_plane.models import JobStatus, Run, RunStatus
-from control_plane.repository import JobRepository
-from control_plane.approval import ApprovalRepository, ApprovalTicket, TicketStatus  # noqa: F401
-from control_plane.worker import TaskWorker
-from agent.agent_pool import WorkerAgent, AgentPool, ExecutionContext
-from core.config import LLMConfig
-from core.models import ToolResult, AgentCapability
-from guardrails.policy import Guardrails, GuardrailPolicy  # noqa: F401
+from control_plane.models import JobStatus, Run, RunStatus  # noqa: E402
+from control_plane.repository import JobRepository  # noqa: E402
+from control_plane.approval import (  # noqa: E402, F401
+    ApprovalRepository, ApprovalTicket, TicketStatus,
+)
+from control_plane.worker import TaskWorker  # noqa: E402
+from agent.agent_pool import WorkerAgent, AgentPool, ExecutionContext  # noqa: E402
+from core.config import LLMConfig  # noqa: E402
+from core.models import ToolResult, AgentCapability  # noqa: E402
+from guardrails.policy import Guardrails, GuardrailPolicy  # noqa: E402, F401
 
 
 # =============================================================================

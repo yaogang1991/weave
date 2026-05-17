@@ -36,10 +36,10 @@ sys.modules["anthropic"] = _mock_anthropic
 sys.modules["openai"] = _mock_openai
 
 # Now safe to import main
-import main as main_module
-import cli.approval as approval_module
-import cli.utils as utils_module
-from control_plane.approval import ApprovalRepository, ApprovalTicket, TicketStatus
+import main as main_module  # noqa: E402
+import cli.approval as approval_module  # noqa: E402
+import cli.utils as utils_module  # noqa: E402
+from control_plane.approval import ApprovalRepository, ApprovalTicket, TicketStatus  # noqa: E402
 
 
 # ------------------------------------------------------------------------------

@@ -19,11 +19,11 @@ import pytest
 # Ensure project root is on sys.path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from backend.base import WorkspaceIsolation, ExecutionSandbox
-from backend.local import LocalBackend
-from backend.worktree import WorktreeBackend
-from backend.lifecycle import BackendManager
-from backend.docker_stub import DockerBackend
+from backend.base import WorkspaceIsolation, ExecutionSandbox  # noqa: E402
+from backend.local import LocalBackend  # noqa: E402
+from backend.worktree import WorktreeBackend  # noqa: E402
+from backend.lifecycle import BackendManager  # noqa: E402
+from backend.docker_stub import DockerBackend  # noqa: E402
 
 
 # ============================================================================

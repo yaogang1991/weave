@@ -14,14 +14,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from control_plane.hooks import (
+from control_plane.hooks import (  # noqa: E402
     ExecutionContext,
     ExecutionHook,
     ImpactHook,
     LearningHook,
     MemoryHook,
 )
-from control_plane.service import RunService
+from control_plane.service import RunService  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

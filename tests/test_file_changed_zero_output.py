@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.models import CriterionType, DAGNode, SuccessCriterion
-from core.dag_engine import DAGExecutionEngine
+from core.models import CriterionType, DAGNode, SuccessCriterion  # noqa: E402
+from core.dag_engine import DAGExecutionEngine  # noqa: E402
 
 
 class TestRequiresOutputArtifacts:
