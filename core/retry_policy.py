@@ -172,10 +172,20 @@ class RetryPolicyEngine:
         work_dir: str,
         snapshot: dict[str, str],
     ) -> None:
-        """Restore files from a previous snapshot."""
+        """Restore files from a previous snapshot.
+
+        Creates a .bak backup of existing files before overwriting.
+        """
         for art, content in snapshot.items():
             path = os.path.join(work_dir, art)
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+            # Backup existing file before overwriting
+            if os.path.isfile(path):
+                backup_path = path + ".bak"
+                with open(path, "r", encoding="utf-8", errors="replace") as src:
+                    backup_content = src.read()
+                with open(backup_path, "w", encoding="utf-8") as dst:
+                    dst.write(backup_content)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(content)
 

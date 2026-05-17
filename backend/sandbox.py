@@ -64,13 +64,15 @@ class SandboxProvider(abc.ABC):
 class LocalSandbox(SandboxProvider):
     """Execute commands directly on the host (current default behavior).
 
-    Strips sensitive environment variables (API keys, tokens) from
-    subprocess env to prevent credential leakage from agent code (#456).
+    When env is None (default), builds a safe environment that strips
+    sensitive keys (API tokens, passwords). When env is explicitly passed,
+    uses it as-is — the caller is responsible for filtering.
+
     """
 
     sandbox_type = ExecutionSandbox.LOCAL
 
-    SENSITIVE_ENV_PATTERNS: tuple[str, ...] = (
+    SENSITIVE_ENV_PREFIXES: tuple[str, ...] = (
         "ANTHROPIC_",
         "OPENAI_",
         "AWS_",
@@ -79,25 +81,17 @@ class LocalSandbox(SandboxProvider):
         "PASSWORD",
         "TOKEN",
         "API_KEY",
-        "API_SECRET",
-        "PRIVATE_KEY",
     )
 
-    def _build_safe_env(self, env: dict[str, str] | None = None) -> dict[str, str]:
-        """Build environment dict without credentials.
+    def _build_safe_env(self) -> dict[str, str]:
+        """Build environment dict with sensitive keys removed."""
+        import os
 
-        If caller provides explicit env, return it unchanged (caller controls).
-        If env is None, build from os.environ with sensitive keys stripped.
-        Matches if any pattern appears as a prefix OR anywhere in the key name.
-        """
-        if env is not None:
-            return env
         return {
-            k: v for k, v in os.environ.items()
-            if not any(
-                k.upper().startswith(p) or p in k.upper()
-                for p in self.SENSITIVE_ENV_PATTERNS
-            )
+            k: v
+            for k, v in os.environ.items()
+            if not any(k.upper().startswith(p) for p in self.SENSITIVE_ENV_PREFIXES)
+
         }
 
     async def run_command(
@@ -111,6 +105,8 @@ class LocalSandbox(SandboxProvider):
         import asyncio
         import time
 
+        resolved_env = env if env is not None else self._build_safe_env()
+
         start = time.monotonic()
         try:
             proc = await asyncio.create_subprocess_shell(
@@ -118,7 +114,8 @@ class LocalSandbox(SandboxProvider):
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self._build_safe_env(env),
+                env=resolved_env,
+
             )
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
