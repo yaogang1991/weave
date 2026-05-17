@@ -4,9 +4,8 @@ Reporter: audit trail, progress tracking, and session reports.
 
 import json
 from pathlib import Path
-from typing import Any
 
-from core.models import EventType, SessionState
+from core.models import EventType
 from session.store import SessionStore
 
 

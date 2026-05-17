@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import signal
 import socket
 import sys
@@ -37,8 +36,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from control_plane.repository import JobRepository
 from control_plane.service import RunService
-from control_plane.models import Job, JobStatus, RunStatus
-from control_plane.approval import TicketStatus
+from control_plane.models import JobStatus
 from control_plane.worker_recovery import (
     _json_log,
     recover_orphan_jobs,
@@ -291,7 +289,6 @@ class TaskWorker:
         from pathlib import Path
 
         try:
-            from control_plane.models import JobStatus
             jobs = self.repository.list_jobs()
             for job in jobs:
                 if job.project_path and job.project_path not in self._config_mtimes:

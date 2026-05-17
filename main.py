@@ -36,7 +36,7 @@ from control_plane.approval import TicketStatus
 
 # Import CLI command handlers from domain modules
 from cli.execution import cmd_plan, cmd_execute, cmd_run, cmd_viz
-from cli.utils import (
+from cli.utils import (  # noqa: F401 — backward-compat re-exports used by tests
     _resolve_project_path,
     _check_dirty_workspace,
     _check_stdlib_shadowing,
@@ -46,7 +46,7 @@ from cli.jobs import (
     cmd_submit, cmd_status, cmd_list_jobs, cmd_cancel,
     cmd_worker, cmd_recover, cmd_console,
 )
-from control_plane.approval import ApprovalRepository as ApprovalRepository
+from control_plane.approval import ApprovalRepository as ApprovalRepository  # noqa: F401 — backward-compat re-export
 from cli.approval import cmd_tickets, cmd_approve, cmd_reject
 from cli.memory import (
     cmd_memory_search, cmd_memory_list, cmd_memory_stats,

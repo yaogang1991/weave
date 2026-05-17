@@ -149,7 +149,6 @@ class TemplateRegistry:
         variables: dict[str, str] | None = None,
     ) -> list[str]:
         """Check for unresolved {var} placeholders in the DAG. Returns warnings."""
-        import warnings
         warnings_list: list[str] = []
         text_fields: list[str] = []
 

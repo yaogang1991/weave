@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-from control_plane.models import Job, JobStatus, RunStatus
+from control_plane.models import JobStatus, RunStatus
 from control_plane.approval import TicketStatus
 from core.exceptions import PendingApprovalError
 

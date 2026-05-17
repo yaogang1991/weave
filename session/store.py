@@ -7,12 +7,10 @@ Inspired by Anthropic's Session design:
 """
 
 import json
-import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
 
-from core.models import Event, EventType, SessionState, AgentMessage, ToolCall
+from core.models import Event, EventType, SessionState, AgentMessage
 
 
 class SessionStore:

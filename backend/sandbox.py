@@ -13,7 +13,7 @@ operational scripts (npm install, pytest) that need access to the host.
 from __future__ import annotations
 
 import abc
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from backend.base import ExecutionSandbox
 

@@ -24,7 +24,6 @@ from __future__ import annotations
 import abc
 from enum import Enum
 from pathlib import Path
-from typing import Any
 
 
 class WorkspaceIsolation(str, Enum):

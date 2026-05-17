@@ -11,7 +11,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from core.config import HarnessConfig, LLMConfig
+from core.config import HarnessConfig
 from core.agent_registry import AgentRegistry
 from core.models import DAG, SuccessCriterion
 

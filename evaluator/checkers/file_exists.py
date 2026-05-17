@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 
 from core.models import CriterionType, SuccessCriterion
-from evaluator.models import CheckResult, CheckSeverity, EvaluationContext
+from evaluator.models import CheckResult, EvaluationContext
 
 logger = logging.getLogger(__name__)
 

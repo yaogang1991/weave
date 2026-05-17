@@ -16,12 +16,11 @@ import asyncio
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from backend.base import ExecutionBackend, WorkspaceIsolation, ExecutionSandbox
 from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
-from backend.sandbox import SandboxProvider, LocalSandbox, DockerSandbox, CommandResult
+from backend.sandbox import SandboxProvider, LocalSandbox, DockerSandbox
 
 
 @dataclass

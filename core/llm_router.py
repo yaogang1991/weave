@@ -11,7 +11,7 @@ import logging
 import os
 from typing import Any
 
-from core.config import LLMConfig, ModelRoute, ModelRoutingConfig, infer_provider
+from core.config import LLMConfig, ModelRoutingConfig, infer_provider
 from core.llm_client import LLMClient
 
 logger = logging.getLogger(__name__)

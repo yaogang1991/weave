@@ -12,13 +12,10 @@ Endpoints:
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 # Ensure project root is on path when running server directly
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -27,7 +24,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel as PydanticModel
 
 from visualizer.event_bridge import WebSocketEventBridge
@@ -311,7 +308,6 @@ async def api_cancel_job(job_id: str):
     try:
         job = repo.transition_job_status(job_id, JobStatus.CANCELED)
         # Cancel any in-flight run task
-        from control_plane.service import RunService
         # Access the global running tasks map if available
         # (workers register tasks via RunService._running_tasks)
         return {"job_id": job.id, "status": job.status.value, "message": "Job canceled"}
@@ -461,7 +457,7 @@ async def api_alerts():
     """Get active alerts."""
     job_repo = JobRepository()
     approval_repo = ApprovalRepository()
-    from monitoring.alerts import AlertManager, create_default_alerts
+    from monitoring.alerts import create_default_alerts
     manager = create_default_alerts(job_repo, approval_repo)
     return {"alerts": [a.__dict__ for a in manager.check_all()]}
 

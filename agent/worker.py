@@ -20,7 +20,7 @@ import logging
 import threading
 import uuid
 
-from core.models import AgentMessage, ToolCall, ToolResult, EventType
+from core.models import AgentMessage, ToolCall, EventType
 from core.config import LLMConfig
 from core.llm_client import LLMClient
 from session.store import SessionStore

@@ -36,7 +36,7 @@ from guardrails.policy import GuardrailPolicy
 from core.models import EventType
 from core.exceptions import PendingApprovalError
 
-from control_plane.models import Job, Run, JobStatus, RunStatus, RetryPolicy
+from control_plane.models import Job, Run, JobStatus, RetryPolicy
 from control_plane.repository import JobRepository
 from control_plane.run_lifecycle import RunLifecycleManager
 from control_plane.job_result import JobResultWriter

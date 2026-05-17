@@ -5,7 +5,6 @@ from __future__ import annotations
 import glob as glob_mod
 import json
 import os
-from pathlib import Path
 
 from core.config import HarnessConfig
 
