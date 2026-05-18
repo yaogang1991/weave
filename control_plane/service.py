@@ -33,14 +33,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from core.config import LLMConfig, WatchdogConfig  # noqa: E402
 from session.store import SessionStore  # noqa: E402
 from guardrails.policy import GuardrailPolicy  # noqa: E402
-from core.models import DAG, EventType  # noqa: E402
+from core.models import DAG, EventType, NodeStatus  # noqa: E402
 from core.exceptions import PendingApprovalError  # noqa: E402
 
 from control_plane.approval import ApprovalRepository  # noqa: E402
 from control_plane.models import Job, Run, JobStatus, RetryPolicy  # noqa: E402
 from control_plane.repository import JobRepository  # noqa: E402
 from control_plane.run_lifecycle import RunLifecycleManager  # noqa: E402
-from control_plane.job_result import JobResultWriter  # noqa: E402
 from control_plane.errors import classify_error  # noqa: E402
 from control_plane.execution_factory import ExecutionFactory  # noqa: E402
 from backend.lifecycle import BackendManager  # noqa: E402
@@ -112,6 +111,100 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _compute_summary(dag: DAG | None) -> dict[str, Any]:
+    """Compute DAG execution summary from node statuses.
+
+    Replaces the redundant engine re-creation that was previously used
+    solely to call ``engine.get_execution_summary()``.
+    """
+    if dag is None:
+        return {}
+    total = len(dag.nodes)
+    success = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SUCCESS)
+    partial_pass = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.PARTIAL_PASS)
+    warned = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.WARNED)
+    failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
+    skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
+    return {
+        "total_nodes": total,
+        "success": success,
+        "partial_pass": partial_pass,
+        "warned": warned,
+        "failed": failed,
+        "skipped": skipped,
+        "all_succeeded": failed == 0 and skipped == 0,
+        "node_details": {
+            nid: {
+                "status": n.status.value,
+                "agent": n.agent_type,
+                "duration_ms": (
+                    (n.completed_at - n.started_at).total_seconds() * 1000
+                    if n.completed_at and n.started_at else None
+                ),
+            }
+            for nid, n in dag.nodes.items()
+        },
+    }
+
+
+def _extract_dag_errors(dag: DAG | None) -> tuple[str, str]:
+    """Extract error message and category from failed DAG nodes."""
+    if dag is None:
+        return "", "unknown"
+    failed_nodes = [nid for nid, n in dag.nodes.items() if n.status == NodeStatus.FAILED]
+    if not failed_nodes:
+        return "", "unknown"
+    errors = [f"{nid}: {dag.nodes[nid].error}" for nid in failed_nodes]
+    error_msg = "; ".join(errors)
+    return error_msg, classify_error(error_msg)
+
+
+def _write_job_result(
+    artifact_path: str,
+    job: Job,
+    run: Run,
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    """Generate and write a standardized job_result.json artifact.
+
+    Inlined from JobResultWriter — the serialization is simple enough
+    to live as a module-level function.
+    """
+    result: dict[str, Any] = {
+        "job": {
+            "id": job.id,
+            "requirement": job.requirement,
+            "project_path": job.project_path,
+            "attempt": job.attempt,
+        },
+        "run": {
+            "id": run.id,
+            "session_id": run.session_id,
+            "status": run.status.value,
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+            "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        },
+        "dag": summary,
+        "approvals": [],
+        "artifacts": [],
+        "errors": [],
+        "timestamps": {
+            "created_at": job.created_at.isoformat(),
+            "updated_at": job.updated_at.isoformat(),
+        },
+    }
+    if job.last_error:
+        result["errors"].append({
+            "message": job.last_error,
+            "category": job.error_category,
+        })
+    artifact_dir = Path(artifact_path) / job.id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    with open(artifact_dir / "job_result.json", "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=2, default=str, ensure_ascii=False)
+    return result
+
+
 # ============================================================================
 # RunService
 # ============================================================================
@@ -170,7 +263,6 @@ class RunService:
 
         # Extracted collaborators (#177 PR 1)
         self._lifecycle = RunLifecycleManager(repository)
-        self._result_writer = JobResultWriter(artifact_path)
         # Extracted lifecycle manager (#177 PR6)
         self._job_lifecycle = JobLifecycleManager(
             repository=repository,
@@ -229,23 +321,20 @@ class RunService:
         Execute the full plan -> execute -> summary lifecycle for *job_id*.
 
         Flow:
-            1. Fetch job and transition status to RUNNING.
-            2. Create a session + Run record.
-            3. Plan DAG via IntelligentOrchestrator.
-            4. Execute DAG via DAGExecutionEngine (with timeout).
-            5. Update Run and Job records with final state.
-            6. On failure: apply RetryPolicy (retry via QUEUED or dead-letter).
-            7. Return the Run.
+            1. Fetch job and validate status.
+            2. Setup backend workspace and lifecycle hooks.
+            3. Plan + execute DAG (with timeout).
+            4. Resolve outcome via ``_resolve_run_outcome``.
+            5. Cleanup and write result artifact.
 
         Raises:
             ValueError: If the job does not exist.
+            PendingApprovalError: If approval is required mid-execution.
         """
         job = self.repository.get_job(job_id)
         if job is None:
             raise ValueError(f"Job not found: {job_id}")
 
-        # Worker is responsible for LEASED -> RUNNING transition.
-        # run_job() only executes jobs that are already RUNNING.
         if job.status != JobStatus.RUNNING:
             raise ValueError(
                 f"Expected job {job_id} to be RUNNING, got {job.status.value}"
@@ -255,222 +344,101 @@ class RunService:
         if current_task is not None:
             self._running_tasks[job_id] = current_task
 
-        # Create session
         session_id = str(uuid.uuid4())
         store = SessionStore(self.event_store_path)
         store.create_session(session_id, "weave_run")
-
-        # Create Run record
         run = self.repository.create_run(job_id, session_id)
-        work_dir: Path | None = None
-
-        # Resolve timeout
+        work_dir: str | None = None
         timeout: int = job.metadata.get("run_timeout_sec", 1800)
 
+        outcome = "failed"
+        result_dag: DAG | None = None
+        error_msg = ""
+        error_cat = ""
+        backend_manager: BackendManager | None = None
+        bls: Any = None  # BackendLifecycleService
+
         try:
-            # M2.2: Build BackendManager per-job so repo_root matches project_path
-            if not job.project_path:
-                raise ValueError(
-                    "project_path is required for job execution. "
-                    "Refusing to use cwd as target — agents may modify Weave itself. "
-                    "Submit jobs with --project /path/to/target."
+            # --- Determine outcome ---
+            try:
+                if not job.project_path:
+                    raise ValueError(
+                        "project_path is required for job execution. "
+                        "Refusing to use cwd as target — agents may modify Weave itself. "
+                        "Submit jobs with --project /path/to/target."
+                    )
+                project_root = Path(job.project_path).resolve()
+                from control_plane.backend_lifecycle import BackendLifecycleService as _BLS
+                bls = _BLS(backend_base_path=self.backend_base_path)
+                backend_manager = bls.create_backend_manager(str(project_root))
+                work_dir = bls.setup_workspace(
+                    backend_manager, job_id=job.id, run_id=run.id,
+                    risk_level=job.metadata.get("risk_level"),
                 )
-            project_root = Path(job.project_path).resolve()
-            from control_plane.backend_lifecycle import BackendLifecycleService
-            bls = BackendLifecycleService(backend_base_path=self.backend_base_path)
-            backend_manager = bls.create_backend_manager(str(project_root))
-            work_dir = bls.setup_workspace(
-                backend_manager, job_id=job.id, run_id=run.id,
-                risk_level=job.metadata.get("risk_level"),
-            )
 
-            # --- Non-interactive: expire old approval tickets ---
-            if self.non_interactive and self.approval_repo is not None:
-                self.approval_repo.expire_tickets()
+                if self.non_interactive and self.approval_repo is not None:
+                    self.approval_repo.expire_tickets()
 
-            # --- Lifecycle hook: after_create ---
-            hooks = BackendLifecycleService.load_project_hooks(job.project_path)
-            await bls.run_hook(backend_manager, "after_create", hooks, work_dir)
+                hooks = _BLS.load_project_hooks(job.project_path)
+                await bls.run_hook(backend_manager, "after_create", hooks, work_dir)
+                await bls.run_hook(backend_manager, "before_run", hooks, work_dir)
 
-            # --- Lifecycle hook: before_run ---
-            await bls.run_hook(backend_manager, "before_run", hooks, work_dir)
-
-            # --- Core execution (with task-level timeout) ---
-            result_dag = await asyncio.wait_for(
-                self._execute_plan_and_run(
-                    job, session_id, store, work_dir, run.id, backend_manager,
-                ),
-                timeout=timeout,
-            )
-
-            # --- Lifecycle hook: after_run ---
-            await bls.run_hook(backend_manager, "after_run", hooks, work_dir)
-
-            # --- Summarize ---
-            orchestrator = self._execution_factory.create_orchestrator(store)
-            engine = self._execution_factory.create_execution_engine(
-                session_id, store,
-                replan_handler=lambda dag, failed_id: orchestrator.replan(
-                    dag, failed_id, job.requirement,
-                ),
-                work_dir=work_dir,
-                backend_manager=backend_manager,
-                job_id=job.id,
-                run_id=run.id,
-                project_dir=job.project_path,
-            )
-            summary = engine.get_execution_summary(result_dag)
-
-            # Determine final status via lifecycle manager
-            if summary.get("all_succeeded", False):
-                run = self._lifecycle.mark_succeeded(run, summary)
-                job_status = JobStatus.SUCCEEDED
-            else:
-                run = self._lifecycle.mark_failed(run, summary)
-                job_status = JobStatus.FAILED
-
-            # Transition job to final state unless externally canceled/requeued.
-            current_job = self.repository.get_job(job_id)
-            if current_job:
-                resolved = self._lifecycle.resolve_external_status(run, current_job)
-                if resolved:
-                    if work_dir is not None:
-                        backend_manager.preserve(job.id, run.id, reason="external_status_change")
-                    return self.repository.get_run(run.id) or run
-
-            error_msg = ""
-            error_cat = ""
-            if job_status == JobStatus.FAILED:
-                # Collect errors from failed nodes
-                failed_nodes = [
-                    nid for nid, n in result_dag.nodes.items()
-                    if n.status.value == "failed"
-                ]
-                if failed_nodes:
-                    errors = [
-                        f"{nid}: {result_dag.nodes[nid].error}"
-                        for nid in failed_nodes
-                    ]
-                    error_msg = "; ".join(errors)
-                    error_cat = classify_error(error_msg)
-
-                # Must transition RUNNING -> FAILED before handle_job_failure
-                self.repository.transition_job_status(
-                    job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
+                result_dag = await asyncio.wait_for(
+                    self._execute_plan_and_run(
+                        job, session_id, store, Path(work_dir), run.id, backend_manager,
+                    ),
+                    timeout=timeout,
                 )
-                # NodeTimeoutError should mark run as TIMED_OUT rather than
-                # merely FAILED (#360).  Note: `timeout` here is the run-level
-                # timeout (default 1800s); the actual node timeout (e.g. 300s)
-                # is recorded in the node error message.  Called after
-                # transition to avoid state inconsistency if transition throws.
-                if error_cat == "timeout" and failed_nodes:
-                    run = self._lifecycle.mark_timed_out(run, timeout)
-                if work_dir is not None:
-                    bls.preserve(backend_manager, job.id, run.id, reason=error_cat or "failed")
-                job = self.repository.get_job(job_id)
-                assert job is not None
-                # Apply retry policy: FAILED -> QUEUED (retry) or DEAD_LETTER
-                job = await self._job_lifecycle.handle_job_failure(
-                    job, error=error_msg, error_category=error_cat,
-                )
-            else:
-                self.repository.transition_job_status(
-                    job_id, job_status, error=error_msg, error_category=error_cat,
-                )
-                if work_dir is not None:
-                    bls.cleanup(backend_manager, job.id, run.id)
 
-        except asyncio.TimeoutError:
-            # --- Timeout handling ---
-            current_job = self.repository.get_job(job_id)
-            if current_job and current_job.status == JobStatus.CANCELED:
-                run = self._lifecycle.mark_canceled(run, "Job canceled during execution")
-                return self.repository.get_run(run.id) or run
+                await bls.run_hook(backend_manager, "after_run", hooks, work_dir)
 
-            run = self._lifecycle.mark_timed_out(run, timeout)
+                summary = _compute_summary(result_dag)
+                if summary.get("all_succeeded", False):
+                    outcome = "succeeded"
+                else:
+                    error_msg, error_cat = _extract_dag_errors(result_dag)
 
-            # Must transition RUNNING -> FAILED before handle_job_failure
-            # (FAILED -> QUEUED/DEAD_LETTER is legal)
-            self.repository.transition_job_status(
-                job_id, JobStatus.FAILED,
-                error="Job execution timed out", error_category="timeout",
+            except asyncio.TimeoutError:
+                outcome = "timed_out"
+                error_msg = "Job execution timed out"
+                error_cat = "timeout"
+
+            except asyncio.CancelledError:
+                outcome = "canceled"
+
+            except PendingApprovalError as exc:
+                self._lifecycle.mark_pending_approval(run, exc.ticket_id)
+                raise
+
+            except Exception as exc:
+                error_msg = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
+                error_cat = classify_error(str(exc))
+
+            # --- Resolve outcome (unified for all paths) ---
+            run = await self._resolve_run_outcome(
+                job_id, run, outcome, result_dag,
+                error_msg, error_cat, timeout,
+                backend_manager, bls, work_dir,
             )
-            job = self.repository.get_job(job_id)
-            assert job is not None
-            job = await self._job_lifecycle.handle_job_failure(
-                job, error="Job execution timed out", error_category="timeout",
-            )
-            if work_dir is not None:
-                bls.preserve(backend_manager, job.id, run.id, reason="timeout")
-
-        except asyncio.CancelledError:
-            run = self._lifecycle.mark_canceled(run, "Run coroutine canceled")
-            current_job = self.repository.get_job(job_id)
-            if current_job and current_job.status == JobStatus.RUNNING:
-                self.repository.transition_job_status(
-                    job_id, JobStatus.CANCELED, error="Run canceled", error_category="tool_blocked",
-                )
-            if work_dir is not None:
-                bls.preserve(backend_manager, job.id, run.id, reason="canceled")
-            return self.repository.get_run(run.id) or run
-
-        except PendingApprovalError as exc:
-            # --- Approval required: pause execution, do NOT cleanup/preserve ---
-            run = self._lifecycle.mark_pending_approval(run, exc.ticket_id)
-            # Re-raise so Worker can enter PENDING_APPROVAL poll loop.
-            raise
-
-        except Exception as exc:
-            # --- Unexpected error handling ---
-            current_job = self.repository.get_job(job_id)
-            if current_job and current_job.status == JobStatus.CANCELED:
-                run = self._lifecycle.mark_canceled(run, "Job canceled during execution")
-                return self.repository.get_run(run.id) or run
-
-            error_msg = f"{type(exc).__name__}: {str(exc)}\n{traceback.format_exc()}"
-            error_cat = classify_error(str(exc))
-
-            run = self._lifecycle.mark_failed(run, {"error": "execution_error", "reason": str(exc)})
-
-            # Must transition RUNNING -> FAILED before handle_job_failure
-            self.repository.transition_job_status(
-                job_id, JobStatus.FAILED, error=error_msg, error_category=error_cat,
-            )
-            job = self.repository.get_job(job_id)
-            assert job is not None
-            job = await self._job_lifecycle.handle_job_failure(
-                job, error=error_msg, error_category=error_cat,
-            )
-            if work_dir is not None:
-                bls.preserve(backend_manager, job.id, run.id, reason=error_cat)
 
         finally:
             self._running_tasks.pop(job_id, None)
-            # Generate standardized job result artifact
             try:
                 final_job = self.repository.get_job(job_id)
                 final_run = self.repository.get_run(run.id)
                 if final_job and final_run:
-                    summary = final_run.dag_result or {}
-                    self._result_writer.generate(final_job, final_run, summary)
+                    _write_job_result(
+                        self.artifact_path, final_job, final_run,
+                        final_run.dag_result or {},
+                    )
             except Exception:
-                pass  # Job result generation must not mask original error
+                pass
 
         return self.repository.get_run(run.id) or run
 
-    # -- Backward-compat proxies for JobLifecycleManager (#177 PR6) ----------
-
-    async def get_job_status(self, job_id: str) -> dict[str, Any]:
-        """Proxy to JobLifecycleManager.get_job_status."""
-        return await self._job_lifecycle.get_job_status(job_id)
-
-    async def list_jobs(self, status: JobStatus | None = None) -> list[Job]:
-        """Proxy to JobLifecycleManager.list_jobs."""
-        return await self._job_lifecycle.list_jobs(status)
-
-    async def cancel_job(self, job_id: str) -> Job:
-        """Proxy to JobLifecycleManager.cancel_job."""
-        return await self._job_lifecycle.cancel_job(job_id)
+    # ------------------------------------------------------------------
+    # Job lifecycle operations (delegated to JobLifecycleManager)
+    # ------------------------------------------------------------------
 
     async def handle_job_failure(
         self,
@@ -478,15 +446,15 @@ class RunService:
         error: str,
         error_category: str = "unknown",
     ) -> Job:
-        """Proxy to JobLifecycleManager.handle_job_failure."""
+        """Apply retry policy or dead-letter a failed job."""
         return await self._job_lifecycle.handle_job_failure(job, error, error_category)
 
     async def resume_after_approval(self, job_id: str, ticket_id: str) -> Run | None:
-        """Proxy to JobLifecycleManager.resume_after_approval."""
+        """Resume a job after an approval ticket is approved."""
         return await self._job_lifecycle.resume_after_approval(job_id, ticket_id)
 
     async def abort_after_rejection(self, job_id: str, ticket_id: str, reason: str = "") -> Job:
-        """Proxy to JobLifecycleManager.abort_after_rejection."""
+        """Abort a job after an approval ticket is rejected."""
         return await self._job_lifecycle.abort_after_rejection(job_id, ticket_id, reason)
 
     def _emit_event(self, event_type: str, job_id: str, details: dict[str, Any]) -> None:
@@ -636,3 +604,120 @@ class RunService:
             self.repository.update_job(job)
 
         return result_dag
+
+    # ------------------------------------------------------------------
+    # Outcome resolution
+    # ------------------------------------------------------------------
+
+    async def _resolve_run_outcome(
+        self,
+        job_id: str,
+        run: Run,
+        outcome: str,
+        result_dag: DAG | None,
+        error_msg: str,
+        error_cat: str,
+        timeout: int,
+        backend_manager: BackendManager | None,
+        bls: Any,
+        work_dir: str | None,
+    ) -> Run:
+        """Unified outcome resolution for all execution paths.
+
+        Handles run/job state transitions, retry policy, and workspace
+        cleanup/preserve in one place instead of duplicated per-exception blocks.
+
+        Args:
+            outcome: One of "succeeded", "failed", "timed_out", "canceled".
+        """
+        current_job = self.repository.get_job(job_id)
+
+        # External cancel takes priority over local outcome
+        if current_job and current_job.status == JobStatus.CANCELED and outcome != "canceled":
+            run = self._lifecycle.mark_canceled(run, "Job canceled during execution")
+            self._preserve_workspace(backend_manager, bls, current_job, run, work_dir, "canceled")
+            return run
+
+        # --- Succeeded ---
+        if outcome == "succeeded":
+            summary = _compute_summary(result_dag)
+            run = self._lifecycle.mark_succeeded(run, summary)
+            if current_job:
+                resolved = self._lifecycle.resolve_external_status(run, current_job)
+                if resolved:
+                    self._preserve_workspace(
+                        backend_manager, bls, current_job, run,
+                        work_dir, "external_status_change",
+                    )
+                    return run
+            self.repository.transition_job_status(job_id, JobStatus.SUCCEEDED)
+            self._cleanup_workspace(backend_manager, bls, current_job, run, work_dir)
+            return run
+
+        # --- Canceled ---
+        if outcome == "canceled":
+            run = self._lifecycle.mark_canceled(run, "Run coroutine canceled")
+            if current_job and current_job.status == JobStatus.RUNNING:
+                self.repository.transition_job_status(
+                    job_id, JobStatus.CANCELED,
+                    error="Run canceled", error_category="tool_blocked",
+                )
+            self._preserve_workspace(backend_manager, bls, current_job, run, work_dir, "canceled")
+            return run
+
+        # --- Failed or Timed Out ---
+        if outcome == "timed_out":
+            run = self._lifecycle.mark_timed_out(run, timeout)
+            error_msg = error_msg or "Job execution timed out"
+            error_cat = error_cat or "timeout"
+        else:
+            summary = _compute_summary(result_dag) if result_dag else {}
+            run = self._lifecycle.mark_failed(run, summary or {"error": "execution_error"})
+
+        self.repository.transition_job_status(
+            job_id, JobStatus.FAILED,
+            error=error_msg, error_category=error_cat,
+        )
+
+        # Node-level timeout: upgrade run status to TIMED_OUT
+        if error_cat == "timeout" and result_dag:
+            failed_nodes = [
+                nid for nid, n in result_dag.nodes.items()
+                if n.status == NodeStatus.FAILED
+            ]
+            if failed_nodes:
+                run = self._lifecycle.mark_timed_out(run, timeout)
+
+        job = self.repository.get_job(job_id)
+        assert job is not None
+        await self._job_lifecycle.handle_job_failure(
+            job, error=error_msg, error_category=error_cat,
+        )
+        self._preserve_workspace(
+            backend_manager, bls, job, run,
+            work_dir, error_cat or "failed",
+        )
+        return run
+
+    def _preserve_workspace(
+        self,
+        backend_manager: BackendManager | None,
+        bls: Any,
+        job: Job,
+        run: Run,
+        work_dir: str | None,
+        reason: str,
+    ) -> None:
+        if work_dir is not None and backend_manager and bls:
+            bls.preserve(backend_manager, job.id, run.id, reason=reason)
+
+    def _cleanup_workspace(
+        self,
+        backend_manager: BackendManager | None,
+        bls: Any,
+        job: Job | None,
+        run: Run,
+        work_dir: str | None,
+    ) -> None:
+        if work_dir is not None and backend_manager and bls and job:
+            bls.cleanup(backend_manager, job.id, run.id)
