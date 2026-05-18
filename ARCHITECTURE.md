@@ -539,123 +539,132 @@ python main.py recover
 weave/
 ├── core/                          # 核心模型与引擎
 │   ├── models.py                  # 统一重导出（领域模型拆分到 *_models.py）
-│   ├── dag_models.py              # DAG 相关模型（DAGNode, DAGEdge, DAG, DAGTemplate）
+│   ├── dag_models.py              # DAG 相关模型
 │   ├── event_models.py            # 事件与 Session 模型
-│   ├── guardrail_models.py        # Guardrail 模型（RiskLevel, PermissionMode）
-│   ├── memory_models.py           # M3.2: 记忆模型（MemoryEntry, MemoryScope, MemoryType）
-│   ├── analysis_models.py         # M3.5: 影响分析模型（ImpactScope, VerificationResult）
-│   ├── eval_models.py             # 评估模型（SuccessCriterion, EvaluationResult）
-│   ├── tool_models.py             # 工具模型（ToolInfo, ToolResult）
-│   ├── mcp_models.py              # MCP 模型（MCPToolInfo, MCPServerStatus）
+│   ├── guardrail_models.py        # Guardrail 模型
+│   ├── memory_models.py           # 记忆模型
+│   ├── analysis_models.py         # 影响分析模型
+│   ├── eval_models.py             # 评估模型
+│   ├── tool_models.py             # 工具模型
+│   ├── mcp_models.py              # MCP 模型
 │   ├── artifact_handoff.py        # HandoffArtifact 交接逻辑
 │   ├── exceptions.py              # 自定义异常层级
-│   ├── config.py                  # 配置管理（WeaveConfig, LLMConfig, MemoryConfig 等）
+│   ├── config.py                  # 配置管理
 │   ├── agent_registry.py          # Agent 能力注册表
-│   ├── llm_client.py              # 统一 LLM 客户端（Anthropic/OpenAI）
-│   ├── llm_router.py              # M3.1: 多模型路由
-│   ├── dag_engine.py              # DAG 引擎（拓扑排序 + 并行执行）
-│   ├── node_executor.py           # 单节点执行逻辑（从 dag_engine 拆分）
-│   ├── quality_gate.py            # 节点后质量检查（从 dag_engine 拆分）
-│   ├── retry_policy.py            # 重试/退避策略（从 dag_engine 拆分）
-│   ├── watchdog.py                # Watchdog 心跳监控（从 dag_engine 拆分）
-│   └── project_config.py          # .weave/config.yaml 加载器
-├── cli/                           # CLI 命令处理器（从 main.py 拆分）
+│   ├── llm_client.py              # 统一 LLM 客户端
+│   ├── llm_router.py              # 多模型路由
+│   ├── dag_engine.py              # DAG 引擎
+│   ├── dag_checkpoint.py          # DAG 检查点
+│   ├── dag_compat.py              # DAG 兼容层
+│   ├── node_executor.py           # 单节点执行逻辑
+│   ├── quality_gate.py            # 节点后质量检查
+│   ├── retry_policy.py            # 重试/退避策略
+│   ├── watchdog.py                # Watchdog 心跳监控
+│   ├── project_config.py          # .weave/config.yaml 加载器
+│   └── context.py                 # 运行时上下文
+├── cli/                           # CLI 命令处理器
 │   ├── __init__.py                # 导出所有 cmd_* 函数
 │   ├── execution.py               # plan, execute, run, viz 命令
 │   ├── jobs.py                    # submit, status, list, cancel, worker, recover, console
 │   ├── approval.py                # tickets, approve, reject 命令
-│   ├── memory.py                  # memory-search/list/stats/add/cleanup 命令
-│   ├── learning.py                # learning-analyze/insights/status 命令
-│   ├── impact.py                  # impact-predict/graph/history 命令
-│   ├── skills.py                  # skills, skill, templates 命令
+│   ├── memory.py                  # memory 命令
+│   ├── learning.py                # learning 命令
+│   ├── impact.py                  # impact 命令
+│   ├── skills.py                  # skills, templates 命令
+│   ├── args.py                    # CLI 参数定义
+│   ├── mcp_tools.py               # MCP 工具命令
 │   └── utils.py                   # 共享 CLI 工具函数
-├── control_plane/                 # M1: 任务控制面
+├── control_plane/                 # 任务控制面
 │   ├── models.py                  # Job/Run 数据模型
-│   ├── repository.py              # 持久化存储（原子写入）
-│   ├── service.py                 # RunService（hooks 驱动的执行生命周期）
-│   ├── hooks.py                   # Execution Hooks（Memory/Learning/Impact）
+│   ├── repository.py              # 持久化存储
+│   ├── service.py                 # RunService
+│   ├── hooks.py                   # Execution Hooks
 │   ├── execution_factory.py       # 编排器 + 引擎工厂
 │   ├── job_lifecycle.py           # Job 状态转换
 │   ├── run_lifecycle.py           # Run 状态转换
 │   ├── job_result.py              # Job 结果聚合
 │   ├── backend_lifecycle.py       # Backend 集成
-│   ├── worker.py                  # Worker 队列消费者（Lease 机制）
+│   ├── worker.py                  # Worker 队列消费者
 │   ├── worker_executor.py         # 单 Job 执行逻辑
 │   ├── worker_recovery.py         # 孤儿 Job 恢复
-│   └── approval.py                # M1.1: 审批票据系统
-├── backend/                       # M2: 执行后端（工作空间 + 沙箱 正交维度）
-│   ├── base.py                    # 抽象接口 + WorkspaceIsolation/ExecutionSandbox 枚举
+│   ├── approval.py                # 审批票据系统
+│   └── errors.py                  # 控制面异常
+├── backend/                       # 执行后端
+│   ├── base.py                    # 抽象接口
 │   ├── local.py                   # 本地执行
 │   ├── worktree.py                # Git worktree 隔离
-│   ├── sandbox.py                 # SandboxProvider / LocalSandbox / DockerSandbox
+│   ├── sandbox.py                 # 沙箱提供者
 │   ├── docker_stub.py             # Docker stub（预留）
+│   ├── wasm.py                    # WASM 运行时后端
 │   └── lifecycle.py               # BackendManager
 ├── orchestrator/
 │   ├── intelligent_orchestrator.py # 智能编排 Agent
-│   ├── plan_validator.py           # DAG 结构验证与自动修复
-│   ├── llm_utils.py                # LLM 工具（token 计数、消息裁剪）
+│   ├── plan_validator.py           # DAG 结构验证
+│   ├── llm_utils.py                # LLM 工具
 │   └── prompts/                    # Prompt 模板
-│       ├── planning.md
-│       ├── adaptation.md
-│       └── replan.md
 ├── agent/
 │   ├── worker.py                  # Agent Worker
-│   ├── agent_pool.py              # Agent 实例池（含记忆注入/提取）
+│   ├── agent_pool.py              # Agent 实例池
 │   └── prompts.py                 # Agent system prompts
-├── evaluator/                     # 评估引擎（从大文件拆分）
+├── evaluator/                     # 评估引擎
 │   ├── engine.py                  # 评估编排
 │   ├── runner.py                  # 测试/lint 执行器
 │   ├── models.py                  # 评估模型
 │   ├── artifact.py                # Artifact 评估
 │   ├── compat.py                  # 向后兼容
 │   ├── checkers/                  # 条件检查器
-│   │   ├── base.py
-│   │   ├── file_exists.py
-│   │   └── bugfix_patterns.py
 │   └── lint/                      # Lint 解析
-│       └── parser.py
 ├── tools/
 │   ├── registry.py                # 工具注册表
-│   └── command_runner.py          # Shell 命令执行
+│   ├── command_runner.py          # Shell 命令执行
+│   ├── ast_utils.py               # AST 工具
+│   ├── schemas.py                 # 工具 Schema
+│   └── validators.py              # 工具参数验证
 ├── guardrails/
-│   └── policy.py                  # 安全策略
+│   ├── policy.py                  # 安全策略
+│   ├── injection.py               # 注入检测
+│   ├── node_isolation.py          # 节点隔离
+│   └── output_monitor.py          # 输出监控
 ├── mcp/                           # Model Context Protocol
-│   └── client.py                  # MCP 客户端（stdio transport）
-├── skills/                        # M3.6: 技能系统
-│   └── registry.py                # SkillRegistry（YAML 技能加载/实例化）
+│   ├── client.py                  # MCP 客户端
+│   └── server.py                  # MCP 服务器
+├── skills/                        # 技能系统
+│   └── registry.py                # SkillRegistry
 ├── session/
-│   └── store.py                   # JSONL 事件存储（含 snapshot + incremental replay）
-├── memory/                        # M3.2: Agent 记忆系统
-│   ├── store.py                   # 持久化存储（原子写入 + 内存索引）
-│   ├── manager.py                 # 高层记忆操作接口
-│   └── sharing.py                 # 跨 Agent 记忆共享
-├── learning/                      # M3.3: 自学习系统
-│   ├── analyzer.py                # 执行模式分析引擎
-│   ├── optimizer.py               # 洞察 → 记忆转换
+│   └── store.py                   # JSONL 事件存储
+├── memory/                        # Agent 记忆系统
+│   ├── store.py                   # 持久化存储
+│   ├── manager.py                 # 高层操作接口
+│   ├── sharing.py                 # 跨 Agent 共享
+│   └── embedding.py               # 语义嵌入
+├── learning/                      # 自学习系统
+│   ├── analyzer.py                # 模式分析引擎
+│   ├── optimizer.py               # 洞察转换
 │   └── scheduler.py               # 定期分析调度
-├── templates/                     # M3.4: DAG 模板系统
+├── templates/                     # DAG 模板系统
 │   ├── library.py                 # TemplateRegistry
-│   ├── build_api.yaml
-│   ├── add_feature.yaml
-│   ├── fix_bug.yaml
-│   ├── refactor.yaml
-│   ├── add_tests.yaml
-│   ├── add_auth.yaml
-│   └── setup_project.yaml
-├── analysis/                      # M3.5: 影响分析系统
+│   └── *.yaml                     # 内置模板
+├── analysis/                      # 影响分析系统
 │   ├── dependency_graph.py
 │   ├── impact_predictor.py
 │   └── change_verifier.py
 ├── monitoring/
 │   ├── metrics.py                 # 指标聚合
-│   └── alerts.py                  # 告警系统
-├── visualizer/                    # M2.3: Web 控制台
+│   ├── alerts.py                  # 告警系统
+│   └── otel.py                    # OpenTelemetry 集成
+├── a2a/                           # Agent-to-Agent 协议
+│   ├── agent_card.py              # Agent Card 模型
+│   ├── discovery.py               # Agent 发现
+│   └── models.py                  # A2A 数据模型
+├── benchmarks/                    # 基准测试框架
+│   ├── runner.py                  # 基准运行器
+│   ├── models.py                  # 基准模型
+│   └── converter.py               # 数据转换
+├── visualizer/                    # Web 控制台
 │   ├── server.py                  # FastAPI 服务
 │   ├── cli_renderer.py            # CLI DAG 渲染
 │   ├── event_bridge.py            # WebSocket 事件桥
-│   └── static/
-│       ├── index.html             # 主仪表盘
-│       └── console.html           # 管理控制台
+│   └── static/                    # 静态资源
 ├── reporter/
 │   └── logger.py                  # 报告生成
 ├── projects/
@@ -665,17 +674,15 @@ weave/
 │   ├── m1_personal_spec.md        # M1 工程规格
 │   ├── config_reference.md        # 配置参考
 │   ├── dev_guide.md               # 开发指南
-│   ├── evaluator_criterion_semantics.md  # 评估条件语义
-│   ├── architecture_improvements.md # 架构改进设计
-│   ├── knowledge_index.py         # M3.0: 知识索引
 │   ├── specs/                     # 模块规格文档
 │   └── adrs/                      # 架构决策记录
 ├── tests/                         # 测试套件
 ├── main.py                        # CLI 入口
-├── README.md                      # 面向用户的说明
+├── README.md                      # 英文说明
+├── README_zh.md                   # 中文说明
 ├── ARCHITECTURE.md                # 本文档
-├── AGENTS.md                      # Agent 开发指南
 ├── CONTRIBUTING.md                # 贡献指南
+├── CHANGELOG.md                   # 更新日志
 └── CLAUDE.md                      # Claude Code 指引
 ```
 
@@ -699,5 +706,5 @@ python main.py run "设计登录页面" --project ./my-project
 
 ---
 
-*日期: 2026-05-17*
-*状态: M3.5 + 架构重构已完成*
+*日期: 2026-05-18*
+*状态: M3.6 完成 + 安全加固 + 基础设施增强*

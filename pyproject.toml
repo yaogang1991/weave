@@ -5,6 +5,7 @@ description = "Weave - Autonomous Multi-Agent Orchestration for Software Develop
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",
+    "httpx[socks]>=0.27.0",
     "openai>=1.50.0",
     "pydantic>=2.0.0",
     "pyyaml>=6.0",
@@ -12,8 +13,10 @@ dependencies = [
     "pytest-cov>=5.0.0",
     "pytest-asyncio>=0.23.0",
     "flake8>=7.0.0",
+    "autoflake>=2.0.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]

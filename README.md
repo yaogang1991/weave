@@ -1,68 +1,88 @@
 # Weave
 
-Intelligent Multi-Agent Orchestration for Autonomous Software Development.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://www.python.org/)
+[![Version](https://img.shields.io/badge/Version-2.0.0-orange.svg)](pyproject.toml)
 
-Based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) architecture, a self-hosted unattended software development workflow.
+**Intelligent Multi-Agent Orchestration for Autonomous Software Development**
 
-> **Weave** — DAG 是织机，Agent 是梭子，编排（orchestrate）本意是编织。多个 Agent 按角色协作，把需求编织成完整的软件。
+Based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) architecture. Weave orchestrates multiple LLM agents (planner, generator, evaluator) to automate the full software development lifecycle via LLM-driven dynamic DAG generation and execution.
 
-## Core Design Principles
+> DAG is the loom, Agent is the shuttle. Multiple agents collaborate by role, weaving requirements into complete software.
 
-1. **Artifact-Centric** — All state externalized to event logs and file artifacts, model context is just cache
-2. **Minimal by Design** — "dumb loop" as core, add complexity on demand
-3. **Defense-in-Depth** — Tool layer + Weave layer + execution layer multi-layer defense
-4. **Trust-First** — Audit logs, rollback, monitoring as first-class citizens
-5. **Human-on-the-Loop** — Plan-level human supervision, execution-level automated running
-6. **Contract-Driven** — Predefined success criteria, automated evaluation
+[中文文档](README_zh.md) | [Architecture](ARCHITECTURE.md) | [Contributing](CONTRIBUTING.md) | [Changelog](CHANGELOG.md) | [Roadmap](docs/roadmap.md)
 
-## Architecture
+---
 
-```
-+------------------------------------------------------------------+
-|                        Orchestrator Layer                         |
-|  +-------------+  +-------------+  +---------------------+      |
-|  |   Planner   |  |  Generator  |  |     Evaluator       |      |
-|  +-------------+  +-------------+  +---------------------+      |
-+------------------------------------------------------------------+
-|              Session Manager (Append-Only Event Log)              |
-+------------------------------------------------------------------+
-|                      Weave Core (Dumb Loop)                       |
-|  +-------------+  +-------------+  +---------------------+      |
-|  |   Agent     |  |   Tool      |  |     Guardrails      |      |
-|  |   Worker    |<--|   Registry  |<--|  (Permission/Risk)  |      |
-|  +-------------+  +-------------+  +---------------------+      |
-+------------------------------------------------------------------+
-|  +-------------+  +-------------+  +---------------------+      |
-|  |   Sandbox   |  |   Git       |  |     Reporter        |      |
-|  +-------------+  +-------------+  +---------------------+      |
-+------------------------------------------------------------------+
-|  +-------------+  +-------------+  +---------------------+      |
-|  |   Memory    |  |  Learning   |  |  Impact Analysis    |      |
-|  |  (M3.2)     |  |  (M3.3)     |  |  (M3.5)             |      |
-|  +-------------+  +-------------+  +---------------------+      |
-+------------------------------------------------------------------+
-```
+## Why Weave?
+
+| Problem | Weave's Answer |
+|---------|---------------|
+| Single-agent tools can't handle complex tasks | Multi-agent DAG orchestration with parallel execution |
+| Hard-coded workflows break on edge cases | LLM-driven planner adapts in real-time |
+| Cloud-only solutions lock you in | Fully self-hosted, token-cost only |
+| No quality guarantee on generated code | Contract-driven evaluation with automated checks |
+
+## Core Features
+
+- **LLM-Driven DAG Orchestration** -- Planner agent generates execution DAGs dynamically, adapting to failures in real-time
+- **Multi-Model Routing** -- Assign different LLM models per agent role (e.g., Opus for planning, Sonnet for coding)
+- **Agent Memory** -- Persistent cross-session memory with scope promotion (PRIVATE → SESSION → GLOBAL)
+- **Self-Learning** -- Automatic pattern analysis from execution history, feeding optimization hints back to the planner
+- **Impact Analysis** -- Pre-execution impact prediction and post-execution change verification
+- **DAG Templates** -- Reusable YAML templates to skip LLM planning for recurring task patterns
+- **Skills System** -- YAML-based prompt templates for single-agent invocations with variable substitution
+- **MCP Integration** -- Model Context Protocol client for tool discovery and execution via stdio transport
+- **Web Console** -- Real-time DAG monitoring, job management, and alert dashboard
+- **Approval Workflow** -- Human-in-the-loop gate for high-risk operations
+- **Multiple Backends** -- Local or git worktree isolation, with Docker sandbox support
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.11+
+- An Anthropic API key (or OpenAI-compatible endpoint)
+
+### Install
+
 ```bash
-# 1. Clone & install
-gh repo clone yaogang1991/weave
+git clone https://github.com/yaogang1991/weave.git
 cd weave
 pip install -r requirements.txt
+```
 
-# 2. Set API Key
+### Run
+
+```bash
+# Set your API key
 export ANTHROPIC_API_KEY="sk-ant-..."
 
-# 3. One-command plan + execute
+# One-command plan + execute
 python main.py run "Build a REST API for todo items"
+```
 
-# Or plan first, then execute
+Or plan first, then execute:
+
+```bash
 python main.py plan "Build a REST API for user authentication"
 python main.py execute ./data/plans/plan_xxx.json
 ```
 
-## M1 Personal Mode Guide
+## Usage
+
+### Interactive Mode
+
+```bash
+# Plan and execute in one step
+python main.py run "Add OAuth2 support to the API"
+
+# With project-specific agents
+python main.py run "Design login page" --project ./my-project --max-parallel 5
+
+# Using a DAG template (skip LLM planning)
+python main.py run "Build Todo API" --template build_api --var feature=Todo --var language=Python
+```
 
 ### Worker Mode (Unattended)
 
@@ -76,140 +96,178 @@ python main.py submit "Build a REST API for user auth"
 # Terminal 3: Monitor
 python main.py list --status running
 python main.py tickets --status pending
-```
 
-### Non-Interactive Mode
-
-```bash
+# Non-interactive mode
 export WEAVE_NON_INTERACTIVE=true
 python main.py worker --non-interactive
 ```
 
-### Command Cheat Sheet
+### MCP Server Mode
+
+```bash
+python main.py serve
+```
+
+### Web Console
+
+```bash
+python main.py viz
+# Open http://localhost:8765 for the dashboard
+```
+
+### Command Reference
 
 | Command | Description |
 |---------|-------------|
-| `submit "<requirement>"` | Submit a new task |
-| `status <job_id>` | View task status |
-| `list [--status STATUS]` | List tasks |
-| `cancel <job_id>` | Cancel a task |
-| `worker [--concurrency N]` | Start Worker |
-| `plan "<requirement>"` | Generate execution plan |
-| `run "<requirement>"` | One-command plan + execute |
+| `run "<req>"` | Plan + execute in one step |
+| `plan "<req>"` | Generate execution plan (DAG) |
+| `execute <plan>` | Execute a saved plan |
+| `submit "<req>"` | Submit task to worker queue |
+| `worker` | Start worker (queue consumer) |
+| `status <id>` | View job status |
+| `list` | List jobs |
+| `cancel <id>` | Cancel a running job |
 | `recover` | Recover orphaned jobs |
-| `run "..." --template build_api` | Run from template (M3.4) |
-| `skill <name> [--var K=V]` | Invoke a skill (M3.6) |
-| `tickets` / `approve` / `reject` | Approval workflow |
-| `memory-search` / `memory-add` | Agent memory (M3.2) |
-| `learning-analyze` / `learning-insights` | Self-learning (M3.3) |
-| `impact-predict` / `impact-graph` | Impact analysis (M3.5) |
+| `tickets` | List approval tickets |
+| `approve <id>` | Approve a ticket |
+| `reject <id>` | Reject a ticket |
+| `templates` | List DAG templates |
 | `skills` | List available skills |
+| `skill <name>` | Invoke a skill |
+| `serve` | Start MCP server |
+| `viz` | Start web console |
+| `memory-search` | Search agent memory |
+| `memory-add` | Add memory entry |
+| `memory-stats` | Memory statistics |
+| `learning-analyze` | Trigger pattern analysis |
+| `learning-insights` | View learning insights |
+| `impact-predict` | Predict impact of a change |
+| `impact-graph` | Show dependency graph |
+| `console` | Interactive management console |
 
-## M3 Features
+## Architecture
 
-### Multi-Model Routing (M3.1)
-
-```bash
-export WEAVE_PLANNER_MODEL="claude-opus-4-6"
-export WEAVE_GENERATOR_MODEL="gpt-4"
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Orchestrator Layer                        │
+│   Planner  ·  Generator  ·  Evaluator                        │
+├──────────────────────────────────────────────────────────────┤
+│              Session Manager (Append-Only Event Log)          │
+├──────────────────────────────────────────────────────────────┤
+│                     Weave Core (Dumb Loop)                    │
+│   Agent Worker  ←  Tool Registry  ←  Guardrails              │
+├──────────────────────────────────────────────────────────────┤
+│   Sandbox  ·  Git  ·  Reporter                                │
+├──────────────────────────────────────────────────────────────┤
+│   Memory  ·  Learning  ·  Impact Analysis                     │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-### Agent Memory (M3.2)
+**Four-layer architecture:** Orchestrator → Session Manager → Weave Core → Execution Layer
 
-```bash
-python main.py memory-search "database schema"
-python main.py memory-add "Always use SQLAlchemy async session" --type fact --scope global
+For the full architecture document, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ANTHROPIC_API_KEY` | -- | Anthropic API key (required) |
+| `OPENAI_API_KEY` | -- | OpenAI API key (alternative) |
+| `WEAVE_MODEL` | `claude-sonnet-4-6` | Default LLM model |
+| `WEAVE_DEFAULT_BACKEND` | `local` | Execution backend (`local`/`worktree`) |
+| `WEAVE_NON_INTERACTIVE` | `false` | Disable interactive prompts |
+| `WEAVE_PLANNER_MODEL` | -- | Override model for planner agent |
+| `WEAVE_GENERATOR_MODEL` | -- | Override model for generator agent |
+
+### Project Configuration
+
+Create `.weave/config.yaml` in your project:
+
+```yaml
+guardrails:
+  permission_mode: default
+  max_file_size: 100000
+
+memory:
+  enabled: true
+  max_entries: 500
+
+backend:
+  type: local
 ```
 
-### Self-Learning (M3.3)
+See [docs/config_reference.md](docs/config_reference.md) for the full configuration reference.
 
-```bash
-python main.py learning-analyze
-python main.py learning-insights
+## Custom Agents
+
+Register project-specific agents in `.weave/agents.yaml`:
+
+```yaml
+agents:
+  - id: ui_designer
+    name: UI Designer
+    skills: [ui_design, react_component_dev, tailwind_css]
+    constraints: [Only modifies frontend/src/]
 ```
 
-### DAG Templates (M3.4)
+The orchestrator discovers these automatically and assigns them during planning.
 
-```bash
-python main.py templates
-python main.py run "Build Todo API" --template build_api --var feature=Todo
-```
-
-### Impact Analysis (M3.5)
-
-```bash
-python main.py impact-predict "Refactor the DAG engine" --project .
-python main.py impact-graph --project .
-```
-
-### Skills (M3.6)
-
-```bash
-# List available skills
-python main.py skills
-
-# Invoke a skill
-python main.py skill review_code --var file=src/main.py
-```
-
-Skills are YAML-based prompt templates in `.weave/skills/` with variable substitution, similar to DAG templates but for single-agent invocations.
-
-## Security Model
-
-| Layer | Component | Function |
-|-------|-----------|----------|
-| Model Layer | Agent Worker | Constitutional AI, pause when uncertain |
-| Tool Layer | Tool Registry | Least privilege, allow/deny lists |
-| Weave Layer | Guardrails | Permission modes (plan/default/auto/dontAsk) |
-| Execution Layer | Sandbox | Docker isolation, credential proxy |
-
-## Module Reference
+## Module Overview
 
 | Module | Responsibility |
 |--------|---------------|
-| `core/` | Domain models (`*_models.py`), configuration, DAG engine, LLM client/router, watchdog |
-| `cli/` | CLI command handlers (split from main.py) |
+| `core/` | Domain models, configuration, DAG engine, LLM client/router, watchdog |
+| `cli/` | CLI command handlers |
 | `session/` | Event storage, state recovery, checkpoint |
 | `agent/` | LLM API calls, agent pool, system prompts |
 | `tools/` | Built-in tools + command runner + MCP integration |
 | `guardrails/` | Risk classification, permission control |
 | `evaluator/` | Automated evaluation (checkers, lint, runner) |
 | `orchestrator/` | Workflow orchestration, plan validation, prompts |
-| `reporter/` | Audit logs, report generation |
-| `memory/` | M3.2: Agent memory (store, retrieve, share) |
-| `learning/` | M3.3: Execution pattern analysis and optimization |
-| `templates/` | M3.4: Reusable DAG templates (YAML + variables) |
-| `analysis/` | M3.5: Dependency graph, impact prediction, change verification |
-| `visualizer/` | M2.3: Web console (FastAPI + WebSocket) |
-| `backend/` | M2: Execution backend (local/worktree) + sandbox providers |
+| `memory/` | Agent memory (store, retrieve, share) |
+| `learning/` | Execution pattern analysis and optimization |
+| `templates/` | Reusable DAG templates (YAML + variables) |
+| `analysis/` | Dependency graph, impact prediction, change verification |
+| `visualizer/` | Web console (FastAPI + WebSocket) |
+| `backend/` | Execution backend (local/worktree) + sandbox providers |
 | `control_plane/` | Job queue, worker, execution hooks, approval tickets |
 | `mcp/` | Model Context Protocol client (stdio transport) |
-| `skills/` | M3.6: YAML skill definitions with variable substitution |
+| `skills/` | YAML skill definitions with variable substitution |
 
-## Relationship with Anthropic Managed Agents
+## Comparison with Anthropic Managed Agents
 
 | Feature | Anthropic Managed Agents | Weave |
 |---------|-------------------------|-------|
-| Running Location | Anthropic Cloud | Local/Self-hosted |
+| Running Location | Anthropic Cloud | Local / Self-hosted |
 | Pricing | $0.08/session-hour + tokens | Token cost only |
 | Session | Managed event log | Local JSONL |
-| Sandbox | Managed container | Docker/Local |
-| LLM | Claude series | Claude/OpenAI compatible |
+| Sandbox | Managed container | Docker / Local |
+| LLM | Claude only | Claude / OpenAI-compatible |
 | MCP | Native support | Client integration |
+| Custom Agents | Limited | Full YAML-based registration |
 
-Suitable for:
-- Enterprises needing full infrastructure control
-- Local development/prototyping
-- CI/CD integration
-- Custom security policies
-
-### Known Limitations
+## Known Limitations
 
 - Single-user scenario (no multi-tenancy)
-- No persistent database (uses JSON files)
-- Single-machine execution (no distribution)
-- Impact analysis only supports Python import resolution
+- File-based storage (no external database required)
+- Single-machine execution (no distributed mode)
+- Impact analysis supports Python import resolution only
+
+## Documentation
+
+- [Architecture](ARCHITECTURE.md) -- Full system architecture and component details
+- [Contributing](CONTRIBUTING.md) -- Development setup and PR process
+- [Changelog](CHANGELOG.md) -- Release history
+- [Roadmap](docs/roadmap.md) -- Milestone history and future plans
+- [Config Reference](docs/config_reference.md) -- All configuration options
+- [Developer Guide](docs/dev_guide.md) -- Extending agents, tools, and backends
+- [Specs](docs/specs/) -- Per-module engineering specifications
+- [ADRs](docs/adrs/) -- Architecture Decision Records
 
 ## License
 
 [Apache License 2.0](LICENSE)
+
+Copyright 2026 yaogang1991
