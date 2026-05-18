@@ -2,8 +2,8 @@
 
 ---
 
-**最后更新:** 2026-05-17
-**当前版本:** M3.5 + 架构重构
+**最后更新:** 2026-05-18
+**当前版本:** M3.6 + 架构重构（M4 规划中）
 
 ---
 
@@ -25,6 +25,10 @@
 | **M3.6** | MCP Client + Skills — MCP 工具发现 + YAML 技能定义 | ✅ 已完成 | 2026-05-15 |
 | **Security** | Phase 1 — 凭证隔离 + 不可变状态 (#456, #457) | ✅ 已完成 | 2026-05-16 |
 | **Infra** | Apache-2.0 许可证 + CONTRIBUTING.md + PR 模板 | ✅ 已完成 | 2026-05-17 |
+| **M4.0** | 项目理解 — 项目 Onboarder（技术栈检测 + 模块摘要 + 约定提取） | 🔲 规划中 | — |
+| **M4.1** | 项目理解 — 增强依赖图（tree-sitter 多语言 + 7 种边类型） | 🔲 规划中 | — |
+| **M4.2** | 项目理解 — 上下文路由（BM25 + 图距离融合 + Token 预算） | 🔲 规划中 | — |
+| **M4.3** | 项目理解 — 项目感知代理（Viewer/Editor 分离 + 约定感知 Prompt） | 🔲 规划中 | — |
 
 ---
 
@@ -486,6 +490,9 @@ weave/
 ├── docs/
 │   ├── roadmap.md                 # 本文档
 │   ├── m1_personal_spec.md
+│   ├── m4_directions.md           # M4 方向调研与决策
+│   ├── research-project-understanding.md  # 项目理解技术方案
+│   ├── research-strategy-direction.md     # 战略方向评估
 │   ├── config_reference.md
 │   ├── dev_guide.md
 │   ├── evaluator_criterion_semantics.md
@@ -500,4 +507,82 @@ weave/
 ├── AGENTS.md
 ├── CONTRIBUTING.md
 └── CLAUDE.md
+```
+
+---
+
+## M4 — Project Understanding
+
+**目标**: 让 Weave 在执行任务前理解已有项目，实现"像高级工程师一样修改代码"。
+
+**设计文档**: `docs/plans/2026-05-18-m4-project-understanding-design.md`
+**技术研究**: `docs/research-project-understanding.md`
+
+### M4.0 — Project Onboarder (Weeks 1-3)
+
+**目标**: 扫描已有项目，自动生成项目索引。首次 run/plan 时自动触发。
+
+- `project/models.py` — TechStack, ModuleSummary, CodeConventions, ProjectIndex
+- `project/stack_detector.py` — 技术栈自动检测（语言分布 + 框架 + 测试框架 + linter）
+- `project/module_summarizer.py` — 模块摘要提取（AST 确定性 + 可选 LLM 语义）
+- `project/convention_extractor.py` — 代码约定提取（缩进、命名、类型注解风格）
+- `project/indexer.py` — 索引编排入口
+- `cli/project.py` — project-analyze / project-index CLI 命令
+- `.weave/index/` — 索引文件存储（graph.json, modules.json, tech_stack.json, conventions.json）
+
+### M4.1 — Enhanced Dependency Graph (Weeks 4-7)
+
+**目标**: Python-only → 多语言多边类型图引擎。
+
+- `project/graph/engine.py` — ProjectGraph（build/query/subgraph/to_text）
+- `project/graph/models.py` — EdgeType (IMPORTS/INHERITS/CALLS/IMPLEMENTS/DECORATES/TESTS/REFERENCES)
+- `project/graph/base_parser.py` — 语言解析器基类
+- `project/graph/python_parser.py` — Python AST + tree-sitter
+- `project/graph/js_ts_parser.py` — JS/TS tree-sitter
+- `project/graph/go_parser.py` — Go tree-sitter
+- `project/graph/rust_parser.py` — Rust tree-sitter
+- `analysis/dependency_graph.py` → 迁移为 project/graph/engine.py 的薄适配器
+
+### M4.2 — Context Router (Weeks 8-10)
+
+**目标**: 根据任务描述选择最相关的项目上下文，Token 预算内注入。
+
+- `project/context/router.py` — BM25 + 图距离融合排序
+- `project/context/selector.py` — FULL/SIGNATURES/COMPRESSED 输出模式
+- 注入 orchestrator planning prompt (4000 tokens)
+- 注入 agent system prompt (2000 tokens)
+- 注入 evaluator (1000 tokens)
+
+### M4.3 — Project-Aware Agents (Weeks 11-13)
+
+**目标**: Viewer/Editor 代理分离，项目感知 Prompt。
+
+- `project/agents/viewer.py` — 只读分析代理（定位 + 理解）
+- `project/agents/prompts.py` — 项目感知 prompt 模板
+- Viewer/Editor 代理注册到 AgentRegistry
+- `orchestrator/prompts/planning.md` — 新增 Rule 20/21（项目感知规划 + 最小化差异原则）
+- `templates/fix_bug_v2.yaml` — 利用 Viewer/Editor 的新模板
+
+### 新增依赖
+
+```
+tree-sitter, tree-sitter-python, tree-sitter-javascript,
+tree-sitter-typescript, tree-sitter-go, tree-sitter-rust
+```
+
+### 新增环境变量
+
+```
+WEAVE_PROJECT_INDEX_ENABLED, WEAVE_PROJECT_INDEX_PATH,
+WEAVE_PROJECT_INDEX_AUTO, WEAVE_PROJECT_GRAPH_MAX_DEPTH,
+WEAVE_CONTEXT_BUDGET
+```
+
+### 新增 CLI 命令
+
+```bash
+python main.py project-analyze --project <path>
+python main.py project-index --project <path>
+python main.py project-graph --project <path> [--query X]
+python main.py project-context "task" --project <path>
 ```
