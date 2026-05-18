@@ -1,4 +1,5 @@
 """Tests for leftover generated files cleanup (#240)."""
+import os
 import time
 
 import pytest
@@ -59,7 +60,7 @@ class TestLeftoverCleanup:
             "j1", "r1", "n1",
             expected_artifacts=["src/a.py"],
         )
-        assert "src/extra.py" in cleaned
+        assert os.path.normpath("src/extra.py") in cleaned
         assert (workspace / "src" / "a.py").exists()
         assert not (workspace / "src" / "extra.py").exists()
         assert (workspace / ".leftovers" / "src" / "extra.py").exists()

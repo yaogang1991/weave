@@ -5,6 +5,7 @@ All tools share a unified interface: execute(name, input) -> ToolResult
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -108,8 +109,10 @@ class ToolRegistry:
             return f"Path resolution failed for '{file_path}'"
         resolved_str = str(resolved)
         for fb in forbidden:
+            # Normalize forbidden path to OS-native separators (#581)
+            fb_norm = fb.replace("/", os.sep)
             # Check suffix match (handles relative vs absolute differences)
-            if resolved_str.endswith(fb) or resolved_str.endswith("/" + fb):
+            if resolved_str.endswith(fb_norm) or resolved_str.endswith(os.sep + fb_norm):
                 return (
                     f"File '{file_path}' is owned by another parallel node "
                     f"and is forbidden for this node (#272)."

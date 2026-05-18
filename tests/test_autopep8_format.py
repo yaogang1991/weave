@@ -9,6 +9,7 @@ Covers:
 - returncode != 0 handling
 - Different-directory same-name files produce distinct paths
 """
+import os
 import subprocess  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -189,7 +190,7 @@ class TestAutopep8Format:
         with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
             engine._run_lint(["pkg/a.py", "a.py"], tmp_path)
 
-        assert sorted(engine._last_auto_formatted) == ["a.py", "pkg/a.py"]
+        assert sorted(engine._last_auto_formatted) == sorted(["a.py", os.path.normpath("pkg/a.py")])
 
     def test_select_does_not_include_e501(self, tmp_path):
         """autopep8 --select should not include E501 (first version: low-risk only)."""

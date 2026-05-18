@@ -44,7 +44,10 @@ class TestPathTraversalPrevention:
     def test_blocks_symlink_escape(self, tmp_path):
         """Symlink pointing outside workspace is blocked."""
         link = tmp_path / "escape"
-        link.symlink_to("/etc")
+        # Use a directory that exists on both Unix and Windows (#581)
+        outside = tmp_path.parent / "_outside_target"
+        outside.mkdir(exist_ok=True)
+        link.symlink_to(str(outside))
         registry = ToolRegistry(base_cwd=str(tmp_path))
         with pytest.raises(ValueError, match="Path escapes workspace"):
             registry._resolve_path("escape/shadow")
