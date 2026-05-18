@@ -138,7 +138,7 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `control_plane/execution_factory.py` — Factory for creating orchestrator + engine per run
 - `control_plane/job_lifecycle.py` — Job state transitions and lifecycle management
 - `control_plane/run_lifecycle.py` — Run state transitions
-- `control_plane/job_result.py` — Job result aggregation
+- `control_plane/service.py` — `_write_job_result()` module-level function for job result artifact generation (inlined from deleted `job_result.py` in #572)
 - `control_plane/backend_lifecycle.py` — Backend setup/cleanup integration
 - `control_plane/worker.py` — Worker queue consumer with lease mechanism
 - `control_plane/worker_executor.py` — Single job execution within worker (extracted from worker)

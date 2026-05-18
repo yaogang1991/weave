@@ -419,7 +419,7 @@ weave/
 │   ├── execution_factory.py       # 工厂
 │   ├── job_lifecycle.py           # Job 生命周期
 │   ├── run_lifecycle.py           # Run 生命周期
-│   ├── job_result.py              # 结果聚合
+│   │   # _write_job_result() lives in service.py (#572)
 │   ├── backend_lifecycle.py       # Backend 集成
 │   ├── worker.py                  # Worker 消费者
 │   ├── worker_executor.py         # Job 执行

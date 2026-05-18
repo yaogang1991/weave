@@ -223,7 +223,7 @@ Available Worker Agents:
 | `execution_factory.py` | 编排器 + 引擎工厂（per-run 创建） |
 | `job_lifecycle.py` | Job 状态转换与生命周期管理 |
 | `run_lifecycle.py` | Run 状态转换 |
-| `job_result.py` | Job 结果聚合 |
+| `service.py` (`_write_job_result`) | Job 结果聚合（内联自已删除的 `job_result.py`） |
 | `backend_lifecycle.py` | Backend 创建/清理集成 |
 | `worker.py` | Worker 队列消费者（Lease 机制） |
 | `worker_executor.py` | Worker 内单 Job 执行逻辑（从 worker 拆分） |
@@ -582,7 +582,7 @@ weave/
 │   ├── execution_factory.py       # 编排器 + 引擎工厂
 │   ├── job_lifecycle.py           # Job 状态转换
 │   ├── run_lifecycle.py           # Run 状态转换
-│   ├── job_result.py              # Job 结果聚合
+│   │   # _write_job_result() lives in service.py (#572)
 │   ├── backend_lifecycle.py       # Backend 集成
 │   ├── worker.py                  # Worker 队列消费者
 │   ├── worker_executor.py         # 单 Job 执行逻辑
