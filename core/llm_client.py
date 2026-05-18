@@ -85,6 +85,9 @@ class LLMClient:
         # acts as a safety net so the call always returns within a bounded
         # time.  Set to 2× the configured timeout + 30s buffer.
         self._hard_timeout = config.timeout * 2 + 30
+        # Track last rate-limit recovery for cooldown between calls (#583).
+        self._last_rate_limit_recovery: float = 0.0
+        self._rate_limit_cooldown_sec: float = 5.0
 
     @staticmethod
     def _parse_tool_arguments(raw: str | None) -> dict:
@@ -195,9 +198,25 @@ class LLMClient:
         sleep_budget = (agent_timeout * 0.5) if agent_timeout else None
         cumulative_sleep = 0.0
 
+        # Cooldown after rate-limit recovery (#583): some LLM backends
+        # (e.g. glm-5.1) return degraded responses immediately after a
+        # 429. A short delay lets the rate-limit window fully clear.
+        elapsed_since_rl = time.monotonic() - self._last_rate_limit_recovery
+        if 0 < elapsed_since_rl < self._rate_limit_cooldown_sec:
+            cooldown = self._rate_limit_cooldown_sec - elapsed_since_rl
+            logger.info("Rate-limit cooldown: %.1fs remaining (#583)", cooldown)
+            time.sleep(cooldown)
+
+        rate_limited_in_this_call = False
+
         for attempt in range(retries + 1):
             try:
-                return self._call_once(messages, tools, tool_choice)
+                result = self._call_once(messages, tools, tool_choice)
+                # Mark rate-limit recovery time (#583)
+                if rate_limited_in_this_call:
+                    self._last_rate_limit_recovery = time.monotonic()
+                    logger.info("Rate-limit recovery cooldown started (#583)")
+                return result
             except Exception as e:
                 if attempt == retries:
                     # Rate-limit exhausted all retries → RateLimitError (#360).
@@ -232,6 +251,7 @@ class LLMClient:
                     or "rate_limit" in error_lower
                     or "ratelimit" in error_lower
                 ):
+                    rate_limited_in_this_call = True
                     # #432: Bail early if cumulative sleep already ate
                     # more than 50% of the agent timeout budget.
                     if sleep_budget is not None and cumulative_sleep >= sleep_budget:
