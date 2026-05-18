@@ -38,7 +38,6 @@ from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.dag_checkpoint import CheckpointManager
-from core.dag_compat import DAGCompatMixin
 from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
 
 
@@ -48,7 +47,7 @@ ReplanHandler = Callable[[DAG, str], Awaitable[DAG]]
 logger = logging.getLogger(__name__)
 
 
-class DAGExecutionEngine(DAGCompatMixin):
+class DAGExecutionEngine:
     """
     Executes a DAG by:
     1. Computing topological levels
@@ -165,6 +164,53 @@ class DAGExecutionEngine(DAGCompatMixin):
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
         self.event_handlers.append(handler)
+
+    # -- Accessor properties for sub-services (inlined from DAGCompatMixin) --
+
+    @property
+    def agent_executor(self):
+        """Agent executor callable, delegated to NodeExecutor."""
+        return self._node_executor.agent_executor
+
+    @agent_executor.setter
+    def agent_executor(self, value):
+        self._node_executor.agent_executor = value
+
+    @property
+    def evaluator(self):
+        """Evaluator engine, delegated to NodeExecutor."""
+        return self._node_executor.evaluator
+
+    @evaluator.setter
+    def evaluator(self, value):
+        self._node_executor.evaluator = value
+
+    @property
+    def heartbeat_interval_sec(self) -> float:
+        return self._watchdog._interval_sec
+
+    @property
+    def heartbeat_miss_threshold(self) -> int:
+        return self._watchdog._miss_threshold
+
+    @property
+    def enable_watchdog(self) -> bool:
+        return self._watchdog._enabled
+
+    @property
+    def _running_nodes(self) -> dict[str, Any]:
+        return self._watchdog._running_nodes
+
+    def _get_heartbeat_settings(self, agent_type: str) -> tuple[float, int]:
+        return self._watchdog.get_heartbeat_settings(agent_type)
+
+    def _get_alert_threshold(self, agent_type: str) -> int:
+        return self._watchdog.get_alert_threshold(agent_type)
+
+    @property
+    def _best_attempts(self) -> dict[str, dict]:
+        """Best-attempt tracking data, delegated to RetryPolicyEngine."""
+        return self._retry_policy._best_attempts
 
     async def _emit(self, event: ExecutionEvent) -> None:
         """Emit execution event to all handlers."""
