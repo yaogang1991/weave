@@ -1,7 +1,7 @@
 [project]
 name = "weave"
 version = "0.3.7"
-description = "Weave - Autonomous Multi-Agent Orchestration for Software Development"
+description = "Self-hosted multi-agent orchestration for autonomous software development — LLM-driven DAG planning, agent memory, self-learning, impact analysis, MCP/A2A integration"
 requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.40.0",
