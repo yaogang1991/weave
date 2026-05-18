@@ -316,6 +316,13 @@ class TestNodeTimeoutConfig:
         cfg = NodeTimeoutConfig()
         assert cfg.timeout_for("generator") == 600
 
+    def test_evaluator_override(self):
+        """Evaluator gets longer timeout than default for test+lint runs (#568)."""
+        from core.config import NodeTimeoutConfig
+        cfg = NodeTimeoutConfig()
+        assert cfg.timeout_for("evaluator") == 480
+        assert cfg.timeout_for("evaluator") > cfg.default_timeout
+
     def test_env_var_override(self):
         """Verify default_timeout can be explicitly set (env var is read at
         import time, not instance creation time, so we pass it explicitly)."""
