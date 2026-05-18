@@ -198,8 +198,13 @@ class ContextManager:
         result = []
         for i, m in enumerate(messages):
             if i in stale_indices:
-                # Replace with placeholder to preserve message ordering
-                result.append({"role": "tool", "content": "[cleared]"})
+                # Replace with placeholder to preserve message ordering (#570)
+                # Keep tool_call_id so _call_anthropic doesn't KeyError
+                result.append({
+                    "role": "tool",
+                    "tool_call_id": m.get("tool_call_id", f"cleared_{i}"),
+                    "content": "[cleared]",
+                })
             else:
                 result.append(m)
         return result

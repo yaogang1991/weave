@@ -132,3 +132,26 @@ class TestClearStaleToolResults:
         assert result[0] == {"role": "assistant", "content": "thinking"}
         assert result[1]["content"] == "[cleared]"
         assert result[2]["content"] == "recent result"
+
+    def test_preserves_tool_call_id_when_cleared(self):
+        """Cleared tool results keep tool_call_id to avoid KeyError (#570)."""
+        messages = [
+            {"role": "tool", "tool_call_id": "call_abc123", "content": "old"},
+            {"role": "tool", "tool_call_id": "call_def456", "content": "recent"},
+        ]
+        result = ContextManager._clear_stale_tool_results(messages, keep_last_n=1)
+        assert result[0]["content"] == "[cleared]"
+        assert result[0]["tool_call_id"] == "call_abc123"
+        assert result[1]["tool_call_id"] == "call_def456"
+        assert result[1]["content"] == "recent"
+
+    def test_fallback_tool_call_id_when_missing(self):
+        """Missing tool_call_id gets a fallback value (#570)."""
+        messages = [
+            {"role": "tool", "content": "old no id"},
+            {"role": "tool", "tool_call_id": "call_xyz", "content": "recent"},
+        ]
+        result = ContextManager._clear_stale_tool_results(messages, keep_last_n=1)
+        assert result[0]["content"] == "[cleared]"
+        assert "tool_call_id" in result[0]
+        assert result[0]["tool_call_id"].startswith("cleared_")
