@@ -102,6 +102,40 @@ class LLMClient:
             logger.warning("Malformed tool arguments, defaulting to {}: %s", raw[:200])
             return {}
 
+    @staticmethod
+    def _extract_tool_args_from_text(
+        text: str, tool_name: str,
+    ) -> dict | None:
+        """Try to extract tool arguments from text content (#579).
+
+        Some LLM backends (e.g. glm-5.1 via Anthropic-compatible API) return
+        tool_use blocks with empty input but include the arguments as JSON in
+        the text content. This fallback attempts to parse that JSON.
+        """
+        import re
+        # Look for JSON objects in the text that might be tool arguments
+        # Pattern: find the largest JSON-like object after the tool name
+        pattern = rf'{re.escape(tool_name)}\s*(?:\(|:)\s*(\{{[^}}]*\}})'
+        match = re.search(pattern, text)
+        if match:
+            try:
+                parsed = json.loads(match.group(1))
+                if isinstance(parsed, dict):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Fallback: find any JSON object in the text
+        for match in re.finditer(r'\{[^{}]*\}', text):
+            try:
+                parsed = json.loads(match.group())
+                if isinstance(parsed, dict) and len(parsed) >= 2:
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+        return None
+
     def _create_client(self):
         # Explicit httpx.Timeout with separate connect/read/write/pool
         # (#401, #367). A plain int timeout can fail to fire when a TCP
@@ -429,14 +463,31 @@ class LLMClient:
         msg: dict = {"role": "assistant", "content": ""}
 
         tool_calls = []
+        text_content = ""
         for block in response.content:
             if block.type == "text":
-                msg["content"] += block.text
-            elif block.type == "tool_use":
+                text_content += block.text
+
+        msg["content"] = text_content
+
+        for block in response.content:
+            if block.type == "tool_use":
+                args = block.input if isinstance(block.input, dict) else {}
+                # Fallback: try extracting args from text content (#579)
+                if not args and text_content:
+                    extracted = self._extract_tool_args_from_text(
+                        text_content, block.name,
+                    )
+                    if extracted:
+                        logger.info(
+                            "Extracted tool args from text for %s (input was empty) (#579)",
+                            block.name,
+                        )
+                        args = extracted
                 tool_calls.append({
                     "id": block.id,
                     "name": block.name,
-                    "arguments": block.input if isinstance(block.input, dict) else {},
+                    "arguments": args,
                 })
 
         if tool_calls:
