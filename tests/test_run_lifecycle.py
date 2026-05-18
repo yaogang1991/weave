@@ -1,5 +1,5 @@
 """
-Tests for #177 PR 1: RunLifecycleManager and JobResultWriter.
+Tests for #177 PR 1: RunLifecycleManager and _write_job_result.
 
 Verifies that extracted lifecycle methods and result generation behave
 identically to the inline code they replace.
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 from control_plane.models import Job, JobStatus, Run, RunStatus
 from control_plane.repository import JobRepository
 from control_plane.run_lifecycle import RunLifecycleManager
-from control_plane.job_result import JobResultWriter
+from control_plane.service import _write_job_result
 
 
 def _make_run(**overrides) -> Run:
@@ -120,10 +120,9 @@ class TestRunLifecycleManager:
 
 class TestJobResultWriter:
     def test_generate_basic(self, tmp_path):
-        writer = JobResultWriter(artifact_path=str(tmp_path))
         run = _make_run()
         job = _make_job()
-        result = writer.generate(job, run, {"all_succeeded": True})
+        result = _write_job_result(str(tmp_path), job, run, {"all_succeeded": True})
 
         assert result["job"]["id"] == "job-1"
         assert result["run"]["id"] == "run-1"
@@ -131,19 +130,17 @@ class TestJobResultWriter:
         assert result["errors"] == []
 
     def test_generate_with_error(self, tmp_path):
-        writer = JobResultWriter(artifact_path=str(tmp_path))
         run = _make_run()
         job = _make_job(last_error="timeout exceeded", error_category="timeout")
-        result = writer.generate(job, run, {})
+        result = _write_job_result(str(tmp_path), job, run, {})
 
         assert len(result["errors"]) == 1
         assert result["errors"][0]["message"] == "timeout exceeded"
 
     def test_generate_writes_file(self, tmp_path):
-        writer = JobResultWriter(artifact_path=str(tmp_path))
         run = _make_run()
         job = _make_job()
-        writer.generate(job, run, {})
+        _write_job_result(str(tmp_path), job, run, {})
 
         result_file = tmp_path / "job-1" / "job_result.json"
         assert result_file.exists()
@@ -151,8 +148,7 @@ class TestJobResultWriter:
         assert data["job"]["id"] == "job-1"
 
     def test_generate_no_error_field(self, tmp_path):
-        writer = JobResultWriter(artifact_path=str(tmp_path))
         run = _make_run()
         job = _make_job()  # no last_error
-        result = writer.generate(job, run, {})
+        result = _write_job_result(str(tmp_path), job, run, {})
         assert result["errors"] == []
