@@ -2,7 +2,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-2.0.0-orange.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/Version-0.3.7-orange.svg)](pyproject.toml)
 
 **智能多Agent编排 · 自主软件开发系统**
 

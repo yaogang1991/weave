@@ -1,6 +1,6 @@
 [project]
 name = "weave"
-version = "2.0.0"
+version = "0.3.7"
 description = "Weave - Autonomous Multi-Agent Orchestration for Software Development"
 requires-python = ">=3.11"
 dependencies = [
