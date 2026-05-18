@@ -532,10 +532,15 @@ class IntelligentOrchestrator:
         dag = DAG(reasoning=plan.reasoning)
 
         for node_def in plan.nodes:
+            task_desc = (
+                node_def.get("task")
+                or node_def.get("task_description")
+                or node_def.get("description", "")
+            )
             node = DAGNode(
                 id=node_def["id"],
                 agent_type=node_def["agent_type"],
-                task_description=node_def["task"],
+                task_description=task_desc,
                 success_criteria=node_def.get("success_criteria", []),
                 owned_files=node_def.get("owned_files", []),
             )

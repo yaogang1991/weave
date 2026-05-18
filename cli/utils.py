@@ -61,7 +61,9 @@ def _resolve_project_path(project: str | None, allow_self_modify: bool = False) 
     return str(cwd)
 
 
-def _check_dirty_workspace(project: str | None) -> None:
+def _check_dirty_workspace(
+    project: str | None, *, non_interactive: bool = False,
+) -> None:
     """Warn if the project workspace has uncommitted changes (#147)."""
     if not project:
         return
@@ -90,7 +92,7 @@ def _check_dirty_workspace(project: str | None) -> None:
         f"This may be from a previous incomplete run.\n"
     )
 
-    non_interactive = _get_non_interactive_env().lower() in (
+    non_interactive = non_interactive or _get_non_interactive_env().lower() in (
         "true", "1", "yes",
     )
     if non_interactive:

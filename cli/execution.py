@@ -508,7 +508,10 @@ async def cmd_run(args):
     )
     args.project = project
 
-    _check_dirty_workspace(args.project)
+    _check_dirty_workspace(
+        args.project,
+        non_interactive=getattr(args, "non_interactive", False),
+    )
 
     _check_stdlib_shadowing(
         args.project,
