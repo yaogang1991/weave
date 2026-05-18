@@ -23,6 +23,7 @@ import logging
 import sys
 import traceback
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any  # noqa: F401 — still used for dict[str, Any] return types
@@ -203,6 +204,22 @@ def _write_job_result(
     with open(artifact_dir / "job_result.json", "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, default=str, ensure_ascii=False)
     return result
+
+
+@dataclass
+class _RunContext:
+    """Execution context bundled for outcome resolution."""
+
+    job: Job                          # Original job (always non-None)
+    run: Run
+    outcome: str                      # "succeeded" | "failed" | "timed_out" | "canceled"
+    result_dag: DAG | None = None
+    error_msg: str = ""
+    error_cat: str = ""
+    timeout: int = 1800
+    backend_manager: Any = None       # BackendManager | None
+    bls: Any = None                   # BackendLifecycleService | None
+    work_dir: str | None = None
 
 
 # ============================================================================
@@ -415,11 +432,12 @@ class RunService:
                 error_cat = classify_error(str(exc))
 
             # --- Resolve outcome (unified for all paths) ---
-            run = await self._resolve_run_outcome(
-                job_id, run, outcome, result_dag,
-                error_msg, error_cat, timeout,
-                backend_manager, bls, work_dir,
+            ctx = _RunContext(
+                job=job, run=run, outcome=outcome, result_dag=result_dag,
+                error_msg=error_msg, error_cat=error_cat, timeout=timeout,
+                backend_manager=backend_manager, bls=bls, work_dir=work_dir,
             )
+            run = await self._resolve_run_outcome(ctx)
 
         finally:
             self._running_tasks.pop(job_id, None)
@@ -609,115 +627,92 @@ class RunService:
     # Outcome resolution
     # ------------------------------------------------------------------
 
-    async def _resolve_run_outcome(
-        self,
-        job_id: str,
-        run: Run,
-        outcome: str,
-        result_dag: DAG | None,
-        error_msg: str,
-        error_cat: str,
-        timeout: int,
-        backend_manager: BackendManager | None,
-        bls: Any,
-        work_dir: str | None,
-    ) -> Run:
+    async def _resolve_run_outcome(self, ctx: _RunContext) -> Run:
         """Unified outcome resolution for all execution paths.
 
         Handles run/job state transitions, retry policy, and workspace
         cleanup/preserve in one place instead of duplicated per-exception blocks.
-
-        Args:
-            outcome: One of "succeeded", "failed", "timed_out", "canceled".
         """
+        job_id = ctx.job.id
         current_job = self.repository.get_job(job_id)
 
         # External cancel takes priority over local outcome
-        if current_job and current_job.status == JobStatus.CANCELED and outcome != "canceled":
-            run = self._lifecycle.mark_canceled(run, "Job canceled during execution")
-            self._preserve_workspace(backend_manager, bls, current_job, run, work_dir, "canceled")
+        if current_job and current_job.status == JobStatus.CANCELED and ctx.outcome != "canceled":
+            run = self._lifecycle.mark_canceled(ctx.run, "Job canceled during execution")
+            self._preserve_workspace(ctx, reason="canceled")
             return run
 
         # --- Succeeded ---
-        if outcome == "succeeded":
-            summary = _compute_summary(result_dag)
-            run = self._lifecycle.mark_succeeded(run, summary)
+        if ctx.outcome == "succeeded":
+            summary = _compute_summary(ctx.result_dag)
+            run = self._lifecycle.mark_succeeded(ctx.run, summary)
             if current_job:
                 resolved = self._lifecycle.resolve_external_status(run, current_job)
                 if resolved:
-                    self._preserve_workspace(
-                        backend_manager, bls, current_job, run,
-                        work_dir, "external_status_change",
-                    )
+                    self._preserve_workspace(ctx, run=run, reason="external_status_change")
                     return run
             self.repository.transition_job_status(job_id, JobStatus.SUCCEEDED)
-            self._cleanup_workspace(backend_manager, bls, current_job, run, work_dir)
+            self._cleanup_workspace(ctx, run=run)
             return run
 
         # --- Canceled ---
-        if outcome == "canceled":
-            run = self._lifecycle.mark_canceled(run, "Run coroutine canceled")
+        if ctx.outcome == "canceled":
+            run = self._lifecycle.mark_canceled(ctx.run, "Run coroutine canceled")
             if current_job and current_job.status == JobStatus.RUNNING:
                 self.repository.transition_job_status(
                     job_id, JobStatus.CANCELED,
                     error="Run canceled", error_category="tool_blocked",
                 )
-            self._preserve_workspace(backend_manager, bls, current_job, run, work_dir, "canceled")
+            self._preserve_workspace(ctx, run=run, reason="canceled")
             return run
 
         # --- Failed or Timed Out ---
-        if outcome == "timed_out":
-            run = self._lifecycle.mark_timed_out(run, timeout)
-            error_msg = error_msg or "Job execution timed out"
-            error_cat = error_cat or "timeout"
+        run = ctx.run
+        if ctx.outcome == "timed_out":
+            run = self._lifecycle.mark_timed_out(run, ctx.timeout)
+            ctx.error_msg = ctx.error_msg or "Job execution timed out"
+            ctx.error_cat = ctx.error_cat or "timeout"
         else:
-            summary = _compute_summary(result_dag) if result_dag else {}
+            summary = _compute_summary(ctx.result_dag) if ctx.result_dag else {}
             run = self._lifecycle.mark_failed(run, summary or {"error": "execution_error"})
 
         self.repository.transition_job_status(
             job_id, JobStatus.FAILED,
-            error=error_msg, error_category=error_cat,
+            error=ctx.error_msg, error_category=ctx.error_cat,
         )
 
         # Node-level timeout: upgrade run status to TIMED_OUT
-        if error_cat == "timeout" and result_dag:
+        if ctx.error_cat == "timeout" and ctx.result_dag:
             failed_nodes = [
-                nid for nid, n in result_dag.nodes.items()
+                nid for nid, n in ctx.result_dag.nodes.items()
                 if n.status == NodeStatus.FAILED
             ]
             if failed_nodes:
-                run = self._lifecycle.mark_timed_out(run, timeout)
+                run = self._lifecycle.mark_timed_out(run, ctx.timeout)
 
-        job = self.repository.get_job(job_id)
-        assert job is not None
+        # Re-fetch job for retry policy (state may have changed)
+        job = self.repository.get_job(job_id) or ctx.job
         await self._job_lifecycle.handle_job_failure(
-            job, error=error_msg, error_category=error_cat,
+            job, error=ctx.error_msg, error_category=ctx.error_cat,
         )
-        self._preserve_workspace(
-            backend_manager, bls, job, run,
-            work_dir, error_cat or "failed",
-        )
+        self._preserve_workspace(ctx, run=run, reason=ctx.error_cat or "failed")
         return run
 
     def _preserve_workspace(
         self,
-        backend_manager: BackendManager | None,
-        bls: Any,
-        job: Job,
-        run: Run,
-        work_dir: str | None,
-        reason: str,
+        ctx: _RunContext,
+        run: Run | None = None,
+        reason: str = "unknown",
     ) -> None:
-        if work_dir is not None and backend_manager and bls:
-            bls.preserve(backend_manager, job.id, run.id, reason=reason)
+        if ctx.work_dir is not None and ctx.backend_manager and ctx.bls:
+            ctx.bls.preserve(
+                ctx.backend_manager, ctx.job.id, (run or ctx.run).id, reason=reason,
+            )
 
     def _cleanup_workspace(
         self,
-        backend_manager: BackendManager | None,
-        bls: Any,
-        job: Job | None,
-        run: Run,
-        work_dir: str | None,
+        ctx: _RunContext,
+        run: Run | None = None,
     ) -> None:
-        if work_dir is not None and backend_manager and bls and job:
-            bls.cleanup(backend_manager, job.id, run.id)
+        if ctx.work_dir is not None and ctx.backend_manager and ctx.bls:
+            ctx.bls.cleanup(ctx.backend_manager, ctx.job.id, (run or ctx.run).id)
