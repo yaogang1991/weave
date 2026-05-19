@@ -91,6 +91,8 @@ class DAGExecutionEngine:
         run_id: str = "",
         # #455: DAG execution state persistence for crash recovery
         checkpoint_dir: str = "./data/dag_progress",
+        # M4.0: Backend registry for per-node backend selection
+        backend_registry: Any | None = None,
     ):
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
@@ -152,6 +154,8 @@ class DAGExecutionEngine:
             run_id=run_id,
             backoff_base=backoff_base,
             backoff_cap=backoff_cap,
+            backend_registry=backend_registry,
+            session_id=session_id or "",
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager

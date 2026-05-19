@@ -334,6 +334,8 @@ def _build_runtime(
     project_work_dir = str(Path(args.project).resolve())
     wd_cfg = config.watchdog
     from core.dag_engine import DAGExecutionEngine
+    from agent.backends.registry import BackendRegistry
+    backend_registry = BackendRegistry(pool=pool, session_id=session_id)
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
@@ -356,6 +358,7 @@ def _build_runtime(
             agent_type: wd_cfg.alert_threshold_for(agent_type)
             for agent_type in wd_cfg.agent_overrides
         },
+        backend_registry=backend_registry,
     )
 
     return {

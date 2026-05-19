@@ -35,6 +35,7 @@ from core.models import (
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError
 from core.exceptions import NodeTimeoutError
+from core.backend_models import BackendContext
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
@@ -69,6 +70,8 @@ class NodeExecutor:
         run_id: str = "",
         backoff_base: float = 2.0,
         backoff_cap: float = 60.0,
+        backend_registry: Any | None = None,
+        session_id: str = "",
     ) -> None:
         self.agent_executor = agent_executor
         self._emit = emit_func
@@ -84,6 +87,8 @@ class NodeExecutor:
         self._run_id = run_id
         self.backoff_base = backoff_base
         self.backoff_cap = backoff_cap
+        self._backend_registry = backend_registry
+        self._session_id = session_id
         # Thread pool for synchronous evaluator calls
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         # Track running tasks for cancellation support
@@ -500,6 +505,8 @@ class NodeExecutor:
         - Cooperative cancellation: threading.Event passed to agent thread
         - Progress reporting: agent reports heartbeat after each LLM call and
           tool execution via progress_callback.
+        - M4.0: When backend_registry is set, dispatches via BackendRegistry
+          instead of the agent_executor closure.
         """
         timeout = self._get_node_timeout(node.agent_type)
         cancel_event = threading.Event()
@@ -512,15 +519,38 @@ class NodeExecutor:
             except RuntimeError:
                 pass  # Event loop closed
 
-        async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
-            return await self.agent_executor(
-                n, arts,
+        if self._backend_registry is not None:
+            # M4.0: Use BackendRegistry path
+            context = BackendContext(
+                node=node,
+                artifacts=input_artifacts,
+                session_id=self._session_id,
+                workspace_path=workspace_path,
+                job_id=self._job_id,
+                run_id=self._run_id,
                 cancel_event=cancel_event,
                 progress_callback=_on_progress,
-                workspace_path=workspace_path,
             )
+            backend_name = getattr(node, 'backend', 'builtin')
 
-        task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
+            async def _run_via_registry() -> dict:
+                result = await self._backend_registry.execute_for_node(
+                    backend_name, context,
+                )
+                return result.to_dict()
+
+            task = asyncio.create_task(_run_via_registry())
+        else:
+            # Legacy path: use agent_executor closure directly
+            async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
+                return await self.agent_executor(
+                    n, arts,
+                    cancel_event=cancel_event,
+                    progress_callback=_on_progress,
+                    workspace_path=workspace_path,
+                )
+
+            task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
 
         try:
             return await asyncio.wait_for(task, timeout=timeout)

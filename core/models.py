@@ -77,9 +77,17 @@ from core.mcp_models import (
     Skill,
     SkillVariable,
 )
+from core.backend_models import (  # noqa: F401
+    BackendContext,
+    BackendResult,
+    BackendStatus,
+)
 
 __all__ = [
     "AgentCapability",
+    "BackendContext",
+    "BackendResult",
+    "BackendStatus",
     "AgentMessage",
     "ConflictResolution",
     "CriterionType",
