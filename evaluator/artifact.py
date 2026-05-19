@@ -147,7 +147,7 @@ def scope_artifacts_to_criteria(
                 break
         else:
             # Also check if artifact is directly in expected_paths
-            if art in expected_paths or any(art_rel.endswith("/" + e.replace("\\", "/")) for e in expected_paths):
+            if art_rel in expected_paths or any(art_rel.endswith("/" + e.replace("\\", "/")) for e in expected_paths):
                 scoped.append(art)
 
     if scoped:
