@@ -9,6 +9,7 @@ Covers:
 - returncode != 0 handling
 - Different-directory same-name files produce distinct paths
 """
+import os
 import subprocess  # noqa: F401
 from pathlib import Path
 from unittest.mock import MagicMock, patch

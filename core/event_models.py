@@ -76,6 +76,11 @@ class EventType(str, Enum):
     MCP_SERVER_ERROR = "mcp.server_error"
     MCP_TOOL_DISCOVERED = "mcp.tool_discovered"
 
+    # Budget events (M4.2)
+    BUDGET_WARNING = "budget.warning"
+    BUDGET_EXHAUSTED = "budget.exhausted"
+    AGENT_STUCK = "agent.stuck"
+
 
 class Event(BaseModel):
     """Immutable event in the session log."""

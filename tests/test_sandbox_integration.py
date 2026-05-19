@@ -321,34 +321,43 @@ class TestLocalSandboxCredentialIsolation:
         assert result["ANTHROPIC_API_KEY"] == "sk-explicit"
 
     @pytest.mark.asyncio
-    async def test_api_key_not_visible_in_sandbox(self):
+    async def test_api_key_not_visible_in_sandbox(self, tmp_path):
         """Sandbox subprocess cannot read ANTHROPIC_API_KEY."""
+        import sys
         sandbox = LocalSandbox()
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test-secret-key"}):
+            if sys.platform == "win32":
+                cmd = "echo %ANTHROPIC_API_KEY%"
+            else:
+                cmd = "echo $ANTHROPIC_API_KEY"
             result = await sandbox.run_command(
-                "echo $ANTHROPIC_API_KEY", cwd="/tmp",
+                cmd, cwd=str(tmp_path),
             )
         assert "sk-test-secret-key" not in result.stdout
 
     @pytest.mark.asyncio
-    async def test_path_preserved_in_sandbox(self):
+    async def test_path_preserved_in_sandbox(self, tmp_path):
         """Non-sensitive env vars like PATH are preserved."""
+        import sys
         sandbox = LocalSandbox()
-        result = await sandbox.run_command("echo $PATH", cwd="/tmp")
+        if sys.platform == "win32":
+            cmd = "echo %PATH%"
+        else:
+            cmd = "echo $PATH"
+        result = await sandbox.run_command(cmd, cwd=str(tmp_path))
         assert result.stdout.strip()  # PATH is non-empty
 
     @pytest.mark.asyncio
-    async def test_explicit_env_not_stripped(self):
+    async def test_explicit_env_not_stripped(self, tmp_path):
         """When caller provides explicit env, values are passed through."""
         import sys
-
         sandbox = LocalSandbox()
         if sys.platform == "win32":
             cmd = "echo %MY_VAR%"
         else:
             cmd = "echo $MY_VAR"
         result = await sandbox.run_command(
-            cmd, cwd="/tmp", env={"MY_VAR": "test_value"},
+            cmd, cwd=str(tmp_path), env={"MY_VAR": "test_value"},
         )
         assert "test_value" in result.stdout
 

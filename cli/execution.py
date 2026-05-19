@@ -334,6 +334,17 @@ def _build_runtime(
     project_work_dir = str(Path(args.project).resolve())
     wd_cfg = config.watchdog
     from core.dag_engine import DAGExecutionEngine
+    from agent.backends.registry import BackendRegistry
+    backend_registry = BackendRegistry(pool=pool, session_id=session_id)
+
+    # M4.2: Budget manager from CLI args
+    budget_manager = None
+    budget_tokens = getattr(args, "budget_tokens", None)
+    if budget_tokens and budget_tokens > 0:
+        from core.budget_manager import BudgetManager
+        from core.config import BudgetConfig
+        budget_manager = BudgetManager(BudgetConfig(total_tokens=budget_tokens))
+
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
@@ -356,6 +367,8 @@ def _build_runtime(
             agent_type: wd_cfg.alert_threshold_for(agent_type)
             for agent_type in wd_cfg.agent_overrides
         },
+        backend_registry=backend_registry,
+        budget_manager=budget_manager,
     )
 
     return {
@@ -533,6 +546,7 @@ async def cmd_run(args):
         no_browser=args.no_browser,
         template=getattr(args, "template", None),
         var=getattr(args, "var", []),
+        budget_tokens=getattr(args, "budget_tokens", None),
     )
     return await cmd_execute(exec_args, dag=dag)
 

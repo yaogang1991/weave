@@ -5,6 +5,8 @@ When a file_pattern criterion like "tests/test_*.py" is used, it should
 cross-reference against output_artifacts to avoid false PASS from
 pre-existing harness test files.
 """
+import os
+
 import pytest
 from pathlib import Path
 
@@ -146,7 +148,7 @@ class TestFilterOwned:
 
         files = [tmp_path / "src" / "a.py", tmp_path / "src" / "b.py"]
         result = FileExistsChecker._filter_owned(
-            files, ["src/a.py"], tmp_path,
+            files, [os.path.normpath("src/a.py")], tmp_path,
         )
         assert len(result) == 1
         assert result[0].name == "a.py"

@@ -352,6 +352,7 @@ class IntelligentOrchestrator:
                         "agent_type": node.agent_type,
                         "task_description": node.task_description,
                         "dependencies": node.dependencies,
+                        "backend": node.backend,
                     }
                     for node in dag_model.nodes
                 ],
@@ -543,6 +544,7 @@ class IntelligentOrchestrator:
                 task_description=task_desc,
                 success_criteria=node_def.get("success_criteria", []),
                 owned_files=node_def.get("owned_files", []),
+                backend=node_def.get("backend", "builtin"),
             )
             dag.add_node(node)
 

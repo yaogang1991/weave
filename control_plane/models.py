@@ -145,6 +145,7 @@ class Job(BaseModel):
             "", "timeout", "eval_failed", "tool_blocked",
             "unknown", "watchdog", "approval_timeout", "rate_limit",
             "coverage_low", "naming_mismatch", "runtime_error",
+            "budget_exhausted",
         }
         if v not in allowed:
             raise ValueError(f"Invalid error_category: {v!r}")

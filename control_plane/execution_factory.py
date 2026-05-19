@@ -16,6 +16,7 @@ from core.agent_registry import AgentRegistry
 from core.models import EventType, PersonalGuardrailPolicy
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from agent.agent_pool import AgentPool
+from agent.backends.registry import BackendRegistry
 from session.store import SessionStore
 from tools.registry import ToolRegistry
 from guardrails.policy import (
@@ -49,6 +50,7 @@ class ExecutionFactory:
         hooks: list[Any],
         approval_repo: Any | None = None,
         policy: GuardrailPolicy | None = None,
+        budget_manager: Any | None = None,
     ) -> None:
         self._llm_config = llm_config
         self._max_parallel = max_parallel
@@ -59,6 +61,7 @@ class ExecutionFactory:
         self._non_interactive = non_interactive
         self._watchdog_config = watchdog_config
         self._hooks = hooks
+        self._budget_manager = budget_manager
         self._approval_repo = approval_repo
         self._policy = policy
 
@@ -166,6 +169,9 @@ class ExecutionFactory:
             auto_format_before_eval=_cfg.auto_format_before_eval,
         )
 
+        # M4.0: Create BackendRegistry wrapping the AgentPool
+        backend_registry = BackendRegistry(pool=pool, session_id=session_id)
+
         engine = DAGExecutionEngine(
             agent_executor=pool.get_executor(session_id),
             failure_handler=orchestrator.adapt_to_failure,
@@ -193,6 +199,8 @@ class ExecutionFactory:
             backend_manager=backend_manager,
             job_id=job_id,
             run_id=run_id or "",
+            backend_registry=backend_registry,
+            budget_manager=self._budget_manager,
         )
 
         async def _session_event_handler(event):

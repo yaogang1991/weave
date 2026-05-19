@@ -35,10 +35,13 @@ from core.models import (
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError
 from core.exceptions import NodeTimeoutError
+from core.exceptions import BudgetExhaustedError
+from core.backend_models import BackendContext
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
+from core.budget_manager import BudgetManager
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
 
@@ -69,6 +72,9 @@ class NodeExecutor:
         run_id: str = "",
         backoff_base: float = 2.0,
         backoff_cap: float = 60.0,
+        backend_registry: Any | None = None,
+        session_id: str = "",
+        budget_manager: BudgetManager | None = None,
     ) -> None:
         self.agent_executor = agent_executor
         self._emit = emit_func
@@ -84,6 +90,9 @@ class NodeExecutor:
         self._run_id = run_id
         self.backoff_base = backoff_base
         self.backoff_cap = backoff_cap
+        self._backend_registry = backend_registry
+        self._session_id = session_id
+        self._budget_manager = budget_manager
         # Thread pool for synchronous evaluator calls
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         # Track running tasks for cancellation support
@@ -142,6 +151,14 @@ class NodeExecutor:
             dag, node_id, failed_soft=failed_soft,
         )
 
+        # M4.2: Budget check before starting node
+        if self._budget_manager and not self._budget_manager.check():
+            raise BudgetExhaustedError(
+                used_tokens=self._budget_manager.used_total_tokens,
+                budget_tokens=self._budget_manager.config.total_tokens,
+                node_id=node_id,
+            )
+
         node = dag.update_node(
             node_id,
             status=NodeStatus.RUNNING,
@@ -199,6 +216,20 @@ class NodeExecutor:
                 node, input_artifacts,
                 workspace_path=workspace_path,
             )
+
+            # M4.2: Record token usage from node result
+            token_usage = result.get("token_usage", {})
+            if token_usage and self._budget_manager:
+                self._budget_manager.record_usage(
+                    input_tokens=token_usage.get("input_tokens", 0),
+                    output_tokens=token_usage.get("output_tokens", 0),
+                )
+                total = token_usage.get("input_tokens", 0) + token_usage.get("output_tokens", 0)
+                dag.update_node(node_id, token_usage={
+                    "input_tokens": token_usage.get("input_tokens", 0),
+                    "output_tokens": token_usage.get("output_tokens", 0),
+                    "total_tokens": total,
+                })
 
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
@@ -429,6 +460,25 @@ class NodeExecutor:
                 ))
                 return
 
+            # M4.2: Budget exhausted — skip this and remaining nodes
+            if isinstance(e, BudgetExhaustedError):
+                dag.update_node(
+                    node_id,
+                    status=NodeStatus.SKIPPED,
+                    error=f"Budget exhausted: {e}",
+                    completed_at=datetime.now(timezone.utc),
+                )
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="failed",
+                    details={
+                        "reason": "budget_exhausted",
+                        "used": e.used_tokens,
+                        "budget": e.budget_tokens,
+                    },
+                ))
+                raise
+
             node = dag.update_node(
                 node_id, retry_count=node.retry_count + 1,
             )
@@ -500,6 +550,8 @@ class NodeExecutor:
         - Cooperative cancellation: threading.Event passed to agent thread
         - Progress reporting: agent reports heartbeat after each LLM call and
           tool execution via progress_callback.
+        - M4.0: When backend_registry is set, dispatches via BackendRegistry
+          instead of the agent_executor closure.
         """
         timeout = self._get_node_timeout(node.agent_type)
         cancel_event = threading.Event()
@@ -512,15 +564,38 @@ class NodeExecutor:
             except RuntimeError:
                 pass  # Event loop closed
 
-        async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
-            return await self.agent_executor(
-                n, arts,
+        if self._backend_registry is not None:
+            # M4.0: Use BackendRegistry path
+            context = BackendContext(
+                node=node,
+                artifacts=input_artifacts,
+                session_id=self._session_id,
+                workspace_path=workspace_path,
+                job_id=self._job_id,
+                run_id=self._run_id,
                 cancel_event=cancel_event,
                 progress_callback=_on_progress,
-                workspace_path=workspace_path,
             )
+            backend_name = getattr(node, 'backend', 'builtin')
 
-        task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
+            async def _run_via_registry() -> dict:
+                result = await self._backend_registry.execute_for_node(
+                    backend_name, context,
+                )
+                return result.to_dict()
+
+            task = asyncio.create_task(_run_via_registry())
+        else:
+            # Legacy path: use agent_executor closure directly
+            async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
+                return await self.agent_executor(
+                    n, arts,
+                    cancel_event=cancel_event,
+                    progress_callback=_on_progress,
+                    workspace_path=workspace_path,
+                )
+
+            task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
 
         try:
             return await asyncio.wait_for(task, timeout=timeout)
