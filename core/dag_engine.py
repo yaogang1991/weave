@@ -481,11 +481,16 @@ class DAGExecutionEngine:
                                     await self._node_executor.execute_node(dag, failed_id)
                             else:
                                 # Normal retry: retry the failed node itself
-                                dag.update_node(
-                                    failed_id,
-                                    status=NodeStatus.RETRYING,
-                                    error="",
-                                )
+                                # Preserve eval_feedback so agent sees what went wrong
+                                # on retry (#599).
+                                retry_updates: dict[str, Any] = {
+                                    "status": NodeStatus.RETRYING,
+                                    "error": "",
+                                }
+                                fb = dag.nodes[failed_id].eval_feedback
+                                if fb:
+                                    retry_updates["eval_feedback"] = fb
+                                dag.update_node(failed_id, **retry_updates)
                                 await self._node_executor.execute_node(dag, failed_id)
 
                             # #455: Persist retried node if it succeeded

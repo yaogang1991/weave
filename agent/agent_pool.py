@@ -218,6 +218,10 @@ class WorkerAgent:
                     "AttributeError, wrong return values, missing method calls), "
                     "you MAY also EDIT the source files to fix those bugs. "
                     "Make targeted fixes — do NOT rewrite the entire module (#288).\n"
+                    "8. FIXTURE/CONFIG ISSUES: If ALL tests fail with import or "
+                    "fixture errors (e.g. fixture not found, dependency injection "
+                    "mismatch), read conftest.py and the source code first, then "
+                    "fix the fixture configuration to match the actual API (#599).\n"
                 )
                 break
 
