@@ -17,14 +17,37 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Maximum number of files to scan before bailing out (#611).
+MAX_FILES = 5000
 
-def register_analysis_tools(server) -> None:
+# Valid enum values for dependency_graph query parameters (#611).
+VALID_DIRECTIONS = {"dependents", "dependencies", "all"}
+VALID_DEPTHS = {"direct", "transitive"}
+
+
+def _validate_project(project: str) -> tuple[Path, str | None]:
+    """Validate and resolve the project path.
+
+    Returns (resolved_path, error_message). If error_message is not None,
+    the path is invalid and the caller should return the error.
+    """
+    project_path = Path(project).resolve()
+    if not project_path.is_dir():
+        return project_path, f"Project path not found: {project}"
+    # Path traversal guard: restrict to CWD or its subdirectories (#611).
+    allowed = Path.cwd().resolve()
+    if project_path != allowed and allowed not in project_path.parents:
+        return project_path, f"Project path not allowed: {project}"
+    return project_path, None
+
+
+def register_analysis_tools(server: Any) -> None:
     """Register analysis tools on an MCPServer instance."""
 
     @server.tool(
@@ -66,11 +89,17 @@ def register_analysis_tools(server) -> None:
         depth: str = "transitive",
     ) -> dict:
         try:
-            from analysis.dependency_graph import DependencyGraph
+            # Validate enum parameters (#611)
+            if direction not in VALID_DIRECTIONS:
+                return {"isError": True, "error": f"Invalid direction: {direction}"}
+            if depth not in VALID_DEPTHS:
+                return {"isError": True, "error": f"Invalid depth: {depth}"}
 
-            project_path = Path(project).resolve()
-            if not project_path.is_dir():
-                return {"error": f"Project path not found: {project}"}
+            project_path, path_err = _validate_project(project)
+            if path_err:
+                return {"isError": True, "error": path_err}
+
+            from analysis.dependency_graph import DependencyGraph
 
             graph = DependencyGraph(project_path)
             graph.build()
@@ -79,7 +108,19 @@ def register_analysis_tools(server) -> None:
                 return _query_file_relations(graph, file, direction, depth)
 
             full_graph = graph.to_dict()
+            # Unbounded response guard (#611)
             edge_count = sum(len(deps) for deps in full_graph.values())
+            if len(full_graph) > MAX_FILES:
+                return {
+                    "project": str(project_path),
+                    "files": len(full_graph),
+                    "edges": edge_count,
+                    "truncated": True,
+                    "message": (
+                        f"Graph has {len(full_graph)} files (limit: {MAX_FILES}). "
+                        "Use 'file' parameter to query specific files."
+                    ),
+                }
             return {
                 "project": str(project_path),
                 "files": len(full_graph),
@@ -88,7 +129,7 @@ def register_analysis_tools(server) -> None:
             }
         except Exception as exc:
             logger.error("dependency_graph error: %s", exc, exc_info=True)
-            return {"error": str(exc)}
+            return {"isError": True, "error": str(exc)}
 
     @server.tool(
         "weave.impact_predict",
@@ -113,11 +154,11 @@ def register_analysis_tools(server) -> None:
     )
     def impact_predict(requirement: str, project: str = ".") -> dict:
         try:
-            from analysis.impact_predictor import ImpactPredictor
+            project_path, path_err = _validate_project(project)
+            if path_err:
+                return {"isError": True, "error": path_err}
 
-            project_path = Path(project).resolve()
-            if not project_path.is_dir():
-                return {"error": f"Project path not found: {project}"}
+            from analysis.impact_predictor import ImpactPredictor
 
             predictor = ImpactPredictor()
             scope = predictor.predict_static(requirement, str(project_path))
@@ -132,7 +173,7 @@ def register_analysis_tools(server) -> None:
             }
         except Exception as exc:
             logger.error("impact_predict error: %s", exc, exc_info=True)
-            return {"error": str(exc)}
+            return {"isError": True, "error": str(exc)}
 
     @server.tool(
         "weave.impact_graph",
@@ -153,14 +194,26 @@ def register_analysis_tools(server) -> None:
     )
     def impact_graph(project: str = ".") -> dict:
         try:
-            from analysis.change_verifier import ChangeVerifier
+            project_path, path_err = _validate_project(project)
+            if path_err:
+                return {"isError": True, "error": path_err}
 
-            project_path = Path(project).resolve()
-            if not project_path.is_dir():
-                return {"error": f"Project path not found: {project}"}
+            from analysis.change_verifier import ChangeVerifier
 
             verifier = ChangeVerifier(str(project_path))
             snapshot = verifier.capture_snapshot()
+
+            # Unbounded response guard (#611)
+            if len(snapshot) > MAX_FILES:
+                return {
+                    "project": str(project_path),
+                    "tracked_files": len(snapshot),
+                    "truncated": True,
+                    "message": (
+                        f"Snapshot has {len(snapshot)} files (limit: {MAX_FILES}). "
+                        "Use dependency_graph with 'file' parameter for specific queries."
+                    ),
+                }
 
             files = [
                 {"path": path, "mtime": mtime, "size": size}
@@ -174,7 +227,7 @@ def register_analysis_tools(server) -> None:
             }
         except Exception as exc:
             logger.error("impact_graph error: %s", exc, exc_info=True)
-            return {"error": str(exc)}
+            return {"isError": True, "error": str(exc)}
 
 
 def _query_file_relations(

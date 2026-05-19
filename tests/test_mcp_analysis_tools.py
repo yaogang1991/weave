@@ -1,5 +1,4 @@
 """Tests for MCP analysis tools (M4.3)."""
-import os
 
 from mcp.server import MCPServer
 
@@ -46,6 +45,31 @@ class TestDependencyGraphTool:
         tool = server._tools["weave.dependency_graph"]
         result = tool.handler(project="/nonexistent/path")
         assert "error" in result
+        assert result.get("isError") is True
+
+    def test_invalid_direction(self):
+        server = _server_with_analysis_tools()
+        tool = server._tools["weave.dependency_graph"]
+        result = tool.handler(project=".", direction="invalid")
+        assert "error" in result
+        assert result.get("isError") is True
+        assert "Invalid direction" in result["error"]
+
+    def test_invalid_depth(self):
+        server = _server_with_analysis_tools()
+        tool = server._tools["weave.dependency_graph"]
+        result = tool.handler(project=".", depth="invalid")
+        assert "error" in result
+        assert result.get("isError") is True
+        assert "Invalid depth" in result["error"]
+
+    def test_path_traversal_rejected(self):
+        server = _server_with_analysis_tools()
+        tool = server._tools["weave.dependency_graph"]
+        result = tool.handler(project="/etc")
+        assert "error" in result
+        assert result.get("isError") is True
+        assert "not allowed" in result["error"]
 
     def test_has_input_schema(self):
         server = _server_with_analysis_tools()
@@ -82,6 +106,7 @@ class TestImpactPredictTool:
             project="/nonexistent/path",
         )
         assert "error" in result
+        assert result.get("isError") is True
 
     def test_has_input_schema(self):
         server = _server_with_analysis_tools()
@@ -115,6 +140,7 @@ class TestImpactGraphTool:
         tool = server._tools["weave.impact_graph"]
         result = tool.handler(project="/nonexistent/path")
         assert "error" in result
+        assert result.get("isError") is True
 
     def test_has_input_schema(self):
         server = _server_with_analysis_tools()
