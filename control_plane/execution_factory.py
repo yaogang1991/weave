@@ -173,7 +173,7 @@ class ExecutionFactory:
         backend_registry = BackendRegistry(pool=pool, session_id=session_id)
 
         # M4.4: Register external backends (codex, etc.)
-        self._register_external_backends(backend_registry)
+        self._register_external_backends(backend_registry, _cfg)
 
         # M4.1: Register ClaudeCodeBackend if enabled
         if _cfg.claude_code.enabled:
@@ -237,20 +237,24 @@ class ExecutionFactory:
         engine.on_event(_session_event_handler)
         return engine
 
-    def _register_external_backends(self, registry: BackendRegistry) -> None:
+    def _register_external_backends(
+        self,
+        registry: BackendRegistry,
+        config: Any,
+    ) -> None:
         """Conditionally register external agent backends.
 
         Only registers backends whose runtime dependencies are available
-        (e.g., codex binary on PATH). Silently skips unavailable ones;
+        and whose enabled flag is set. Silently skips unavailable ones;
         BackendRegistry falls back to builtin automatically.
         """
-        try:
-            from agent.backends.codex import CodexBackend
-            _cfg = WeaveConfig.from_env()
-            registry.register("codex", CodexBackend(config=_cfg.codex))
-            logger.info("Registered CodexBackend")
-        except Exception as exc:
-            logger.debug("CodexBackend registration skipped: %s", exc)
+        if config.codex.enabled:
+            try:
+                from agent.backends.codex import CodexBackend
+                registry.register("codex", CodexBackend(config=config.codex))
+                logger.info("Registered CodexBackend")
+            except Exception as exc:
+                logger.debug("CodexBackend registration skipped: %s", exc)
 
     @staticmethod
     def load_project_guardrails(work_dir: Path | None) -> dict[str, Any]:

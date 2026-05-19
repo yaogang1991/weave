@@ -5,15 +5,21 @@ import asyncio
 import json
 import logging
 import shutil
+import subprocess
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
 from core.config import CodexBackendConfig
+from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
 from agent.backends.base import AgentBackend
 
 logger = logging.getLogger(__name__)
 
-_VALID_SANDBOX_MODES = frozenset({"workspace-write", "workspace-read", "full-access", "none", "readOnly", "dangerFullAccess"})
+# Named constants (#619).
+ARTIFACT_CONTENT_LIMIT = 2000
+SUMMARY_LIMIT = 200
+
+__all__ = ["CodexBackend"]
 
 
 class CodexBackend(AgentBackend):
@@ -35,8 +41,8 @@ class CodexBackend(AgentBackend):
         return "codex"
 
     async def health_check(self) -> bool:
-        if self._resolved_path is None:
-            self._resolved_path = shutil.which(self._binary_path)
+        # Re-resolve each time (#619 #8 — no permanent cache).
+        self._resolved_path = shutil.which(self._binary_path)
         return self._resolved_path is not None
 
     def get_capabilities(self) -> list[str]:
@@ -51,7 +57,7 @@ class CodexBackend(AgentBackend):
 
         prompt = self._build_prompt(context)
         cwd = context.workspace_path or "."
-        sandbox = self._sandbox_mode if self._sandbox_mode in _VALID_SANDBOX_MODES else "workspace-write"
+        sandbox = self._sandbox_mode
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -71,6 +77,7 @@ class CodexBackend(AgentBackend):
                 error=f"codex binary not found: {self._resolved_path}",
             )
 
+        # Mutable containers for streaming output (#619 #9 — documented).
         output_lines: list[str] = []
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
 
@@ -85,15 +92,10 @@ class CodexBackend(AgentBackend):
         except asyncio.TimeoutError:
             if process.returncode is None:
                 process.kill()
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=f"codex timed out after {self._timeout}s",
-            )
-        except Exception as exc:
-            if process.returncode is None:
-                process.kill()
-            return BackendResult(
-                status=BackendStatus.FAILED, error=str(exc),
+            raise NodeTimeoutError(
+                node_id=context.node.id,
+                agent_type=context.node.agent_type,
+                timeout=self._timeout,
             )
 
         stderr = ""
@@ -101,20 +103,32 @@ class CodexBackend(AgentBackend):
             stderr_bytes = await process.stderr.read()
             stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
 
-        return self._parse_result(process.returncode, output_lines, usage, stderr)
+        # Error classification (#619 #5).
+        self._raise_if_classifiable(stderr, context)
+
+        # Artifact discovery (#619 #2).
+        artifacts = self._discover_artifacts(context)
+
+        return self._parse_result(
+            process.returncode, output_lines, usage, stderr, artifacts,
+        )
 
     def _build_prompt(self, context: BackendContext) -> str:
         parts: list[str] = []
-        task = getattr(context.node, "task_description", "") or ""
-        parts.append(task)
+        # Typed field access (#619 #7).
+        parts.append(context.node.task_description)
 
         for art in context.artifacts:
-            content = getattr(art, "content", None)
-            paths = getattr(art, "file_paths", None)
+            content = art.content
             if content:
+                # Truncation with indicator (#619 #6).
+                if len(content) > ARTIFACT_CONTENT_LIMIT:
+                    content = content[:ARTIFACT_CONTENT_LIMIT] + "...(truncated)"
                 parts.append(f"\n=== PREVIOUS OUTPUT ===\n{content}")
-            if paths:
-                parts.append(f"\n=== RELEVANT FILES ===\n{', '.join(paths)}")
+            if art.file_paths:
+                parts.append(
+                    f"\n=== RELEVANT FILES ===\n{', '.join(art.file_paths)}"
+                )
 
         return "\n".join(parts)
 
@@ -126,12 +140,22 @@ class CodexBackend(AgentBackend):
         cancel_event: Any | None,
         progress_callback: Any | None,
     ) -> None:
+        """Stream JSONL output from Codex process.
+
+        Note: mutates output_lines and usage in-place for streaming
+        performance (#619 #9).
+        """
         if process.stdout is None:
             return
 
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 process.terminate()
+                # Follow up with kill if terminate doesn't work (#619 #16).
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
                 return
 
             line_bytes = await process.stdout.readline()
@@ -173,11 +197,13 @@ class CodexBackend(AgentBackend):
         output_lines: list[str],
         usage: dict[str, int],
         stderr: str,
+        artifacts: list[str],
     ) -> BackendResult:
         if returncode is None or returncode < 0:
             return BackendResult(
                 status=BackendStatus.CANCELLED,
                 output="\n".join(output_lines),
+                artifacts=artifacts,
                 metadata={"token_usage": usage},
             )
 
@@ -186,15 +212,82 @@ class CodexBackend(AgentBackend):
                 status=BackendStatus.FAILED,
                 error=stderr or f"codex exited with code {returncode}",
                 output="\n".join(output_lines),
+                artifacts=artifacts,
                 metadata={"token_usage": usage},
             )
 
         output = "\n".join(output_lines)
-        summary = output_lines[-1][:200] if output_lines else ""
+        # Use first line as summary, not last (#619 #10).
+        summary = output_lines[0][:SUMMARY_LIMIT] if output_lines else ""
 
         return BackendResult(
             status=BackendStatus.COMPLETED,
             summary=summary,
+            artifacts=artifacts,
             output=output,
-            metadata={"token_usage": usage},
+            metadata={
+                "token_usage": usage,
+                "backend": "codex",
+            },
         )
+
+    def _discover_artifacts(self, context: BackendContext) -> list[str]:
+        """Discover files created/modified by Codex via git diff (#619 #2)."""
+        workspace = context.workspace_path
+        if not workspace:
+            return []
+
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=ACMR"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return [
+                    f.strip()
+                    for f in result.stdout.strip().split("\n")
+                    if f.strip()
+                ]
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            logger.debug("Codex artifact discovery failed: %s", exc)
+
+        return []
+
+    def _raise_if_classifiable(
+        self,
+        error_message: str,
+        context: BackendContext,
+    ) -> None:
+        """Classify Codex errors and raise if match found (#619 #5)."""
+        if not error_message:
+            return
+
+        error_lower = error_message.lower()
+
+        rate_limit_patterns = (
+            "rate limit", "rate_limit", "429", "too many requests",
+        )
+        if any(p in error_lower for p in rate_limit_patterns):
+            raise RateLimitError(
+                provider="codex",
+                model=self._model,
+                retries=0,
+            )
+
+        if "budget" in error_lower:
+            raise BudgetExhaustedError(
+                used_tokens=0,
+                budget_tokens=0,
+                node_id=context.node.id,
+            )
+
+        timeout_patterns = ("timeout", "timed out", "deadline exceeded")
+        if any(p in error_lower for p in timeout_patterns):
+            raise NodeTimeoutError(
+                node_id=context.node.id,
+                agent_type=context.node.agent_type,
+                timeout=self._timeout,
+            )

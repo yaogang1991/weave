@@ -2,7 +2,6 @@
 from agent.backends.base import AgentBackend
 from agent.backends.registry import BackendRegistry
 from agent.backends.builtin import BuiltinBackend
-from agent.backends.codex import CodexBackend
 
 __all__ = [
     "AgentBackend",
@@ -21,4 +20,7 @@ def __getattr__(name: str):
     if name == "ClaudeCodeRuntimeConfig":
         from agent.backends.claude_code import ClaudeCodeRuntimeConfig
         return ClaudeCodeRuntimeConfig
+    if name == "CodexBackend":
+        from agent.backends.codex import CodexBackend
+        return CodexBackend
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
