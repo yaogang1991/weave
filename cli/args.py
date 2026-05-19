@@ -74,6 +74,11 @@ def add_execution_args(parser: argparse.ArgumentParser) -> None:
         "--budget-tokens", type=int, default=None,
         help="Total token budget for this run (0 or unset = unlimited)",
     )
+    parser.add_argument(
+        "--backend", default=None,
+        choices=["builtin", "claude_code"],
+        help="Execution backend for agent nodes (default: builtin)",
+    )
 
 
 def add_self_modify_arg(parser: argparse.ArgumentParser) -> None:

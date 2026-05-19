@@ -337,6 +337,17 @@ def _build_runtime(
     from agent.backends.registry import BackendRegistry
     backend_registry = BackendRegistry(pool=pool, session_id=session_id)
 
+    # M4.1: Register ClaudeCodeBackend if enabled or requested
+    backend_name = getattr(args, "backend", None)
+    if backend_name == "claude_code" or config.claude_code.enabled:
+        from agent.backends.claude_code import (
+            ClaudeCodeBackend,
+            ClaudeCodeConfig as RuntimeConfig,
+        )
+        cc_config = RuntimeConfig.from_core_config(config.claude_code)
+        cc_backend = ClaudeCodeBackend(config=cc_config)
+        backend_registry.register("claude_code", cc_backend)
+
     # M4.2: Budget manager from CLI args
     budget_manager = None
     budget_tokens = getattr(args, "budget_tokens", None)
@@ -547,6 +558,7 @@ async def cmd_run(args):
         template=getattr(args, "template", None),
         var=getattr(args, "var", []),
         budget_tokens=getattr(args, "budget_tokens", None),
+        backend=getattr(args, "backend", None),
     )
     return await cmd_execute(exec_args, dag=dag)
 
