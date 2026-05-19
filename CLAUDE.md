@@ -179,6 +179,9 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 
 ### mcp/ — Model Context Protocol
 - `mcp/client.py` — MCP server connection, tool discovery, and execution via stdio transport
+- `mcp/server.py` — Lightweight MCP Server framework (JSON-RPC over stdio)
+- `mcp/analysis_tools.py` — M4.3: Analysis tools (dependency_graph, impact_predict, impact_graph) for external workers
+- `mcp/weave_tools_server.py` — M4.3: Standalone MCP server entry point for analysis tools only
 
 ### skills/ — YAML skill definitions
 - `skills/registry.py` — SkillRegistry: discover, load, instantiate YAML skills with variable substitution
