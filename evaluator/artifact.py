@@ -73,7 +73,7 @@ def scope_artifacts_to_criteria(
         owned_set = set(owned_files)
         filtered = []
         for art in output_artifacts:
-            art_rel = art
+            art_rel = art.replace("\\", "/")
             if work_dir:
                 try:
                     p = Path(art)
@@ -82,9 +82,9 @@ def scope_artifacts_to_criteria(
                 except ValueError:
                     pass
             if any(
-                art_rel.replace("\\", "/") == own.replace("\\", "/")
-                or art_rel.replace("\\", "/").endswith("/" + own.replace("\\", "/"))
-                or own.replace("\\", "/").endswith("/" + art_rel.replace("\\", "/"))
+                art_rel == own.replace("\\", "/")
+                or art_rel.endswith("/" + own.replace("\\", "/"))
+                or own.replace("\\", "/").endswith("/" + art_rel)
                 for own in owned_set
             ):
                 filtered.append(art)
@@ -105,7 +105,7 @@ def scope_artifacts_to_criteria(
     expected_patterns: list[str] = []
     for crit in criteria:
         if crit.type == CriterionType.FILE_EXISTS and crit.path:
-            expected_paths.append(crit.path)
+            expected_paths.append(crit.path.replace("\\", "/"))
         elif crit.type == CriterionType.FILE_PATTERN and crit.pattern:
             expected_patterns.append(crit.pattern)
 
