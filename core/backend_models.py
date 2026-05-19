@@ -32,12 +32,16 @@ class BackendResult(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to the dict format expected by NodeExecutor."""
-        return {
+        result: dict[str, Any] = {
             "status": self.status.value,
             "summary": self.summary,
             "artifacts": self.artifacts,
             "output": self.output,
         }
+        token_usage = self.metadata.get("token_usage")
+        if token_usage:
+            result["token_usage"] = token_usage
+        return result
 
 
 class BackendContext(BaseModel):
