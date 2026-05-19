@@ -300,6 +300,7 @@ class RunService:
             hooks=self._hooks,
             approval_repo=approval_repo,
             policy=policy,
+            budget_manager=None,
         )
 
     # ------------------------------------------------------------------

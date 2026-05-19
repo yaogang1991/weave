@@ -35,11 +35,13 @@ from core.models import (
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError
 from core.exceptions import NodeTimeoutError
+from core.exceptions import BudgetExhaustedError
 from core.backend_models import BackendContext
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
+from core.budget_manager import BudgetManager
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
 
@@ -72,6 +74,7 @@ class NodeExecutor:
         backoff_cap: float = 60.0,
         backend_registry: Any | None = None,
         session_id: str = "",
+        budget_manager: BudgetManager | None = None,
     ) -> None:
         self.agent_executor = agent_executor
         self._emit = emit_func
@@ -89,6 +92,7 @@ class NodeExecutor:
         self.backoff_cap = backoff_cap
         self._backend_registry = backend_registry
         self._session_id = session_id
+        self._budget_manager = budget_manager
         # Thread pool for synchronous evaluator calls
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         # Track running tasks for cancellation support
@@ -147,6 +151,14 @@ class NodeExecutor:
             dag, node_id, failed_soft=failed_soft,
         )
 
+        # M4.2: Budget check before starting node
+        if self._budget_manager and not self._budget_manager.check():
+            raise BudgetExhaustedError(
+                used_tokens=self._budget_manager.used_total_tokens,
+                budget_tokens=self._budget_manager.config.total_tokens,
+                node_id=node_id,
+            )
+
         node = dag.update_node(
             node_id,
             status=NodeStatus.RUNNING,
@@ -204,6 +216,20 @@ class NodeExecutor:
                 node, input_artifacts,
                 workspace_path=workspace_path,
             )
+
+            # M4.2: Record token usage from node result
+            token_usage = result.get("token_usage", {})
+            if token_usage and self._budget_manager:
+                self._budget_manager.record_usage(
+                    input_tokens=token_usage.get("input_tokens", 0),
+                    output_tokens=token_usage.get("output_tokens", 0),
+                )
+                total = token_usage.get("input_tokens", 0) + token_usage.get("output_tokens", 0)
+                dag.update_node(node_id, token_usage={
+                    "input_tokens": token_usage.get("input_tokens", 0),
+                    "output_tokens": token_usage.get("output_tokens", 0),
+                    "total_tokens": total,
+                })
 
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them
@@ -433,6 +459,25 @@ class NodeExecutor:
                     },
                 ))
                 return
+
+            # M4.2: Budget exhausted — skip this and remaining nodes
+            if isinstance(e, BudgetExhaustedError):
+                dag.update_node(
+                    node_id,
+                    status=NodeStatus.SKIPPED,
+                    error=f"Budget exhausted: {e}",
+                    completed_at=datetime.now(timezone.utc),
+                )
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type="failed",
+                    details={
+                        "reason": "budget_exhausted",
+                        "used": e.used_tokens,
+                        "budget": e.budget_tokens,
+                    },
+                ))
+                raise
 
             node = dag.update_node(
                 node_id, retry_count=node.retry_count + 1,

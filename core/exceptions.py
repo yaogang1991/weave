@@ -81,3 +81,25 @@ class RateLimitError(Exception):
         super().__init__(
             f"Rate limit exhausted for {provider}/{model} after {retries} retries"
         )
+
+
+class BudgetExhaustedError(Exception):
+    """Raised when cumulative token usage exceeds the configured budget (M4.2).
+
+    Propagation chain:
+        NodeExecutor.execute_node() — budget_manager.check() returns False
+          -> raises BudgetExhaustedError
+        -> DAGExecutionEngine._execute_inner() — catches, skips remaining nodes
+        -> RunService.run_job() — classifies as "budget_exhausted"
+    """
+
+    def __init__(
+        self, used_tokens: int, budget_tokens: int, node_id: str = "",
+    ) -> None:
+        self.used_tokens = used_tokens
+        self.budget_tokens = budget_tokens
+        self.node_id = node_id
+        super().__init__(
+            f"Token budget exhausted: {used_tokens}/{budget_tokens} tokens used"
+            f"{f' at node {node_id}' if node_id else ''}"
+        )

@@ -388,6 +388,42 @@ class NodeTimeoutConfig(BaseModel):
         return max(values)
 
 
+class BudgetConfig(BaseModel):
+    """M4.2: Token budget configuration for cost control."""
+
+    enabled: bool = True
+    total_tokens: int = Field(
+        default=0, ge=0,
+        description="Total token budget for a run. 0 means unlimited.",
+    )
+    warning_threshold: float = Field(
+        default=0.8, ge=0.0, le=1.0,
+        description="Emit BUDGET_WARNING when usage reaches this fraction.",
+    )
+    per_node_token_limit: int = Field(
+        default=0, ge=0,
+        description="Per-node token limit. 0 means unlimited.",
+    )
+
+    @property
+    def is_unlimited(self) -> bool:
+        return self.total_tokens == 0
+
+    @classmethod
+    def from_env(cls) -> BudgetConfig:
+        return cls(
+            enabled=os.getenv("WEAVE_BUDGET_ENABLED", "true").lower()
+            not in ("false", "0", "no"),
+            total_tokens=int(os.getenv("WEAVE_BUDGET_TOKENS", "0")),
+            warning_threshold=float(
+                os.getenv("WEAVE_BUDGET_WARNING_THRESHOLD", "0.8")
+            ),
+            per_node_token_limit=int(
+                os.getenv("WEAVE_BUDGET_PER_NODE_TOKENS", "0")
+            ),
+        )
+
+
 class WeaveConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
@@ -452,6 +488,9 @@ class WeaveConfig(BaseModel):
 
     # M3.5: Impact Analysis
     impact: ImpactConfig = Field(default_factory=ImpactConfig)
+
+    # M4.2: Token Budget
+    budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
     # M2.0: Watchdog
     watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
@@ -598,6 +637,7 @@ class WeaveConfig(BaseModel):
                 ),
             ),
             watchdog=WatchdogConfig.from_env(),
+            budget=BudgetConfig.from_env(),
             mcp=MCPConfig(
                 auto_discover=(
                     os.getenv("WEAVE_MCP_AUTO_DISCOVER", "false").lower()

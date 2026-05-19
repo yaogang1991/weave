@@ -24,6 +24,7 @@ from core.models import AgentMessage, ToolCall, EventType
 from core.config import LLMConfig
 from core.llm_client import LLMClient
 from core.context import ContextManager
+from core.stuck_detector import StuckDetector
 from session.store import SessionStore
 
 if TYPE_CHECKING:
@@ -96,6 +97,8 @@ class AgentWorker:
         self._memory_manager = memory_manager
         self._output_monitor = output_monitor
         self._context_manager = ContextManager(max_tokens=max_context_tokens)
+        self._run_token_usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        self.last_token_usage: dict[str, int] = {}
 
     # -- Public interface ---------------------------------------------------
 
@@ -143,8 +146,11 @@ class AgentWorker:
                     })
 
         self.artifacts = []
-        consecutive_empty_iterations = 0
-        consecutive_degenerate_iterations = 0
+        self._run_token_usage = {"input_tokens": 0, "output_tokens": 0}
+        stuck_detector = StuckDetector(
+            empty_call_limit=EMPTY_TOOL_CALL_LIMIT,
+            degenerate_call_limit=DEGENERATE_CALL_LIMIT,
+        )
 
         for iteration in range(max_iterations):
             # Cooperative cancellation check (#360 PR2)
@@ -170,6 +176,11 @@ class AgentWorker:
 
             for llm_attempt in range(EMPTY_CALL_MAX_RETRIES + 1):
                 assistant_message = self.llm.call(messages, tools)
+
+                # M4.2: Track token usage from LLM response
+                usage = assistant_message.get("usage", {})
+                self._run_token_usage["input_tokens"] += usage.get("input_tokens", 0)
+                self._run_token_usage["output_tokens"] += usage.get("output_tokens", 0)
 
                 # Report progress: LLM responded (#360 PR3)
                 if progress_callback:
@@ -245,90 +256,33 @@ class AgentWorker:
             messages.append(assistant_message)
             messages.extend(tool_results)
 
-            # Circuit breaker: track consecutive iterations where ALL tool calls
-            # were invalid (missing/blank args). Prevents infinite empty-call
-            # loops observed with some models (184 calls in R20, #290).
-            all_invalid = bool(assistant_message.get("tool_calls")) and not any_tool_executed
-            if all_invalid:
-                consecutive_empty_iterations += 1
-                logger.warning(
-                    "Consecutive empty tool call iteration %d/%d (node threshold=%d)",
-                    consecutive_empty_iterations, EMPTY_TOOL_CALL_LIMIT, EMPTY_TOOL_CALL_LIMIT,
-                )
-            else:
-                consecutive_empty_iterations = 0
-
-            if consecutive_empty_iterations >= EMPTY_TOOL_CALL_LIMIT:
+            # M4.2: Stuck detection via composable StuckDetector
+            stuck_result = stuck_detector.observe(assistant_message, any_tool_executed)
+            if stuck_result.is_stuck:
                 logger.error(
-                    "Circuit breaker triggered: %d consecutive empty tool call iterations. "
-                    "Breaking agent loop to prevent infinite cycling (#290).",
-                    consecutive_empty_iterations,
+                    "Stuck detector triggered: %s (pattern=%s, count=%d/%d)",
+                    stuck_result.message,
+                    stuck_result.pattern.value if stuck_result.pattern else "unknown",
+                    stuck_result.consecutive_count,
+                    stuck_result.threshold,
                 )
                 self.session_store.emit_event(
                     session_id,
-                    EventType.AGENT_ERROR,
+                    EventType.AGENT_STUCK,
                     {
-                        "error": "empty_tool_call_circuit_breaker",
-                        "consecutive_empty_iterations": consecutive_empty_iterations,
-                        "message": (
-                            f"Agent loop terminated after {consecutive_empty_iterations} "
-                            f"consecutive iterations with only invalid tool calls."
-                        ),
-                    },
-                )
-                break
-
-            # Degenerate loop breaker: detect when the LLM keeps producing
-            # tool calls with completely empty args {} (#345).  This is
-            # unrecoverable — no amount of error feedback will fix it.
-            # Separate from the broad circuit breaker because the threshold
-            # is much lower (3 vs 10), saving ~7 iterations of wasted API
-            # calls (~7 min at typical latency).
-            if all_invalid:
-                all_empty_dict = all(
-                    tc.get("arguments") == {}
-                    for tc in assistant_message.get("tool_calls", [])
-                )
-                if all_empty_dict:
-                    consecutive_degenerate_iterations += 1
-                    logger.warning(
-                        "Degenerate empty-args iteration %d/%d (#345)",
-                        consecutive_degenerate_iterations,
-                        DEGENERATE_CALL_LIMIT,
-                    )
-                else:
-                    consecutive_degenerate_iterations = 0
-            else:
-                consecutive_degenerate_iterations = 0
-
-            if consecutive_degenerate_iterations >= DEGENERATE_CALL_LIMIT:
-                logger.error(
-                    "Degenerate loop breaker: %d consecutive iterations with "
-                    "completely empty tool call args. LLM is stuck — "
-                    "breaking loop (#345).",
-                    consecutive_degenerate_iterations,
-                )
-                self.session_store.emit_event(
-                    session_id,
-                    EventType.AGENT_ERROR,
-                    {
-                        "error": "degenerate_empty_args_breaker",
-                        "consecutive_degenerate_iterations": (
-                            consecutive_degenerate_iterations
-                        ),
-                        "message": (
-                            f"Agent loop terminated after "
-                            f"{consecutive_degenerate_iterations} "
-                            f"consecutive iterations with completely empty "
-                            f"tool call args. The LLM is in an unrecoverable "
-                            f"degenerate loop."
-                        ),
+                        "pattern": stuck_result.pattern.value if stuck_result.pattern else None,
+                        "consecutive_count": stuck_result.consecutive_count,
+                        "threshold": stuck_result.threshold,
+                        "message": stuck_result.message,
                     },
                 )
                 break
 
         # Extract and store key learnings to memory (#481)
         self._persist_memory(session_id, user_message, messages)
+
+        # M4.2: Persist token usage for this run
+        self.last_token_usage = dict(self._run_token_usage)
 
     def _execute_tool_calls(
         self,

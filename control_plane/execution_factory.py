@@ -50,6 +50,7 @@ class ExecutionFactory:
         hooks: list[Any],
         approval_repo: Any | None = None,
         policy: GuardrailPolicy | None = None,
+        budget_manager: Any | None = None,
     ) -> None:
         self._llm_config = llm_config
         self._max_parallel = max_parallel
@@ -60,6 +61,7 @@ class ExecutionFactory:
         self._non_interactive = non_interactive
         self._watchdog_config = watchdog_config
         self._hooks = hooks
+        self._budget_manager = budget_manager
         self._approval_repo = approval_repo
         self._policy = policy
 
@@ -198,6 +200,7 @@ class ExecutionFactory:
             job_id=job_id,
             run_id=run_id or "",
             backend_registry=backend_registry,
+            budget_manager=self._budget_manager,
         )
 
         async def _session_event_handler(event):

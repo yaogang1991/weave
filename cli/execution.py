@@ -336,6 +336,15 @@ def _build_runtime(
     from core.dag_engine import DAGExecutionEngine
     from agent.backends.registry import BackendRegistry
     backend_registry = BackendRegistry(pool=pool, session_id=session_id)
+
+    # M4.2: Budget manager from CLI args
+    budget_manager = None
+    budget_tokens = getattr(args, "budget_tokens", None)
+    if budget_tokens and budget_tokens > 0:
+        from core.budget_manager import BudgetManager
+        from core.config import BudgetConfig
+        budget_manager = BudgetManager(BudgetConfig(total_tokens=budget_tokens))
+
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
@@ -359,6 +368,7 @@ def _build_runtime(
             for agent_type in wd_cfg.agent_overrides
         },
         backend_registry=backend_registry,
+        budget_manager=budget_manager,
     )
 
     return {

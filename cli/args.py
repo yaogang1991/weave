@@ -70,6 +70,10 @@ def add_execution_args(parser: argparse.ArgumentParser) -> None:
             "(default: 7.0 from config; lint-only failures downgrade to WARN)"
         ),
     )
+    parser.add_argument(
+        "--budget-tokens", type=int, default=None,
+        help="Total token budget for this run (0 or unset = unlimited)",
+    )
 
 
 def add_self_modify_arg(parser: argparse.ArgumentParser) -> None:
