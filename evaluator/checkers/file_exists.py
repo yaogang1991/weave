@@ -73,7 +73,10 @@ class FileExistsChecker:
             # Fallback: loose glob match by stem.
             stem = Path(cand).stem
             if stem and len(stem) >= 3:
-                matches = list(eval_root.glob(f"**/*{stem}*"))
+                try:
+                    matches = list(eval_root.glob(f"**/*{stem}*"))
+                except NotImplementedError:
+                    matches = []
                 matches = [m for m in matches if m.is_file()]
                 if matches:
                     verified.append(str(matches[0]))
@@ -164,7 +167,12 @@ class FileExistsChecker:
             parts = Path(path).parts
             for i, part in enumerate(parts):
                 candidate = str(Path(*parts[:i], pfx + part, *parts[i + 1:]))
-                if list(base.glob(candidate)):
+                try:
+                    matches = list(base.glob(candidate))
+                except NotImplementedError:
+                    # Python 3.12+ rejects non-relative patterns (#591)
+                    matches = []
+                if matches:
                     return candidate
         return None
 
@@ -186,12 +194,19 @@ class FileExistsChecker:
                 message="file_pattern: no pattern specified (skipped)",
             )
 
-        matches = set(work_dir.glob(pattern))
+        try:
+            matches = set(work_dir.glob(pattern))
+        except NotImplementedError:
+            # Python 3.12+ rejects non-relative patterns (#591)
+            matches = set()
         if "*" in pattern and "**" not in pattern:
             parts = pattern.split("/")
             if len(parts) >= 2:
                 recursive_parts = parts[:-1] + ["**"] + parts[-1:]
-                matches.update(work_dir.glob("/".join(recursive_parts)))
+                try:
+                    matches.update(work_dir.glob("/".join(recursive_parts)))
+                except NotImplementedError:
+                    pass
 
         files = [m for m in matches if m.is_file()]
 
