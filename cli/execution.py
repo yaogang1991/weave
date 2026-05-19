@@ -546,6 +546,7 @@ async def cmd_run(args):
         no_browser=args.no_browser,
         template=getattr(args, "template", None),
         var=getattr(args, "var", []),
+        budget_tokens=getattr(args, "budget_tokens", None),
     )
     return await cmd_execute(exec_args, dag=dag)
 
