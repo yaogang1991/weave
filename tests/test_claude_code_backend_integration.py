@@ -35,12 +35,12 @@ class TestClaudeCodeBackendRegistryIntegration:
     async def test_register_and_execute_via_registry(self):
         from agent.backends.claude_code import (
             ClaudeCodeBackend,
-            ClaudeCodeConfig,
+            ClaudeCodeRuntimeConfig,
         )
 
         pool = _make_pool_mock()
         registry = BackendRegistry(pool=pool, session_id="s1")
-        config = ClaudeCodeConfig()
+        config = ClaudeCodeRuntimeConfig()
         backend = ClaudeCodeBackend(config=config)
         registry.register("claude_code", backend)
 
@@ -68,12 +68,12 @@ class TestClaudeCodeBackendRegistryIntegration:
     async def test_fallback_to_builtin_when_unhealthy(self):
         from agent.backends.claude_code import (
             ClaudeCodeBackend,
-            ClaudeCodeConfig,
+            ClaudeCodeRuntimeConfig,
         )
 
         pool = _make_pool_mock()
         registry = BackendRegistry(pool=pool, session_id="s1")
-        config = ClaudeCodeConfig(cli_path="/nonexistent/claude")
+        config = ClaudeCodeRuntimeConfig(cli_path="/nonexistent/claude")
         backend = ClaudeCodeBackend(config=config)
         backend._sdk_available = False
         registry.register("claude_code", backend)
@@ -104,10 +104,10 @@ class TestClaudeCodeBackendEndToEnd:
     async def test_full_execute_with_cli_success(self):
         from agent.backends.claude_code import (
             ClaudeCodeBackend,
-            ClaudeCodeConfig,
+            ClaudeCodeRuntimeConfig,
         )
 
-        config = ClaudeCodeConfig()
+        config = ClaudeCodeRuntimeConfig()
         backend = ClaudeCodeBackend(config=config)
         backend._sdk_available = False
 

@@ -467,8 +467,12 @@ class ClaudeCodeConfig(BaseModel):
         description="Max conversation turns (0 = unlimited)",
     )
     permission_mode: str = Field(
-        default="bypassPermissions",
-        description="Claude Code permission mode",
+        default="default",
+        description=(
+            "Claude Code permission mode. "
+            "Must be 'default', 'plan', or 'bypassPermissions' "
+            "(requires explicit opt-in)."
+        ),
     )
     allowed_tools: list[str] = Field(
         default_factory=list,
@@ -486,6 +490,23 @@ class ClaudeCodeConfig(BaseModel):
         default=0, ge=0,
         description="Per-node timeout override in seconds (0 = use node_timeout)",
     )
+
+    @field_validator("permission_mode")
+    @classmethod
+    def validate_permission_mode(cls, v: str) -> str:
+        allowed = {"default", "plan", "bypassPermissions"}
+        if v not in allowed:
+            raise ValueError(
+                f"permission_mode must be one of {allowed}, got '{v}'"
+            )
+        return v
+
+    @field_validator("cli_path")
+    @classmethod
+    def validate_cli_path(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("cli_path must not be empty")
+        return v.strip()
 
 
 class WeaveConfig(BaseModel):
