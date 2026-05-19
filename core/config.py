@@ -424,6 +424,28 @@ class BudgetConfig(BaseModel):
         )
 
 
+class CodexBackendConfig(BaseModel):
+    """M4.4: Configuration for the Codex CLI backend."""
+    binary_path: str = Field(
+        default_factory=lambda: os.getenv("WEAVE_CODEX_BINARY_PATH", "codex"),
+    )
+    model: str = Field(
+        default_factory=lambda: os.getenv("WEAVE_CODEX_MODEL", "codex-mini"),
+    )
+    sandbox_mode: str = Field(
+        default_factory=lambda: os.getenv("WEAVE_CODEX_SANDBOX", "workspace-write"),
+    )
+    timeout: int = Field(default=600, description="Per-invocation timeout in seconds.")
+
+    @field_validator("sandbox_mode")
+    @classmethod
+    def _validate_sandbox_mode(cls, v: str) -> str:
+        allowed = {"workspace-write", "workspace-read", "full-access", "none", "readOnly", "dangerFullAccess"}
+        if v not in allowed:
+            raise ValueError(f"sandbox_mode must be one of {allowed}, got {v!r}")
+        return v
+
+
 class ClaudeCodeConfig(BaseModel):
     """M4.1: Configuration for ClaudeCodeBackend."""
 
@@ -554,6 +576,9 @@ class WeaveConfig(BaseModel):
 
     # M4.2: Token Budget
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
+
+    # M4.4: Codex Backend
+    codex: CodexBackendConfig = Field(default_factory=CodexBackendConfig)
 
     # M4.1: Claude Code Backend
     claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
