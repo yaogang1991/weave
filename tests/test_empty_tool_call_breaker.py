@@ -113,7 +113,7 @@ class TestEmptyToolCallBreaker:
         assert len(msgs) == 6
 
     def test_emits_error_event_on_breaker(self, worker, tmp_store):
-        """Degenerate breaker emits an AGENT_ERROR event with breaker details."""
+        """Degenerate breaker emits an AGENT_STUCK event with pattern details."""
         worker.llm.call = MagicMock(return_value={
             "role": "assistant",
             "content": "",
@@ -122,13 +122,16 @@ class TestEmptyToolCallBreaker:
         mock_exec = MagicMock()
         list(worker.run("s1", "sys", "do it", [], mock_exec, max_iterations=100))
 
-        # Verify AGENT_ERROR event was emitted
+        # Verify AGENT_STUCK event was emitted with degenerate pattern
         events = tmp_store.get_events("s1")
-        error_events = [e for e in events if e.type == EventType.AGENT_ERROR]
-        assert len(error_events) == 1
-        data = error_events[0].payload
-        assert data["error"] == "degenerate_empty_args_breaker"
-        assert data["consecutive_degenerate_iterations"] == DEGENERATE_CALL_LIMIT
+        stuck_events = [e for e in events if e.type == EventType.AGENT_STUCK]
+        degenerate_events = [
+            e for e in stuck_events
+            if e.payload.get("pattern") == "degenerate_args"
+        ]
+        assert len(degenerate_events) == 1
+        data = degenerate_events[0].payload
+        assert data["consecutive_count"] == DEGENERATE_CALL_LIMIT
 
     def test_mixed_valid_invalid_does_not_trigger(self, worker, mock_tool_executor):
         """If at least one tool call per iteration is valid, breaker doesn't trigger."""
