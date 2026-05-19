@@ -12,6 +12,7 @@ BuiltinBackend always remains available as the safe fallback.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shutil
@@ -24,20 +25,37 @@ from agent.backends.base import AgentBackend
 
 logger = logging.getLogger(__name__)
 
+# Named constants for truncation limits (#612 #16).
+ARTIFACT_CONTENT_LIMIT = 2000
+SUMMARY_LIMIT = 500
+OUTPUT_PREVIEW_LIMIT = 2000
+DEFAULT_CLI_TIMEOUT = 1800
 
-class ClaudeCodeConfig:
+# Valid permission modes (#612 #2).
+VALID_PERMISSION_MODES = {"default", "plan", "bypassPermissions"}
+
+__all__ = ["ClaudeCodeBackend", "ClaudeCodeRuntimeConfig"]
+
+
+class ClaudeCodeRuntimeConfig:
     """Immutable runtime configuration for ClaudeCodeBackend.
 
-    Created once per backend instance. Property accessors return copies
-    of mutable fields to preserve immutability.
+    Created once per backend instance from core.config.ClaudeCodeConfig.
+    Renamed from ClaudeCodeConfig to avoid collision (#612 #10).
     """
+
+    __slots__ = (
+        "_cli_path", "_model", "_max_turns", "_permission_mode",
+        "_allowed_tools", "_system_prompt_append", "_max_budget_usd",
+        "_timeout_override",
+    )
 
     def __init__(
         self,
         cli_path: str = "claude",
         model: str = "",
         max_turns: int = 0,
-        permission_mode: str = "bypassPermissions",
+        permission_mode: str = "default",
         allowed_tools: list[str] | None = None,
         system_prompt_append: str = "",
         max_budget_usd: float = 0.0,
@@ -46,14 +64,19 @@ class ClaudeCodeConfig:
         self._cli_path = cli_path
         self._model = model
         self._max_turns = max_turns
+        if permission_mode not in VALID_PERMISSION_MODES:
+            raise ValueError(
+                f"permission_mode must be one of {VALID_PERMISSION_MODES}, "
+                f"got '{permission_mode}'"
+            )
         self._permission_mode = permission_mode
-        self._allowed_tools = list(allowed_tools) if allowed_tools else []
+        self._allowed_tools = tuple(allowed_tools) if allowed_tools else ()
         self._system_prompt_append = system_prompt_append
         self._max_budget_usd = max_budget_usd
         self._timeout_override = timeout_override
 
     @classmethod
-    def from_core_config(cls, config: Any) -> ClaudeCodeConfig:
+    def from_core_config(cls, config: Any) -> ClaudeCodeRuntimeConfig:
         """Create from core.config.ClaudeCodeConfig."""
         return cls(
             cli_path=config.cli_path,
@@ -114,7 +137,7 @@ class ClaudeCodeBackend(AgentBackend):
 
     BACKEND_NAME = "claude_code"
 
-    def __init__(self, config: ClaudeCodeConfig) -> None:
+    def __init__(self, config: ClaudeCodeRuntimeConfig) -> None:
         self._config = config
         self._sdk_available: bool | None = None
         self._cli_available: bool | None = None
@@ -129,6 +152,9 @@ class ClaudeCodeBackend(AgentBackend):
     # -- AgentBackend interface -----------------------------------------------
 
     async def health_check(self) -> bool:
+        # Re-check availability each time (#612 #7 — no permanent cache).
+        self._sdk_available = None
+        self._cli_available = None
         return self._is_sdk_available() or self._is_cli_available()
 
     async def execute(self, context: BackendContext) -> BackendResult:
@@ -169,7 +195,11 @@ class ClaudeCodeBackend(AgentBackend):
     async def _execute_via_sdk(
         self, context: BackendContext, prompt: str,
     ) -> BackendResult:
-        """Execute via Claude Code Python SDK."""
+        """Execute via Claude Code Python SDK.
+
+        Uses asyncio-compatible invocation: if the SDK provides an async
+        API, await directly. Otherwise, fall back to run_in_executor (#612 #1).
+        """
         import claude_code_sdk
 
         options: dict[str, Any] = {
@@ -187,11 +217,14 @@ class ClaudeCodeBackend(AgentBackend):
         if self._config.permission_mode:
             options["permission_mode"] = self._config.permission_mode
 
-        import asyncio
-        loop = asyncio.get_running_loop()
-        raw_result = await loop.run_in_executor(
-            None, lambda: claude_code_sdk.run(**options),
-        )
+        run_fn = claude_code_sdk.run
+        if asyncio.iscoroutinefunction(run_fn):
+            raw_result = await run_fn(**options)
+        else:
+            loop = asyncio.get_running_loop()
+            raw_result = await loop.run_in_executor(
+                None, lambda: run_fn(**options),
+            )
 
         return self._parse_sdk_result(raw_result, context)
 
@@ -219,9 +252,7 @@ class ClaudeCodeBackend(AgentBackend):
                 if errors
                 else "SDK execution failed"
             )
-            classified = self._classify_error(error_msg, context)
-            if classified is not None:
-                raise classified
+            self._raise_if_classifiable(error_msg, context)
             return BackendResult(
                 status=BackendStatus.FAILED,
                 error=error_msg,
@@ -231,7 +262,7 @@ class ClaudeCodeBackend(AgentBackend):
 
         return BackendResult(
             status=BackendStatus.COMPLETED,
-            summary=result_text[:500],
+            summary=result_text[:SUMMARY_LIMIT],
             artifacts=artifacts,
             output=result_text,
             metadata={
@@ -258,7 +289,6 @@ class ClaudeCodeBackend(AgentBackend):
         cwd = context.workspace_path or "."
 
         try:
-            import asyncio
             loop = asyncio.get_running_loop()
             proc = await loop.run_in_executor(
                 None,
@@ -284,9 +314,7 @@ class ClaudeCodeBackend(AgentBackend):
 
         if proc.returncode != 0:
             stderr = proc.stderr.strip()
-            classified = self._classify_error(stderr, context)
-            if classified is not None:
-                raise classified
+            self._raise_if_classifiable(stderr, context)
             return BackendResult(
                 status=BackendStatus.FAILED,
                 error=stderr or f"claude CLI exited with code {proc.returncode}",
@@ -329,7 +357,7 @@ class ClaudeCodeBackend(AgentBackend):
             return BackendResult(
                 status=BackendStatus.FAILED,
                 error=f"Failed to parse Claude CLI JSON output: {exc}",
-                output=stdout[:2000],
+                output=stdout[:OUTPUT_PREVIEW_LIMIT],
             )
 
         is_error = data.get("is_error", False)
@@ -347,11 +375,9 @@ class ClaudeCodeBackend(AgentBackend):
                 else "CLI execution failed"
             )
             subtype = data.get("subtype", "")
-            classified = self._classify_error(
+            self._raise_if_classifiable(
                 error_msg, context, subtype=subtype,
             )
-            if classified is not None:
-                raise classified
             return BackendResult(
                 status=BackendStatus.FAILED,
                 error=error_msg,
@@ -361,7 +387,7 @@ class ClaudeCodeBackend(AgentBackend):
 
         return BackendResult(
             status=BackendStatus.COMPLETED,
-            summary=result_text[:500],
+            summary=result_text[:SUMMARY_LIMIT],
             artifacts=artifacts,
             output=result_text,
             metadata={
@@ -407,7 +433,13 @@ class ClaudeCodeBackend(AgentBackend):
                 )
                 if artifact.file_paths:
                     section += f"Files: {', '.join(artifact.file_paths)}\n"
-                section += artifact.content[:2000]
+                content = artifact.content
+                if len(content) > ARTIFACT_CONTENT_LIMIT:
+                    content = (
+                        content[:ARTIFACT_CONTENT_LIMIT]
+                        + "...(truncated)"
+                    )
+                section += content
                 sections.append(section)
             if sections:
                 parts.append(f"\n## Input Context\n{''.join(sections)}")
@@ -417,7 +449,11 @@ class ClaudeCodeBackend(AgentBackend):
     # -- Artifact discovery --------------------------------------------------
 
     def _discover_artifacts(self, context: BackendContext) -> list[str]:
-        """Discover files created/modified by Claude Code via git diff."""
+        """Discover files created/modified by Claude Code via git diff.
+
+        Synchronous subprocess call — runs after async CLI execution
+        completes, so event loop blocking is acceptable here.
+        """
         workspace = context.workspace_path
         if not workspace:
             return []
@@ -436,8 +472,8 @@ class ClaudeCodeBackend(AgentBackend):
                     for f in result.stdout.strip().split("\n")
                     if f.strip()
                 ]
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+            logger.debug("Artifact discovery failed: %s", exc)
 
         return []
 
@@ -447,8 +483,12 @@ class ClaudeCodeBackend(AgentBackend):
     def _extract_token_usage(
         usage: dict[str, Any] | None,
     ) -> dict[str, int]:
+        """Extract token usage from SDK/CLI output.
+
+        Returns zeroed defaults if usage is None/empty (#612 #15).
+        """
         if not usage:
-            return {}
+            return {"input_tokens": 0, "output_tokens": 0}
         return {
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
@@ -456,15 +496,16 @@ class ClaudeCodeBackend(AgentBackend):
 
     # -- Error classification ------------------------------------------------
 
-    def _classify_error(
+    def _raise_if_classifiable(
         self,
         error_message: str,
         context: BackendContext,
         subtype: str = "",
-    ) -> Exception | None:
-        """Classify Claude Code errors into Weave exception types.
+    ) -> None:
+        """Classify Claude Code errors and raise if match found (#612 #6).
 
-        Returns an exception to raise, or None for generic failure.
+        Raises the appropriate Weave exception if the error is classifiable.
+        Otherwise returns normally, allowing the caller to handle as generic.
         """
         error_lower = error_message.lower()
 
@@ -472,14 +513,14 @@ class ClaudeCodeBackend(AgentBackend):
             "rate limit", "rate_limit", "429", "too many requests",
         )
         if any(p in error_lower for p in rate_limit_patterns):
-            return RateLimitError(
+            raise RateLimitError(
                 provider="claude_code",
                 model=self._config.model or "default",
                 retries=0,
             )
 
         if subtype == "error_max_budget_usd" or "budget" in error_lower:
-            return BudgetExhaustedError(
+            raise BudgetExhaustedError(
                 used_tokens=0,
                 budget_tokens=0,
                 node_id=context.node.id,
@@ -487,12 +528,24 @@ class ClaudeCodeBackend(AgentBackend):
 
         timeout_patterns = ("timeout", "timed out", "deadline exceeded")
         if any(p in error_lower for p in timeout_patterns):
-            return NodeTimeoutError(
+            raise NodeTimeoutError(
                 node_id=context.node.id,
                 agent_type=context.node.agent_type,
                 timeout=0,
             )
 
+    # Backward-compat alias for callers/tests that use the old name.
+    def _classify_error(
+        self,
+        error_message: str,
+        context: BackendContext,
+        subtype: str = "",
+    ) -> Exception | None:
+        """Return classified exception or None (backward-compat wrapper)."""
+        try:
+            self._raise_if_classifiable(error_message, context, subtype)
+        except (RateLimitError, NodeTimeoutError, BudgetExhaustedError) as exc:
+            return exc
         return None
 
     # -- Helpers --------------------------------------------------------------
@@ -500,4 +553,4 @@ class ClaudeCodeBackend(AgentBackend):
     def _get_cli_timeout(self) -> int:
         if self._config.timeout_override > 0:
             return self._config.timeout_override
-        return 1800
+        return DEFAULT_CLI_TIMEOUT

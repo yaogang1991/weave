@@ -176,9 +176,11 @@ class ExecutionFactory:
         if _cfg.claude_code.enabled:
             from agent.backends.claude_code import (
                 ClaudeCodeBackend,
-                ClaudeCodeConfig as RuntimeConfig,
+                ClaudeCodeRuntimeConfig,
             )
-            cc_config = RuntimeConfig.from_core_config(_cfg.claude_code)
+            cc_config = ClaudeCodeRuntimeConfig.from_core_config(
+                _cfg.claude_code,
+            )
             backend_registry.register(
                 "claude_code", ClaudeCodeBackend(config=cc_config),
             )

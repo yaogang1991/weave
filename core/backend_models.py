@@ -31,7 +31,10 @@ class BackendResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to the dict format expected by NodeExecutor."""
+        """Convert to the dict format expected by NodeExecutor.
+
+        Includes token_usage and cost_usd from metadata when present (#612 #9).
+        """
         result: dict[str, Any] = {
             "status": self.status.value,
             "summary": self.summary,
@@ -41,6 +44,12 @@ class BackendResult(BaseModel):
         token_usage = self.metadata.get("token_usage")
         if token_usage:
             result["token_usage"] = token_usage
+        cost_usd = self.metadata.get("cost_usd")
+        if cost_usd is not None:
+            result["cost_usd"] = cost_usd
+        session_id = self.metadata.get("session_id")
+        if session_id:
+            result["session_id"] = session_id
         return result
 
 
