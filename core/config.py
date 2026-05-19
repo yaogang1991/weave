@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -426,6 +427,11 @@ class BudgetConfig(BaseModel):
 
 class CodexBackendConfig(BaseModel):
     """M4.4: Configuration for the Codex CLI backend."""
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv(
+            "WEAVE_CODEX_ENABLED", "false"
+        ).lower() in ("true", "1", "yes"),
+    )
     binary_path: str = Field(
         default_factory=lambda: os.getenv("WEAVE_CODEX_BINARY_PATH", "codex"),
     )
@@ -437,12 +443,19 @@ class CodexBackendConfig(BaseModel):
     )
     timeout: int = Field(default=600, description="Per-invocation timeout in seconds.")
 
+    # Allowed sandbox modes — single source of truth (#619 #4).
+    VALID_SANDBOX_MODES: ClassVar[frozenset[str]] = frozenset({
+        "workspace-write", "workspace-read", "full-access",
+        "none", "readOnly", "dangerFullAccess",
+    })
+
     @field_validator("sandbox_mode")
     @classmethod
     def _validate_sandbox_mode(cls, v: str) -> str:
-        allowed = {"workspace-write", "workspace-read", "full-access", "none", "readOnly", "dangerFullAccess"}
-        if v not in allowed:
-            raise ValueError(f"sandbox_mode must be one of {allowed}, got {v!r}")
+        if v not in cls.VALID_SANDBOX_MODES:
+            raise ValueError(
+                f"sandbox_mode must be one of {cls.VALID_SANDBOX_MODES}, got {v!r}"
+            )
         return v
 
 

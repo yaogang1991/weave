@@ -6,8 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from core.backend_models import BackendContext, BackendResult, BackendStatus
+from core.backend_models import BackendContext, BackendStatus
 from core.dag_models import HandoffArtifact
+from core.exceptions import NodeTimeoutError
 from agent.backends.codex import CodexBackend
 from agent.backends.registry import BackendRegistry
 
@@ -49,7 +50,7 @@ class TestCodexHealthCheck:
             backend = CodexBackend()
             await backend.health_check()
             await backend.health_check()
-            assert mock_which.call_count == 1
+            assert mock_which.call_count == 2  # Re-resolves each call (#619 #8)
 
 
 class TestCodexBuildPrompt:
@@ -131,6 +132,7 @@ class TestCodexStreamOutput:
         mock_process = MagicMock()
         mock_process.stdout = AsyncMock()
         mock_process.stdout.readline = AsyncMock(side_effect=[b""])
+        mock_process.wait = AsyncMock()
 
         output_lines = []
         usage = {"input_tokens": 0, "output_tokens": 0}
@@ -182,30 +184,30 @@ class TestCodexStreamOutput:
 class TestCodexParseResult:
     def test_completed(self):
         backend = CodexBackend()
-        result = backend._parse_result(0, ["Hello", "World"], {"input_tokens": 10, "output_tokens": 5}, "")
+        result = backend._parse_result(0, ["Hello", "World"], {"input_tokens": 10, "output_tokens": 5}, "", [])
         assert result.status == BackendStatus.COMPLETED
-        assert result.summary == "World"
+        assert result.summary == "Hello"  # Uses first line (#619 #10)
         assert result.metadata["token_usage"]["input_tokens"] == 10
 
     def test_failed(self):
         backend = CodexBackend()
-        result = backend._parse_result(1, [], {"input_tokens": 0, "output_tokens": 0}, "error msg")
+        result = backend._parse_result(1, [], {"input_tokens": 0, "output_tokens": 0}, "error msg", [])
         assert result.status == BackendStatus.FAILED
         assert "error msg" in result.error
 
     def test_cancelled_signal(self):
         backend = CodexBackend()
-        result = backend._parse_result(-1, ["partial"], {"input_tokens": 5, "output_tokens": 3}, "")
+        result = backend._parse_result(-1, ["partial"], {"input_tokens": 5, "output_tokens": 3}, "", [])
         assert result.status == BackendStatus.CANCELLED
 
     def test_cancelled_none(self):
         backend = CodexBackend()
-        result = backend._parse_result(None, [], {"input_tokens": 0, "output_tokens": 0}, "")
+        result = backend._parse_result(None, [], {"input_tokens": 0, "output_tokens": 0}, "", [])
         assert result.status == BackendStatus.CANCELLED
 
     def test_failed_no_stderr(self):
         backend = CodexBackend()
-        result = backend._parse_result(2, [], {"input_tokens": 0, "output_tokens": 0}, "")
+        result = backend._parse_result(2, [], {"input_tokens": 0, "output_tokens": 0}, "", [])
         assert "code 2" in result.error
 
 
@@ -301,10 +303,10 @@ class TestCodexExecute:
 
         with patch("asyncio.create_subprocess_exec", return_value=mock_process):
             backend._timeout = 0.01
-            result = await backend.execute(ctx)
+            with pytest.raises(NodeTimeoutError):
+                await backend.execute(ctx)
 
-        assert result.status == BackendStatus.FAILED
-        assert "timed out" in result.error
+        mock_process.kill.assert_called()
 
 
 class TestCodexRegistryIntegration:
@@ -314,7 +316,6 @@ class TestCodexRegistryIntegration:
         registry = BackendRegistry(pool=pool, session_id="s1")
 
         backend = CodexBackend()
-        backend._resolved_path = "/usr/local/bin/codex"  # skip health check
         registry.register("codex", backend)
 
         mock_process = MagicMock()
@@ -324,9 +325,10 @@ class TestCodexRegistryIntegration:
         mock_process.stderr = AsyncMock()
         mock_process.stderr.read = AsyncMock(return_value=b"")
 
-        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
-            ctx = _make_context()
-            result = await registry.execute_for_node("codex", ctx)
+        with patch("agent.backends.codex.shutil.which", return_value="/usr/local/bin/codex"):
+            with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+                ctx = _make_context()
+                result = await registry.execute_for_node("codex", ctx)
 
         assert result.status == BackendStatus.COMPLETED
 
