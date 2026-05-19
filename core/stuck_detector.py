@@ -24,6 +24,7 @@ class StuckResult:
     consecutive_count: int = 0
     threshold: int = 0
     message: str = ""
+    needs_hint: bool = False
 
 
 class StuckDetector:
@@ -49,6 +50,7 @@ class StuckDetector:
         self._consecutive_degenerate: int = 0
         self._consecutive_repeat: int = 0
         self._last_content: str = ""
+        self._hint_injected: bool = False
 
     def observe(
         self,
@@ -93,6 +95,7 @@ class StuckDetector:
         else:
             self._consecutive_empty = 0
             self._consecutive_degenerate = 0
+            self._hint_injected = False  # Reset hint on successful tool use (#607)
             return StuckResult(is_stuck=False)
 
         # Check degenerate args (all tool calls have empty dict args)
@@ -101,6 +104,22 @@ class StuckDetector:
         )
         if all_empty_dict:
             self._consecutive_degenerate += 1
+            # P1 (#607): On first degenerate detection, signal for prompt hint
+            # injection instead of immediately counting toward the limit.
+            # This gives the model a chance to self-correct.
+            if self._consecutive_degenerate == 1 and not self._hint_injected:
+                self._hint_injected = True
+                return StuckResult(
+                    is_stuck=False,
+                    pattern=StuckPattern.DEGENERATE_ARGS,
+                    consecutive_count=self._consecutive_degenerate,
+                    threshold=self._degenerate_call_limit,
+                    message=(
+                        "First degenerate empty-args detected — "
+                        "requesting prompt hint injection for recovery."
+                    ),
+                    needs_hint=True,
+                )
             if self._consecutive_degenerate >= self._degenerate_call_limit:
                 return StuckResult(
                     is_stuck=True,
@@ -137,6 +156,7 @@ class StuckDetector:
         self._consecutive_degenerate = 0
         self._consecutive_repeat = 0
         self._last_content = ""
+        self._hint_injected = False
 
     @property
     def state(self) -> dict[str, int]:

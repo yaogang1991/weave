@@ -258,6 +258,37 @@ class AgentWorker:
 
             # M4.2: Stuck detection via composable StuckDetector
             stuck_result = stuck_detector.observe(assistant_message, any_tool_executed)
+
+            # P1 (#607): Inject recovery hint on first degenerate detection
+            if stuck_result.needs_hint:
+                logger.warning(
+                    "Degenerate empty-args detected — injecting recovery hint (#607)",
+                )
+                self.session_store.emit_event(
+                    session_id,
+                    EventType.AGENT_STUCK,
+                    {
+                        "pattern": "degenerate_args_recovery",
+                        "consecutive_count": stuck_result.consecutive_count,
+                        "message": "Injecting recovery hint for empty-args loop",
+                    },
+                )
+                messages.append({
+                    "role": "assistant",
+                    "content": "I need to call a tool to continue.",
+                })
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "CRITICAL: Your previous tool call had empty arguments {}. "
+                        "You MUST provide complete arguments in the correct format. "
+                        "For example, when calling 'write', include both 'file_path' "
+                        "and 'content'. When calling 'edit', include 'file_path', "
+                        "'old_string', and 'new_string'. Do NOT repeat the empty call."
+                    ),
+                })
+                continue  # Give model another chance without counting toward limit
+
             if stuck_result.is_stuck:
                 logger.error(
                     "Stuck detector triggered: %s (pattern=%s, count=%d/%d)",

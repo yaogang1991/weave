@@ -83,14 +83,14 @@ def test_degenerate_breaks_at_limit():
     # Should break at DEGENERATE_CALL_LIMIT, not run all 50 iterations
     assert len(worker.llm.call.call_args_list) <= DEGENERATE_CALL_LIMIT * 4 + 1
 
-    # Verify error event was emitted
-    error_events = [
+    # Verify stuck event was emitted
+    stuck_events = [
         c for c in worker.session_store.emit_event.call_args_list
-        if len(c.args) >= 2 and c.args[1] == EventType.AGENT_ERROR
+        if len(c.args) >= 2 and c.args[1] == EventType.AGENT_STUCK
     ]
     degenerate_events = [
-        e for e in error_events
-        if e.args[2].get("error") == "degenerate_empty_args_breaker"
+        e for e in stuck_events
+        if e.args[2].get("pattern") == "degenerate_args"
     ]
     assert len(degenerate_events) == 1
 
@@ -127,14 +127,14 @@ def test_partial_missing_args_not_degenerate():
     call_count = len(worker.llm.call.call_args_list)
     assert call_count > DEGENERATE_CALL_LIMIT * 3  # Not the degenerate limit
 
-    # Verify no degenerate error event
-    error_events = [
+    # Verify no degenerate stuck event
+    stuck_events = [
         c for c in worker.session_store.emit_event.call_args_list
-        if len(c.args) >= 2 and c.args[1] == EventType.AGENT_ERROR
+        if len(c.args) >= 2 and c.args[1] == EventType.AGENT_STUCK
     ]
     degenerate_events = [
-        e for e in error_events
-        if e.args[2].get("error") == "degenerate_empty_args_breaker"
+        e for e in stuck_events
+        if e.args[2].get("pattern") == "degenerate_args"
     ]
     assert len(degenerate_events) == 0
 
@@ -189,13 +189,13 @@ def test_degenerate_counter_resets_on_valid_call():
     ))
 
     # The degenerate breaker should have fired
-    error_events = [
+    stuck_events = [
         c for c in worker.session_store.emit_event.call_args_list
-        if len(c.args) >= 2 and c.args[1] == EventType.AGENT_ERROR
+        if len(c.args) >= 2 and c.args[1] == EventType.AGENT_STUCK
     ]
     degenerate_events = [
-        e for e in error_events
-        if e.args[2].get("error") == "degenerate_empty_args_breaker"
+        e for e in stuck_events
+        if e.args[2].get("pattern") == "degenerate_args"
     ]
     assert len(degenerate_events) == 1
 
