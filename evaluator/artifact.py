@@ -7,6 +7,7 @@ These functions are stateless — all context is passed as arguments.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from core.models import CriterionType, SuccessCriterion
@@ -70,15 +71,15 @@ def scope_artifacts_to_criteria(
 
     # Filter by owned_files first (#395)
     if owned_files:
-        owned_set = set(owned_files)
+        owned_set = {own.replace(os.sep, "/") for own in owned_files}
         filtered = []
         for art in output_artifacts:
-            art_rel = art
+            art_rel = art.replace(os.sep, "/")
             if work_dir:
                 try:
                     p = Path(art)
                     if p.is_absolute():
-                        art_rel = str(p.relative_to(work_dir))
+                        art_rel = str(p.relative_to(work_dir)).replace(os.sep, "/")
                 except ValueError:
                     pass
             if any(
@@ -120,20 +121,26 @@ def scope_artifacts_to_criteria(
             for match in work_dir.glob(pattern):
                 if match.is_file():
                     try:
-                        expected_files.add(str(match.relative_to(work_dir)))
+                        expected_files.add(
+                            str(
+                                match.relative_to(work_dir)
+                            ).replace(os.sep, "/")
+                        )
                     except ValueError:
                         expected_files.add(str(match))
 
     # Filter artifacts to only expected files
     scoped = []
     for art in output_artifacts:
-        # Normalize: try relative path
-        art_rel = art
+        # Normalize: try relative path with forward slashes (#581)
+        art_rel = art.replace(os.sep, "/")
         if work_dir:
             try:
                 p = Path(art)
                 if p.is_absolute():
-                    art_rel = str(p.relative_to(work_dir))
+                    art_rel = str(
+                        p.relative_to(work_dir)
+                    ).replace(os.sep, "/")
             except ValueError:
                 pass
         # Match against expected files (prefix match for directories)
@@ -147,7 +154,9 @@ def scope_artifacts_to_criteria(
                 break
         else:
             # Also check if artifact is directly in expected_paths
-            if art in expected_paths or any(art.endswith("/" + e) for e in expected_paths):
+            if art in expected_paths or any(
+                art.endswith("/" + e) for e in expected_paths
+            ):
                 scoped.append(art)
 
     if scoped:

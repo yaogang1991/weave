@@ -146,3 +146,51 @@ class TestCheckDirtyWorkspace:
         _check_dirty_workspace(None)
         captured = capsys.readouterr()
         assert captured.err == ""
+
+    def test_non_interactive_flag_skips_prompt(self, tmp_path, capsys):
+        """non_interactive=True parameter skips prompt without env var (#578)."""
+        import subprocess
+        subprocess.run(
+            ["git", "init"], cwd=str(tmp_path),
+            capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=str(tmp_path), capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=str(tmp_path), capture_output=True, timeout=10,
+        )
+        (tmp_path / "dirty.py").write_text("x = 1")
+
+        # No env var set, but non_interactive=True passed as parameter
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": ""}):
+            _check_dirty_workspace(str(tmp_path), non_interactive=True)
+
+        captured = capsys.readouterr()
+        assert "non-interactive" in captured.err.lower()
+
+    def test_non_interactive_flag_overrides_env(self, tmp_path, capsys):
+        """non_interactive=True works even when env var is not set (#578)."""
+        import subprocess
+        subprocess.run(
+            ["git", "init"], cwd=str(tmp_path),
+            capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=str(tmp_path), capture_output=True, timeout=10,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=str(tmp_path), capture_output=True, timeout=10,
+        )
+        (tmp_path / "dirty.py").write_text("x = 1")
+
+        # Explicitly no env var, but non_interactive=True as parameter
+        with patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": ""}, clear=False):
+            _check_dirty_workspace(str(tmp_path), non_interactive=True)
+
+        captured = capsys.readouterr()
+        assert "Proceeding anyway" in captured.err

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -444,7 +445,7 @@ class BackendManager:
         if not expected_artifacts:
             return []
 
-        expected_set = set(expected_artifacts)
+        expected_set = {a.replace("/", os.sep) for a in expected_artifacts}
         cleaned: list[str] = []
 
         for py_file in work_path.rglob("*.py"):
