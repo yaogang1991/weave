@@ -513,6 +513,13 @@ class LLMClient:
         if tool_calls:
             msg["tool_calls"] = tool_calls
 
+        # M4.2: Extract token usage from response
+        if hasattr(response, "usage") and response.usage:
+            msg["usage"] = {
+                "input_tokens": getattr(response.usage, "input_tokens", 0) or 0,
+                "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
+            }
+
         return msg
 
     # -- OpenAI -----------------------------------------------------------
@@ -545,5 +552,12 @@ class LLMClient:
                 }
                 for tc in choice.message.tool_calls
             ]
+
+        # M4.2: Extract token usage from response
+        if hasattr(response, "usage") and response.usage:
+            msg["usage"] = {
+                "input_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
+                "output_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
+            }
 
         return msg

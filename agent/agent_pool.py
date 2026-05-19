@@ -339,6 +339,7 @@ Execute using your available tools. Produce clear, verifiable output.
             "summary": final.content if final else "",
             "artifacts": self.worker.artifacts,
             "output": final.content if final else "",
+            "token_usage": self.worker.last_token_usage,
         }
 
     @staticmethod

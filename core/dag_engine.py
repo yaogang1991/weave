@@ -29,6 +29,7 @@ from core.models import (
 )
 from core.config import NodeTimeoutConfig
 from core.exceptions import PendingApprovalError
+from core.exceptions import BudgetExhaustedError
 from backend.lifecycle import BackendManager
 from memory.manager import MemoryManager
 from evaluator.engine import EvaluatorEngine
@@ -37,6 +38,7 @@ from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
+from core.budget_manager import BudgetManager
 from core.dag_checkpoint import CheckpointManager
 from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
 
@@ -91,6 +93,10 @@ class DAGExecutionEngine:
         run_id: str = "",
         # #455: DAG execution state persistence for crash recovery
         checkpoint_dir: str = "./data/dag_progress",
+        # M4.0: Backend registry for per-node backend selection
+        backend_registry: Any | None = None,
+        # M4.2: Token budget manager
+        budget_manager: BudgetManager | None = None,
     ):
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
@@ -152,6 +158,9 @@ class DAGExecutionEngine:
             run_id=run_id,
             backoff_base=backoff_base,
             backoff_cap=backoff_cap,
+            backend_registry=backend_registry,
+            session_id=session_id or "",
+            budget_manager=budget_manager,
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
@@ -160,6 +169,8 @@ class DAGExecutionEngine:
         self._run_id = run_id
         # #455: DAG execution state persistence for crash recovery
         self._checkpoint = CheckpointManager(checkpoint_dir, session_id)
+        # M4.2: Budget manager for token tracking
+        self._budget_manager = budget_manager
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -387,6 +398,21 @@ class DAGExecutionEngine:
                 for r in results:
                     if isinstance(r, PendingApprovalError):
                         raise r
+
+                # M4.2: Check budget exhaustion after level execution
+                budget_exhausted = any(
+                    isinstance(r, BudgetExhaustedError) for r in results
+                )
+                if budget_exhausted:
+                    logger.warning(
+                        "Budget exhausted after level %d: %d/%d tokens. "
+                        "Skipping remaining levels.",
+                        level_idx + 1,
+                        self._budget_manager.used_total_tokens if self._budget_manager else 0,
+                        self._budget_manager.config.total_tokens if self._budget_manager else 0,
+                    )
+                    self._skip_remaining(dag, levels, level_idx + 1)
+                    return dag
 
                 failed_in_level = [
                     nid for nid in pending
@@ -756,7 +782,7 @@ class DAGExecutionEngine:
         failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
         skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
 
-        return {
+        summary = {
             "total_nodes": total,
             "success": success,
             "partial_pass": partial_pass,
@@ -776,3 +802,20 @@ class DAGExecutionEngine:
                 for nid, n in dag.nodes.items()
             },
         }
+
+        # M4.2: Token usage aggregation
+        total_input = 0
+        total_output = 0
+        for n in dag.nodes.values():
+            tu = n.token_usage if hasattr(n, "token_usage") else {}
+            total_input += tu.get("input_tokens", 0)
+            total_output += tu.get("output_tokens", 0)
+        summary["token_usage"] = {
+            "total_input_tokens": total_input,
+            "total_output_tokens": total_output,
+            "total_tokens": total_input + total_output,
+        }
+        if self._budget_manager and not self._budget_manager.config.is_unlimited:
+            summary["budget"] = self._budget_manager.to_dict()
+
+        return summary
