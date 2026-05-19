@@ -81,6 +81,7 @@ def add_execution_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+
 def add_self_modify_arg(parser: argparse.ArgumentParser) -> None:
     """Add --allow-self-modify argument."""
     parser.add_argument(

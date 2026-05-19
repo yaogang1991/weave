@@ -258,11 +258,11 @@ class AgentWorker:
 
             # M4.2: Stuck detection via composable StuckDetector
             stuck_result = stuck_detector.observe(assistant_message, any_tool_executed)
-
             # P1 (#607): Inject recovery hint on first degenerate detection
             if stuck_result.needs_hint:
                 logger.warning(
                     "Degenerate empty-args detected — injecting recovery hint (#607)",
+
                 )
                 self.session_store.emit_event(
                     session_id,
@@ -313,6 +313,7 @@ class AgentWorker:
                     session_id,
                     EventType.AGENT_STUCK,
                     {
+
                         "pattern": stuck_result.pattern.value if stuck_result.pattern else None,
                         "consecutive_count": stuck_result.consecutive_count,
                         "threshold": stuck_result.threshold,

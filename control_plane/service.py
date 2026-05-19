@@ -301,6 +301,7 @@ class RunService:
             approval_repo=approval_repo,
             policy=policy,
             budget_manager=None,  # TODO: propagate from WeaveConfig.budget (#595)
+
         )
 
     # ------------------------------------------------------------------

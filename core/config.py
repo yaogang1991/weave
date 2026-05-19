@@ -575,6 +575,7 @@ class ClaudeCodeConfig(BaseModel):
         return v.strip()
 
 
+
 class WeaveConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
@@ -648,6 +649,7 @@ class WeaveConfig(BaseModel):
 
     # M4.1: Claude Code Backend
     claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
+
 
     # M2.0: Watchdog
     watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)
