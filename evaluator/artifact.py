@@ -74,18 +74,18 @@ def scope_artifacts_to_criteria(
         owned_set = {own.replace(os.sep, "/") for own in owned_files}
         filtered = []
         for art in output_artifacts:
-            art_rel = art.replace(os.sep, "/")
+            art_rel = art.replace("\\", "/")
             if work_dir:
                 try:
                     p = Path(art)
                     if p.is_absolute():
-                        art_rel = str(p.relative_to(work_dir)).replace(os.sep, "/")
+                        art_rel = str(p.relative_to(work_dir)).replace("\\", "/")
                 except ValueError:
                     pass
             if any(
-                art_rel == own
-                or art_rel.endswith("/" + own)
-                or own.endswith("/" + art_rel)
+                art_rel == own.replace("\\", "/")
+                or art_rel.endswith("/" + own.replace("\\", "/"))
+                or own.replace("\\", "/").endswith("/" + art_rel)
                 for own in owned_set
             ):
                 filtered.append(art)
@@ -106,7 +106,7 @@ def scope_artifacts_to_criteria(
     expected_patterns: list[str] = []
     for crit in criteria:
         if crit.type == CriterionType.FILE_EXISTS and crit.path:
-            expected_paths.append(crit.path)
+            expected_paths.append(crit.path.replace("\\", "/"))
         elif crit.type == CriterionType.FILE_PATTERN and crit.pattern:
             expected_patterns.append(crit.pattern)
 
@@ -121,26 +121,20 @@ def scope_artifacts_to_criteria(
             for match in work_dir.glob(pattern):
                 if match.is_file():
                     try:
-                        expected_files.add(
-                            str(
-                                match.relative_to(work_dir)
-                            ).replace(os.sep, "/")
-                        )
+                        expected_files.add(str(match.relative_to(work_dir)).replace("\\", "/"))
                     except ValueError:
-                        expected_files.add(str(match))
+                        expected_files.add(str(match).replace("\\", "/"))
 
     # Filter artifacts to only expected files
     scoped = []
     for art in output_artifacts:
         # Normalize: try relative path with forward slashes (#581)
-        art_rel = art.replace(os.sep, "/")
+        art_rel = art.replace("\\", "/")
         if work_dir:
             try:
                 p = Path(art)
                 if p.is_absolute():
-                    art_rel = str(
-                        p.relative_to(work_dir)
-                    ).replace(os.sep, "/")
+                    art_rel = str(p.relative_to(work_dir)).replace("\\", "/")
             except ValueError:
                 pass
         # Match against expected files (prefix match for directories)
@@ -154,8 +148,8 @@ def scope_artifacts_to_criteria(
                 break
         else:
             # Also check if artifact is directly in expected_paths
-            if art in expected_paths or any(
-                art.endswith("/" + e) for e in expected_paths
+            if art_rel in expected_paths or any(
+                art_rel.endswith("/" + e.replace("\\", "/")) for e in expected_paths
             ):
                 scoped.append(art)
 

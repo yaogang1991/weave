@@ -175,6 +175,17 @@ class ExecutionFactory:
         # M4.4: Register external backends (codex, etc.)
         self._register_external_backends(backend_registry)
 
+        # M4.1: Register ClaudeCodeBackend if enabled
+        if _cfg.claude_code.enabled:
+            from agent.backends.claude_code import (
+                ClaudeCodeBackend,
+                ClaudeCodeConfig as RuntimeConfig,
+            )
+            cc_config = RuntimeConfig.from_core_config(_cfg.claude_code)
+            backend_registry.register(
+                "claude_code", ClaudeCodeBackend(config=cc_config),
+            )
+
         engine = DAGExecutionEngine(
             agent_executor=pool.get_executor(session_id),
             failure_handler=orchestrator.adapt_to_failure,

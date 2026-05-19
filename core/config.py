@@ -446,6 +446,48 @@ class CodexBackendConfig(BaseModel):
         return v
 
 
+class ClaudeCodeConfig(BaseModel):
+    """M4.1: Configuration for ClaudeCodeBackend."""
+
+    enabled: bool = Field(
+        default_factory=lambda: os.getenv(
+            "WEAVE_CLAUDE_CODE_ENABLED", "false"
+        ).lower() in ("true", "1", "yes"),
+    )
+    cli_path: str = Field(
+        default_factory=lambda: os.getenv("WEAVE_CLAUDE_CODE_PATH", "claude"),
+        description="Path to claude CLI binary",
+    )
+    model: str = Field(
+        default="",
+        description="Model override for Claude Code (empty = default)",
+    )
+    max_turns: int = Field(
+        default=0, ge=0,
+        description="Max conversation turns (0 = unlimited)",
+    )
+    permission_mode: str = Field(
+        default="bypassPermissions",
+        description="Claude Code permission mode",
+    )
+    allowed_tools: list[str] = Field(
+        default_factory=list,
+        description="Tool names to allow (empty = all default)",
+    )
+    system_prompt_append: str = Field(
+        default="",
+        description="Additional system prompt",
+    )
+    max_budget_usd: float = Field(
+        default=0.0, ge=0.0,
+        description="Max USD budget per node (0 = unlimited)",
+    )
+    timeout_override: int = Field(
+        default=0, ge=0,
+        description="Per-node timeout override in seconds (0 = use node_timeout)",
+    )
+
+
 class WeaveConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
@@ -516,6 +558,9 @@ class WeaveConfig(BaseModel):
 
     # M4.4: Codex Backend
     codex: CodexBackendConfig = Field(default_factory=CodexBackendConfig)
+
+    # M4.1: Claude Code Backend
+    claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
 
     # M2.0: Watchdog
     watchdog: WatchdogConfig = Field(default_factory=WatchdogConfig)

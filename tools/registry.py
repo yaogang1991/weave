@@ -107,12 +107,13 @@ class ToolRegistry:
             resolved = self._resolve_path(file_path)
         except ValueError:
             return f"Path resolution failed for '{file_path}'"
-        resolved_str = str(resolved)
+        resolved_str = str(resolved).replace("\\", "/")
         for fb in forbidden:
             # Normalize forbidden path to OS-native separators (#581)
             fb_norm = fb.replace("/", os.sep)
             # Check suffix match (handles relative vs absolute differences)
-            if resolved_str.endswith(fb_norm) or resolved_str.endswith(os.sep + fb_norm):
+            fb_norm = fb.replace("\\", "/")
+            if resolved_str.endswith(fb_norm) or resolved_str.endswith("/" + fb_norm):
                 return (
                     f"File '{file_path}' is owned by another parallel node "
                     f"and is forbidden for this node (#272)."

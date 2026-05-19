@@ -294,24 +294,25 @@ class FileExistsChecker:
         Compares relative paths so that absolute artifacts and glob results
         can be matched correctly.
         """
-        # Normalize output_artifacts to relative paths
+        # Normalize output_artifacts to relative paths using forward slashes
+        # for cross-platform comparison (Windows uses backslash, artifacts use forward slash)
         owned_rels: set[str] = set()
         for art in output_artifacts:
             p = Path(art)
             if p.is_absolute():
                 try:
-                    owned_rels.add(str(p.relative_to(work_dir)))
+                    owned_rels.add(str(p.relative_to(work_dir)).replace("\\", "/"))
                 except ValueError:
-                    owned_rels.add(art)
+                    owned_rels.add(art.replace("\\", "/"))
             else:
-                owned_rels.add(art)
+                owned_rels.add(art.replace("\\", "/"))
 
         owned = []
         for f in files:
             try:
-                rel = str(f.relative_to(work_dir))
+                rel = str(f.relative_to(work_dir)).replace("\\", "/")
             except ValueError:
-                rel = str(f)
+                rel = str(f).replace("\\", "/")
             if rel in owned_rels or any(rel.endswith("/" + a) for a in owned_rels):
                 owned.append(f)
         return owned

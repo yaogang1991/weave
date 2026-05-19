@@ -1,4 +1,6 @@
 """Tests for path traversal prevention in ToolRegistry (#500)."""
+import sys
+
 import pytest
 
 from tools.registry import ToolRegistry
@@ -41,6 +43,7 @@ class TestPathTraversalPrevention:
         result = registry._resolve_path(".")
         assert result == tmp_path.resolve()
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Symlinks require admin on Windows")
     def test_blocks_symlink_escape(self, tmp_path):
         """Symlink pointing outside workspace is blocked."""
         link = tmp_path / "escape"

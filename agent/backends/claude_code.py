@@ -1,0 +1,503 @@
+"""ClaudeCodeBackend -- delegates node execution to Claude Code (SDK or CLI).
+
+M4.1 implementation: integrates Claude Code as an external Worker backend
+for the Weave DAG orchestration system.
+
+Two execution paths:
+1. SDK path: Uses the claude-code Python SDK (if installed).
+2. CLI fallback: Shells out to the `claude` CLI with --output-format json.
+
+All vendor-specific code is isolated in this single file.
+BuiltinBackend always remains available as the safe fallback.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import shutil
+import subprocess
+from typing import Any
+
+from core.backend_models import BackendContext, BackendResult, BackendStatus
+from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
+from agent.backends.base import AgentBackend
+
+logger = logging.getLogger(__name__)
+
+
+class ClaudeCodeConfig:
+    """Immutable runtime configuration for ClaudeCodeBackend.
+
+    Created once per backend instance. Property accessors return copies
+    of mutable fields to preserve immutability.
+    """
+
+    def __init__(
+        self,
+        cli_path: str = "claude",
+        model: str = "",
+        max_turns: int = 0,
+        permission_mode: str = "bypassPermissions",
+        allowed_tools: list[str] | None = None,
+        system_prompt_append: str = "",
+        max_budget_usd: float = 0.0,
+        timeout_override: int = 0,
+    ) -> None:
+        self._cli_path = cli_path
+        self._model = model
+        self._max_turns = max_turns
+        self._permission_mode = permission_mode
+        self._allowed_tools = list(allowed_tools) if allowed_tools else []
+        self._system_prompt_append = system_prompt_append
+        self._max_budget_usd = max_budget_usd
+        self._timeout_override = timeout_override
+
+    @classmethod
+    def from_core_config(cls, config: Any) -> ClaudeCodeConfig:
+        """Create from core.config.ClaudeCodeConfig."""
+        return cls(
+            cli_path=config.cli_path,
+            model=config.model,
+            max_turns=config.max_turns,
+            permission_mode=config.permission_mode,
+            allowed_tools=list(config.allowed_tools) if config.allowed_tools else None,
+            system_prompt_append=config.system_prompt_append,
+            max_budget_usd=config.max_budget_usd,
+            timeout_override=config.timeout_override,
+        )
+
+    @property
+    def cli_path(self) -> str:
+        return self._cli_path
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def max_turns(self) -> int:
+        return self._max_turns
+
+    @property
+    def permission_mode(self) -> str:
+        return self._permission_mode
+
+    @property
+    def allowed_tools(self) -> list[str]:
+        return list(self._allowed_tools)
+
+    @property
+    def system_prompt_append(self) -> str:
+        return self._system_prompt_append
+
+    @property
+    def max_budget_usd(self) -> float:
+        return self._max_budget_usd
+
+    @property
+    def timeout_override(self) -> int:
+        return self._timeout_override
+
+
+class ClaudeCodeBackend(AgentBackend):
+    """Executes DAG nodes by delegating to Claude Code.
+
+    Claude Code handles its own OS-level sandboxing (bubblewrap/Seatbelt + gVisor),
+    so no SandboxProvider is needed.
+
+    The backend does NOT manage:
+    - Workspace isolation (handled by BackendManager)
+    - Evaluation (handled by EvaluatorEngine)
+    - Retry logic (handled by NodeExecutor)
+    - Timeout enforcement (handled by NodeExecutor)
+    """
+
+    BACKEND_NAME = "claude_code"
+
+    def __init__(self, config: ClaudeCodeConfig) -> None:
+        self._config = config
+        self._sdk_available: bool | None = None
+        self._cli_available: bool | None = None
+
+    @property
+    def name(self) -> str:
+        return self.BACKEND_NAME
+
+    def get_capabilities(self) -> list[str]:
+        return ["planner", "generator", "evaluator"]
+
+    # -- AgentBackend interface -----------------------------------------------
+
+    async def health_check(self) -> bool:
+        return self._is_sdk_available() or self._is_cli_available()
+
+    async def execute(self, context: BackendContext) -> BackendResult:
+        """Execute a node via Claude Code.
+
+        Strategy: SDK first, CLI fallback.
+        """
+        prompt = self._build_prompt(context)
+
+        if self._is_sdk_available():
+            try:
+                return await self._execute_via_sdk(context, prompt)
+            except Exception as exc:
+                logger.warning(
+                    "Claude Code SDK failed (%s), falling back to CLI", exc,
+                )
+
+        if self._is_cli_available():
+            return await self._execute_via_cli(context, prompt)
+
+        return BackendResult(
+            status=BackendStatus.FAILED,
+            error="Claude Code SDK not installed and CLI not found in PATH",
+        )
+
+    # -- SDK path ------------------------------------------------------------
+
+    def _is_sdk_available(self) -> bool:
+        if self._sdk_available is not None:
+            return self._sdk_available
+        try:
+            import claude_code_sdk  # noqa: F401
+            self._sdk_available = True
+        except ImportError:
+            self._sdk_available = False
+        return self._sdk_available
+
+    async def _execute_via_sdk(
+        self, context: BackendContext, prompt: str,
+    ) -> BackendResult:
+        """Execute via Claude Code Python SDK."""
+        import claude_code_sdk
+
+        options: dict[str, Any] = {
+            "prompt": prompt,
+            "cwd": context.workspace_path or ".",
+        }
+        if self._config.allowed_tools:
+            options["allowed_tools"] = self._config.allowed_tools
+        if self._config.max_turns > 0:
+            options["max_turns"] = self._config.max_turns
+        if self._config.model:
+            options["model"] = self._config.model
+        if self._config.system_prompt_append:
+            options["system_prompt_append"] = self._config.system_prompt_append
+        if self._config.permission_mode:
+            options["permission_mode"] = self._config.permission_mode
+
+        import asyncio
+        loop = asyncio.get_running_loop()
+        raw_result = await loop.run_in_executor(
+            None, lambda: claude_code_sdk.run(**options),
+        )
+
+        return self._parse_sdk_result(raw_result, context)
+
+    def _parse_sdk_result(
+        self, raw_result: Any, context: BackendContext,
+    ) -> BackendResult:
+        if hasattr(raw_result, "model_dump"):
+            data = raw_result.model_dump()
+        elif isinstance(raw_result, dict):
+            data = raw_result
+        else:
+            data = {"result": str(raw_result)}
+
+        is_error = data.get("is_error", False)
+        result_text = data.get("result", "")
+        usage = data.get("usage", {})
+
+        token_usage = self._extract_token_usage(usage)
+        artifacts = self._discover_artifacts(context)
+
+        if is_error:
+            errors = data.get("errors", [])
+            error_msg = (
+                "; ".join(str(e) for e in errors)
+                if errors
+                else "SDK execution failed"
+            )
+            classified = self._classify_error(error_msg, context)
+            if classified is not None:
+                raise classified
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=error_msg,
+                artifacts=artifacts,
+                metadata={"token_usage": token_usage},
+            )
+
+        return BackendResult(
+            status=BackendStatus.COMPLETED,
+            summary=result_text[:500],
+            artifacts=artifacts,
+            output=result_text,
+            metadata={
+                "token_usage": token_usage,
+                "session_id": data.get("session_id", ""),
+                "cost_usd": data.get("total_cost_usd", 0.0),
+                "backend": self.BACKEND_NAME,
+            },
+        )
+
+    # -- CLI fallback path ---------------------------------------------------
+
+    def _is_cli_available(self) -> bool:
+        if self._cli_available is not None:
+            return self._cli_available
+        self._cli_available = shutil.which(self._config.cli_path) is not None
+        return self._cli_available
+
+    async def _execute_via_cli(
+        self, context: BackendContext, prompt: str,
+    ) -> BackendResult:
+        """Execute via claude CLI subprocess."""
+        cmd = self._build_cli_command(context, prompt)
+        cwd = context.workspace_path or "."
+
+        try:
+            import asyncio
+            loop = asyncio.get_running_loop()
+            proc = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    cmd,
+                    cwd=cwd,
+                    capture_output=True,
+                    text=True,
+                    timeout=self._get_cli_timeout(),
+                ),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise NodeTimeoutError(
+                node_id=context.node.id,
+                agent_type=context.node.agent_type,
+                timeout=self._get_cli_timeout(),
+            ) from exc
+        except FileNotFoundError:
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=f"Claude CLI not found at: {self._config.cli_path}",
+            )
+
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip()
+            classified = self._classify_error(stderr, context)
+            if classified is not None:
+                raise classified
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=stderr or f"claude CLI exited with code {proc.returncode}",
+            )
+
+        return self._parse_cli_output(proc.stdout, context)
+
+    def _build_cli_command(
+        self, context: BackendContext, prompt: str,
+    ) -> list[str]:
+        cmd = [
+            self._config.cli_path,
+            "-p",
+            "--output-format", "json",
+            "--permission-mode", self._config.permission_mode,
+        ]
+
+        if self._config.model:
+            cmd.extend(["--model", self._config.model])
+        if self._config.max_turns > 0:
+            cmd.extend(["--max-turns", str(self._config.max_turns)])
+        if self._config.max_budget_usd > 0:
+            cmd.extend(["--max-budget-usd", str(self._config.max_budget_usd)])
+        if self._config.system_prompt_append:
+            cmd.extend(["--append-system-prompt", self._config.system_prompt_append])
+        for tool in self._config.allowed_tools:
+            cmd.extend(["--allowed-tools", tool])
+        if context.session_id:
+            cmd.extend(["--session-id", context.session_id])
+
+        cmd.append(prompt)
+        return cmd
+
+    def _parse_cli_output(
+        self, stdout: str, context: BackendContext,
+    ) -> BackendResult:
+        try:
+            data = json.loads(stdout.strip())
+        except json.JSONDecodeError as exc:
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=f"Failed to parse Claude CLI JSON output: {exc}",
+                output=stdout[:2000],
+            )
+
+        is_error = data.get("is_error", False)
+        result_text = data.get("result", "")
+        usage = data.get("usage", {})
+        errors = data.get("errors", [])
+
+        token_usage = self._extract_token_usage(usage)
+        artifacts = self._discover_artifacts(context)
+
+        if is_error:
+            error_msg = (
+                "; ".join(str(e) for e in errors)
+                if errors
+                else "CLI execution failed"
+            )
+            subtype = data.get("subtype", "")
+            classified = self._classify_error(
+                error_msg, context, subtype=subtype,
+            )
+            if classified is not None:
+                raise classified
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=error_msg,
+                artifacts=artifacts,
+                metadata={"token_usage": token_usage},
+            )
+
+        return BackendResult(
+            status=BackendStatus.COMPLETED,
+            summary=result_text[:500],
+            artifacts=artifacts,
+            output=result_text,
+            metadata={
+                "token_usage": token_usage,
+                "session_id": data.get("session_id", ""),
+                "cost_usd": data.get("total_cost_usd", 0.0),
+                "backend": self.BACKEND_NAME,
+            },
+        )
+
+    # -- Prompt construction -------------------------------------------------
+
+    def _build_prompt(self, context: BackendContext) -> str:
+        parts: list[str] = []
+
+        role_map = {
+            "planner": (
+                "You are a planning agent. Analyze the requirement"
+                " and produce a detailed plan."
+            ),
+            "generator": (
+                "You are a code generation agent."
+                " Implement the described functionality."
+            ),
+            "evaluator": (
+                "You are an evaluation agent."
+                " Review and evaluate the provided code."
+            ),
+        }
+        agent_type = context.node.agent_type
+        parts.append(
+            role_map.get(agent_type, "You are a helpful coding assistant.")
+        )
+
+        parts.append(f"\n## Task\n{context.node.task_description}")
+
+        if context.artifacts:
+            sections: list[str] = []
+            for artifact in context.artifacts:
+                section = (
+                    f"### From {artifact.from_agent}"
+                    f" ({artifact.metadata.get('from_node', 'unknown')})\n"
+                )
+                if artifact.file_paths:
+                    section += f"Files: {', '.join(artifact.file_paths)}\n"
+                section += artifact.content[:2000]
+                sections.append(section)
+            if sections:
+                parts.append(f"\n## Input Context\n{''.join(sections)}")
+
+        return "\n".join(parts)
+
+    # -- Artifact discovery --------------------------------------------------
+
+    def _discover_artifacts(self, context: BackendContext) -> list[str]:
+        """Discover files created/modified by Claude Code via git diff."""
+        workspace = context.workspace_path
+        if not workspace:
+            return []
+
+        try:
+            result = subprocess.run(
+                ["git", "diff", "--name-only", "--diff-filter=ACMR"],
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode == 0:
+                return [
+                    f.strip()
+                    for f in result.stdout.strip().split("\n")
+                    if f.strip()
+                ]
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+        return []
+
+    # -- Token usage extraction ----------------------------------------------
+
+    @staticmethod
+    def _extract_token_usage(
+        usage: dict[str, Any] | None,
+    ) -> dict[str, int]:
+        if not usage:
+            return {}
+        return {
+            "input_tokens": usage.get("input_tokens", 0),
+            "output_tokens": usage.get("output_tokens", 0),
+        }
+
+    # -- Error classification ------------------------------------------------
+
+    def _classify_error(
+        self,
+        error_message: str,
+        context: BackendContext,
+        subtype: str = "",
+    ) -> Exception | None:
+        """Classify Claude Code errors into Weave exception types.
+
+        Returns an exception to raise, or None for generic failure.
+        """
+        error_lower = error_message.lower()
+
+        rate_limit_patterns = (
+            "rate limit", "rate_limit", "429", "too many requests",
+        )
+        if any(p in error_lower for p in rate_limit_patterns):
+            return RateLimitError(
+                provider="claude_code",
+                model=self._config.model or "default",
+                retries=0,
+            )
+
+        if subtype == "error_max_budget_usd" or "budget" in error_lower:
+            return BudgetExhaustedError(
+                used_tokens=0,
+                budget_tokens=0,
+                node_id=context.node.id,
+            )
+
+        timeout_patterns = ("timeout", "timed out", "deadline exceeded")
+        if any(p in error_lower for p in timeout_patterns):
+            return NodeTimeoutError(
+                node_id=context.node.id,
+                agent_type=context.node.agent_type,
+                timeout=0,
+            )
+
+        return None
+
+    # -- Helpers --------------------------------------------------------------
+
+    def _get_cli_timeout(self) -> int:
+        if self._config.timeout_override > 0:
+            return self._config.timeout_override
+        return 1800
