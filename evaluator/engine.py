@@ -349,6 +349,9 @@ class EvaluatorEngine:
             elif output_artifacts:
                 test_targets = find_test_files(output_artifacts, Path(work_dir))
             if not test_targets:
+                # Broad fallback: discover any test files in project (#598)
+                test_targets = find_test_files([], Path(work_dir))
+            if not test_targets:
                 return True, (
                     "No test files found to run — tests not verified. "
                     "Consider adding test files or adjusting criteria."

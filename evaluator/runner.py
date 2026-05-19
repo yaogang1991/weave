@@ -81,6 +81,23 @@ def find_test_files(
                     if rel not in test_files:
                         test_files.append(rel)
 
+    # Fallback: when no test files found from artifacts, discover all test
+    # files in the project to avoid false PASS (#598, #599).
+    if not test_files:
+        for search_dir in [work_dir / "tests", work_dir]:
+            if not search_dir.is_dir():
+                continue
+            for tf in search_dir.glob("test_*.py"):
+                rel = (
+                    str(tf.relative_to(work_dir))
+                    if tf.is_relative_to(work_dir)
+                    else str(tf)
+                )
+                if rel not in test_files:
+                    test_files.append(rel)
+            if test_files:
+                break  # Found tests in first available directory
+
     return test_files
 
 
@@ -130,7 +147,7 @@ def run_tests(
             cmd,
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
-            timeout=60,
+            timeout=180,
             cwd=str(work_dir) if work_dir.is_dir() else None,
             env=isolated_env(eval_id, work_dir),
         )
@@ -159,7 +176,7 @@ def run_tests(
         return passed, msg
     except subprocess.TimeoutExpired:
         return False, (
-            "Tests timed out after 60s — likely a background thread or process leak. "
+            "Tests timed out after 180s — likely a background thread or process leak. "
             "Ensure all threads use daemon=True and add proper cleanup in test teardown "
             "(e.g. @pytest.fixture with yield + stop() call)."
         )
