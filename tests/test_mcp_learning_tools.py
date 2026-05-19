@@ -83,6 +83,9 @@ class TestAllWeaveToolsRegistered:
             "weave.health",
             "weave.analyze",
             "weave.insights",
+            "weave.dependency_graph",
+            "weave.impact_predict",
+            "weave.impact_graph",
         }
         actual = set(server._tools.keys())
         assert expected.issubset(actual), (

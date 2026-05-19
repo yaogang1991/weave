@@ -375,3 +375,7 @@ def register_weave_tools(server) -> None:
             }
         except Exception as exc:
             return {"error": str(exc), "hints": ""}
+
+    # -- M4.3: Analysis tools (project understanding for external workers) ------
+    from mcp.analysis_tools import register_analysis_tools
+    register_analysis_tools(server)
