@@ -83,7 +83,8 @@ def find_test_files(
 
     # Fallback: when no test files found from artifacts, discover all test
     # files in the project to avoid false PASS (#598, #599).
-    if not test_files:
+    # Guard: only fallback when artifacts were actually provided (#605).
+    if not test_files and output_artifacts:
         for search_dir in [work_dir / "tests", work_dir]:
             if not search_dir.is_dir():
                 continue

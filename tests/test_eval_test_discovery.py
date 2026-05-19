@@ -8,19 +8,20 @@ class TestFindTestFilesFallback:
     """find_test_files discovers tests even without artifact hints (#598)."""
 
     def test_fallback_discovers_tests_in_project(self, tmp_path):
-        """When no artifacts match, fallback finds test_*.py in project."""
+        """When artifacts don't match any test by name/stem, fallback finds all test_*.py."""
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_main.py").write_text("def test_ok(): pass")
         (tmp_path / "tests" / "test_utils.py").write_text("def test_ok(): pass")
 
-        result = find_test_files([], tmp_path)
+        # Use an artifact that doesn't match any test file by name or stem
+        result = find_test_files(["src/parser.py"], tmp_path)
         assert len(result) >= 2
 
     def test_fallback_discovers_tests_in_workdir(self, tmp_path):
-        """When no tests/ dir, fallback finds test_*.py in work_dir."""
+        """When artifacts exist but no tests/ dir, fallback finds test_*.py in work_dir."""
         (tmp_path / "test_app.py").write_text("def test_ok(): pass")
 
-        result = find_test_files([], tmp_path)
+        result = find_test_files(["src/app.py"], tmp_path)
         assert len(result) >= 1
 
     def test_artifact_match_takes_priority(self, tmp_path):
