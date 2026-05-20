@@ -377,6 +377,44 @@ class EvalTimeoutScaleConfig(BaseModel):
     )
 
 
+class EvaluatorStallScaleConfig(BaseModel):
+    """Dynamic evaluator stall timeout scaling based on workspace size."""
+
+    base: int = Field(
+        default=int(os.getenv("WEAVE_EVAL_STALL_BASE", "120")),
+        ge=1,
+    )
+    per_file: int = Field(
+        default=int(os.getenv("WEAVE_EVAL_STALL_PER_FILE", "4")),
+        ge=0,
+    )
+    per_test: int = Field(
+        default=int(os.getenv("WEAVE_EVAL_STALL_PER_TEST", "3")),
+        ge=0,
+    )
+    cap: int = Field(
+        default=int(os.getenv("WEAVE_EVAL_STALL_CAP", "600")),
+        ge=1,
+    )
+
+
+class GeneratorStallScaleConfig(BaseModel):
+    """Dynamic generator stall timeout scaling based on dependency count."""
+
+    base: int = Field(
+        default=int(os.getenv("WEAVE_GEN_STALL_BASE", "120")),
+        ge=1,
+    )
+    per_dep: int = Field(
+        default=int(os.getenv("WEAVE_GEN_STALL_PER_DEP", "30")),
+        ge=0,
+    )
+    cap: int = Field(
+        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "300")),
+        ge=1,
+    )
+
+
 class NodeTimeoutConfig(BaseModel):
     """Per-agent-type node execution timeout (#360 PR2, M4.5).
 
@@ -416,6 +454,12 @@ class NodeTimeoutConfig(BaseModel):
         default_factory=dict,
         description="Per-agent-type stall timeout overrides",
     )
+    eval_stall_scale: EvaluatorStallScaleConfig = Field(
+        default_factory=EvaluatorStallScaleConfig,
+    )
+    gen_stall_scale: GeneratorStallScaleConfig = Field(
+        default_factory=GeneratorStallScaleConfig,
+    )
 
     def timeout_for(
         self, agent_type: str, artifact_count: int = 0,
@@ -441,46 +485,31 @@ class NodeTimeoutConfig(BaseModel):
     def stall_timeout_for(
         self,
         agent_type: str,
-        node: object | None = None,
-        workspace_path: str | None = None,
+        file_count: int = 0,
+        test_count: int = 0,
+        dep_count: int = 0,
     ) -> int:
         """Return dynamic stall timeout: max(configured, complexity-based).
 
-        Merges estimate_max_timeout logic: file/test/dependency counts
-        drive dynamic scaling.  Configured value is always a floor.
+        Caller provides file/test/dependency counts; no I/O performed here.
+        Configured value is always a floor.
         """
-        from pathlib import Path as _Path
         configured = self.stall_overrides.get(agent_type, self.stall_timeout)
 
         dynamic = 0
-        if agent_type == "evaluator" and workspace_path:
-            base = int(os.getenv("WEAVE_EVAL_STALL_BASE", "120"))
-            per_file = int(os.getenv("WEAVE_EVAL_STALL_PER_FILE", "4"))
-            per_test = int(os.getenv("WEAVE_EVAL_STALL_PER_TEST", "3"))
-            cap = int(os.getenv("WEAVE_EVAL_STALL_CAP", "600"))
-            wp = _Path(workspace_path)
-            if wp.is_dir():
-                files = sum(
-                    1 for p in wp.rglob("*.py")
-                    if "test" not in p.name.lower()
-                    and "__pycache__" not in str(p)
-                )
-                tests = sum(
-                    1 for p in wp.rglob("*.py")
-                    if "test" in p.name.lower()
-                    and "__pycache__" not in str(p)
-                )
-                dynamic = min(
-                    base + files * per_file + tests * per_test,
-                    cap,
-                )
-        elif (agent_type == "generator" and node
-              and hasattr(node, 'dependencies')
-              and node.dependencies):
-            base = int(os.getenv("WEAVE_GEN_STALL_BASE", "120"))
-            per_dep = int(os.getenv("WEAVE_GEN_STALL_PER_DEP", "30"))
-            cap = int(os.getenv("WEAVE_GEN_STALL_CAP", "300"))
-            dynamic = min(base + len(node.dependencies) * per_dep, cap)
+        if agent_type == "evaluator" and (file_count or test_count):
+            dynamic = min(
+                self.eval_stall_scale.base
+                + file_count * self.eval_stall_scale.per_file
+                + test_count * self.eval_stall_scale.per_test,
+                self.eval_stall_scale.cap,
+            )
+        elif agent_type == "generator" and dep_count:
+            dynamic = min(
+                self.gen_stall_scale.base
+                + dep_count * self.gen_stall_scale.per_dep,
+                self.gen_stall_scale.cap,
+            )
 
         return max(configured, dynamic) if dynamic else configured
 
