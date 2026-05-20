@@ -683,7 +683,17 @@ class IntelligentOrchestrator:
         for est in estimates:
             if est.node_id in dag.nodes:
                 dag.update_node(est.node_id, estimated_tokens=est.estimated_tokens)
+        self._check_post_estimation_budget(dag)
         return dag
+
+    def _check_post_estimation_budget(self, dag: DAG) -> None:
+        """Warn if estimated tokens exceed budget after estimation (M4.6)."""
+        for nid, node in dag.nodes.items():
+            if node.estimated_tokens > 0 and node.estimated_tokens > node.token_budget:
+                logger.warning(
+                    "Node '%s' estimated at %d tokens exceeds budget of %d tokens",
+                    nid, node.estimated_tokens, node.token_budget,
+                )
 
     # -- Delegation to llm_utils for backward compat --
 
