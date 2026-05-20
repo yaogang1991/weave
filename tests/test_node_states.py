@@ -21,6 +21,7 @@ from core.models import (  # noqa: F401
     HandoffArtifact, SuccessCriterion, CriterionType,
 )
 from core.dag_engine import DAGExecutionEngine
+from core.quality_gate import QualityGate
 
 
 def _make_node(nid: str, agent_type: str = "generator", **kw) -> DAGNode:
@@ -70,22 +71,22 @@ class TestEvalStatusMapping:
     """EvalStatus maps to correct NodeStatus."""
 
     def test_clean_pass_maps_to_success(self):
-        assert DAGExecutionEngine._eval_status_to_node_status(
+        assert QualityGate.eval_status_to_node_status(
             EvalStatus.CLEAN_PASS,
         ) == NodeStatus.SUCCESS
 
     def test_partial_pass_maps_to_partial_pass(self):
-        assert DAGExecutionEngine._eval_status_to_node_status(
+        assert QualityGate.eval_status_to_node_status(
             EvalStatus.PARTIAL_PASS,
         ) == NodeStatus.PARTIAL_PASS
 
     def test_warned_maps_to_warned(self):
-        assert DAGExecutionEngine._eval_status_to_node_status(
+        assert QualityGate.eval_status_to_node_status(
             EvalStatus.WARNED,
         ) == NodeStatus.WARNED
 
     def test_failed_maps_to_failed(self):
-        assert DAGExecutionEngine._eval_status_to_node_status(
+        assert QualityGate.eval_status_to_node_status(
             EvalStatus.FAILED,
         ) == NodeStatus.FAILED
 
@@ -98,22 +99,22 @@ class TestIsTerminalSuccess:
     """SUCCESS, PARTIAL_PASS, WARNED are all terminal success states."""
 
     def test_success_is_terminal(self):
-        assert DAGExecutionEngine._is_terminal_success(NodeStatus.SUCCESS)
+        assert QualityGate.is_terminal_success(NodeStatus.SUCCESS)
 
     def test_partial_pass_is_terminal(self):
-        assert DAGExecutionEngine._is_terminal_success(NodeStatus.PARTIAL_PASS)
+        assert QualityGate.is_terminal_success(NodeStatus.PARTIAL_PASS)
 
     def test_warned_is_terminal(self):
-        assert DAGExecutionEngine._is_terminal_success(NodeStatus.WARNED)
+        assert QualityGate.is_terminal_success(NodeStatus.WARNED)
 
     def test_failed_is_not_terminal(self):
-        assert not DAGExecutionEngine._is_terminal_success(NodeStatus.FAILED)
+        assert not QualityGate.is_terminal_success(NodeStatus.FAILED)
 
     def test_skipped_is_not_terminal(self):
-        assert not DAGExecutionEngine._is_terminal_success(NodeStatus.SKIPPED)
+        assert not QualityGate.is_terminal_success(NodeStatus.SKIPPED)
 
     def test_pending_is_not_terminal(self):
-        assert not DAGExecutionEngine._is_terminal_success(NodeStatus.PENDING)
+        assert not QualityGate.is_terminal_success(NodeStatus.PENDING)
 
 
 # =====================================================================
@@ -135,7 +136,7 @@ class TestPartialPassPropagation:
         )
 
         engine = _make_engine()
-        await engine._execute_single_node(dag, "eval")
+        await engine._node_executor.execute_node(dag, "eval")
         # Downstream should NOT be skipped
         assert dag.nodes["eval"].status != NodeStatus.SKIPPED
 
@@ -151,7 +152,7 @@ class TestPartialPassPropagation:
         )
 
         engine = _make_engine()
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
         assert len(artifacts) >= 1
         assert any(a.from_agent == "generator" for a in artifacts)
 
@@ -175,7 +176,7 @@ class TestWarnedPropagation:
         )
 
         engine = _make_engine()
-        await engine._execute_single_node(dag, "eval")
+        await engine._node_executor.execute_node(dag, "eval")
         assert dag.nodes["eval"].status != NodeStatus.SKIPPED
 
     @pytest.mark.asyncio
@@ -190,7 +191,7 @@ class TestWarnedPropagation:
         )
 
         engine = _make_engine()
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
         assert len(artifacts) >= 1
 
 
@@ -212,7 +213,7 @@ class TestFailedPropagation:
         )
 
         engine = _make_engine()
-        await engine._execute_single_node(dag, "eval")
+        await engine._node_executor.execute_node(dag, "eval")
         assert dag.nodes["eval"].status == NodeStatus.SKIPPED
 
 
@@ -237,7 +238,7 @@ class TestIndependentBranches:
         )
 
         engine = _make_engine()
-        await engine._execute_single_node(dag, "gen_b")
+        await engine._node_executor.execute_node(dag, "gen_b")
         # gen_b has no dependency on gen_a → should NOT be skipped
         assert dag.nodes["gen_b"].status != NodeStatus.SKIPPED
         assert dag.nodes["gen_b"].status in (NodeStatus.RUNNING, NodeStatus.SUCCESS)
@@ -344,7 +345,7 @@ class TestEvaluatorToNodeStatus:
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])
         dag = _make_dag({"gen": node})
-        await engine._execute_single_node(dag, "gen")
+        await engine._node_executor.execute_node(dag, "gen")
         assert dag.nodes["gen"].status == NodeStatus.SUCCESS
 
     @pytest.mark.asyncio
@@ -362,7 +363,7 @@ class TestEvaluatorToNodeStatus:
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])
         dag = _make_dag({"gen": node})
-        await engine._execute_single_node(dag, "gen")
+        await engine._node_executor.execute_node(dag, "gen")
         assert dag.nodes["gen"].status == NodeStatus.PARTIAL_PASS
 
     @pytest.mark.asyncio
@@ -380,7 +381,7 @@ class TestEvaluatorToNodeStatus:
             type=CriterionType.CUSTOM, description="manual review",
         )])
         dag = _make_dag({"gen": node})
-        await engine._execute_single_node(dag, "gen")
+        await engine._node_executor.execute_node(dag, "gen")
         assert dag.nodes["gen"].status == NodeStatus.WARNED
 
     @pytest.mark.asyncio
@@ -397,7 +398,7 @@ class TestEvaluatorToNodeStatus:
             type=CriterionType.FILE_EXISTS, path="a.py", description="a",
         )])
         dag = _make_dag({"gen": node})
-        await engine._execute_single_node(dag, "gen")
+        await engine._node_executor.execute_node(dag, "gen")
         assert dag.nodes["gen"].status == NodeStatus.FAILED
 
 

@@ -54,7 +54,7 @@ class TestNodeTimeoutRetryBudget:
         engine = DAGExecutionEngine(
             timeout_executor, _noop_failure_handler, enable_watchdog=False,
         )
-        await engine._execute_single_node(dag, "n1")
+        await engine._node_executor.execute_node(dag, "n1")
 
         node = dag.nodes["n1"]
         # Key assertion: timeout does NOT consume retry budget
@@ -79,7 +79,7 @@ class TestNodeTimeoutRetryBudget:
         engine = DAGExecutionEngine(
             rate_limit_executor, _noop_failure_handler, enable_watchdog=False,
         )
-        await engine._execute_single_node(dag, "n1")
+        await engine._node_executor.execute_node(dag, "n1")
 
         node = dag.nodes["n1"]
         assert node.retry_count == 0
@@ -100,7 +100,7 @@ class TestNodeTimeoutRetryBudget:
         engine = DAGExecutionEngine(
             fail_executor, _noop_failure_handler, enable_watchdog=False,
         )
-        await engine._execute_single_node(dag, "n1")
+        await engine._node_executor.execute_node(dag, "n1")
 
         node = dag.nodes["n1"]
         assert node.retry_count >= 1, (
@@ -124,7 +124,7 @@ class TestNodeTimeoutRetryBudget:
         )
         engine.event_handlers.append(lambda e: emitted_events.append(e))
 
-        await engine._execute_single_node(dag, "n1")
+        await engine._node_executor.execute_node(dag, "n1")
 
         # Should have a "failed" event with timeout reason
         failed_events = [

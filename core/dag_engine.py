@@ -234,30 +234,6 @@ class DAGExecutionEngine:
                 # Don't let event handlers break execution, but keep traceability.
                 logger.warning("event handler failed: %s: %s", type(exc).__name__, exc)
 
-    @staticmethod
-    def _eval_status_to_node_status(eval_status: EvalStatus) -> NodeStatus:
-        """Map EvalStatus from evaluator to NodeStatus for DAG nodes (#270).
-
-        Delegated to QualityGate (#177 PR4).
-        """
-        return QualityGate.eval_status_to_node_status(eval_status)
-
-    @staticmethod
-    def _is_terminal_success(status: NodeStatus) -> bool:
-        """Check if a node status represents a successful terminal state (#270).
-
-        Delegated to QualityGate (#177 PR4).
-        """
-        return QualityGate.is_terminal_success(status)
-
-    @staticmethod
-    def _is_test_file_exists_criterion(criterion: str | object) -> bool:
-        """Check if a criterion requires test files to exist (#247).
-
-        Delegated to QualityGate (#177 PR4).
-        """
-        return QualityGate.is_test_file_exists_criterion(criterion)
-
     def _skip_remaining(self, dag: DAG, levels: list[list[str]], from_level: int) -> None:
         """Mark all pending nodes from from_level onward as SKIPPED."""
         for remaining_level in levels[from_level:]:
@@ -275,7 +251,7 @@ class DAGExecutionEngine:
         """
         merged = new_dag
         for node_id, node in old_dag.nodes.items():
-            if self._is_terminal_success(node.status) and node_id in merged.nodes:
+            if QualityGate.is_terminal_success(node.status) and node_id in merged.nodes:
                 merged.update_node(
                     node_id,
                     status=node.status,
@@ -382,7 +358,7 @@ class DAGExecutionEngine:
 
                 # #455: Persist completed nodes after each level
                 for nid in pending:
-                    if self._is_terminal_success(dag.nodes[nid].status):
+                    if QualityGate.is_terminal_success(dag.nodes[nid].status):
                         self._persist_node_completion(nid, dag.nodes[nid].result)
 
                 # Check for CancelledError (timeout/signal) — propagate (#304)
@@ -463,7 +439,7 @@ class DAGExecutionEngine:
                                 target_succeeded = (
                                     target_id
                                     and dag.nodes[target_id].agent_type == "generator"
-                                    and self._is_terminal_success(dag.nodes[target_id].status)
+                                    and QualityGate.is_terminal_success(dag.nodes[target_id].status)
                                 )
                                 if target_succeeded:
                                     # Target already passed — just retry the evaluator
@@ -511,7 +487,7 @@ class DAGExecutionEngine:
                                         )
                                         await self._node_executor.execute_node(dag, target_id)
 
-                                        if self._is_terminal_success(dag.nodes[target_id].status):
+                                        if QualityGate.is_terminal_success(dag.nodes[target_id].status):
                                             # Re-run evaluator after generator fix
                                             dag.update_node(
                                                 failed_id,
@@ -542,13 +518,13 @@ class DAGExecutionEngine:
                                 await self._node_executor.execute_node(dag, failed_id)
 
                             # #455: Persist retried node if it succeeded
-                            if self._is_terminal_success(dag.nodes[failed_id].status):
+                            if QualityGate.is_terminal_success(dag.nodes[failed_id].status):
                                 self._persist_node_completion(
                                     failed_id, dag.nodes[failed_id].result,
                                 )
 
                             # Check if retry resolved this failure
-                            if not self._is_terminal_success(dag.nodes[failed_id].status):
+                            if not QualityGate.is_terminal_success(dag.nodes[failed_id].status):
                                 # This failure was not resolved — but don't skip
                                 # all remaining levels (#259). Instead, let
                                 # downstream nodes decide via dependency check
@@ -675,30 +651,11 @@ class DAGExecutionEngine:
 
     # -- File snapshot for regression rollback (#212) ----------------------
 
-    @staticmethod
-    def _capture_file_snapshot(
-        work_dir: str, artifacts: list[str],
-    ) -> dict[str, str]:
-        """Capture file contents of artifacts for later rollback."""
-        return RetryPolicyEngine.capture_file_snapshot(work_dir, artifacts)
-
-    @staticmethod
-    def _restore_file_snapshot(
-        work_dir: str, snapshot: dict[str, str],
-    ) -> None:
-        """Restore files from a previously captured snapshot."""
-        return RetryPolicyEngine.restore_file_snapshot(work_dir, snapshot)
-
     def _compute_backoff(self, retry_count: int) -> float:
         """Compute exponential backoff delay in seconds."""
         return self._retry_policy.compute_backoff(
             retry_count, base=self.backoff_base, cap=self.backoff_cap,
         )
-
-    @staticmethod
-    def _requires_output_artifacts(node: DAGNode) -> bool:
-        """Check whether a node is expected to produce output file artifacts."""
-        return RetryPolicyEngine.requires_output_artifacts(node)
 
     def _auto_serialize_parallel_generators(
         self,
@@ -761,39 +718,6 @@ class DAGExecutionEngine:
         if edges_added:
             return dag.topological_levels()
         return levels
-
-    # Codes that are purely formatting/whitespace and safe to tolerate on retry.
-    # Delegated to RetryPolicyEngine (#177 PR4). Kept as alias for backward compat.
-    _RETRY_TOLERABLE_CODES = RetryPolicyEngine.RETRY_TOLERABLE_CODES
-
-    @classmethod
-    def _is_retry_tolerable_lint_issue(cls, issue: str) -> bool:
-        """Check if a lint issue is formatting-only and safe to tolerate."""
-        return RetryPolicyEngine.is_tolerable_lint_issue(issue)
-
-    # -- Backward-compat proxies for NodeExecutor (#177 PR5) ------------------
-
-    async def _execute_single_node(self, dag: DAG, node_id: str) -> None:
-        """Proxy to NodeExecutor.execute_node for backward compat."""
-        await self._node_executor.execute_node(dag, node_id)
-
-    @property
-    def _get_node_timeout(self):
-        """Proxy to NodeExecutor._get_node_timeout for backward compat."""
-        return self._node_executor._get_node_timeout
-
-    @_get_node_timeout.setter
-    def _get_node_timeout(self, value):
-        self._node_executor._get_node_timeout = value
-
-    def _collect_input_artifacts(
-        self,
-        dag: DAG,
-        node_id: str,
-        failed_soft: list[str] | None = None,
-    ) -> list[HandoffArtifact]:
-        """Proxy to NodeExecutor._collect_input_artifacts for backward compat."""
-        return self._node_executor._collect_input_artifacts(dag, node_id, failed_soft)
 
     def get_execution_summary(self, dag: DAG) -> dict[str, Any]:
         """Generate a summary of DAG execution results."""

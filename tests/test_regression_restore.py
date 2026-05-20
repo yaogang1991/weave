@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import MagicMock
 
 from core.dag_engine import DAGExecutionEngine
+from core.retry_policy import RetryPolicyEngine
 
 
 class TestFileSnapshot:
@@ -20,7 +21,7 @@ class TestFileSnapshot:
         (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
         (tmp_path / "b.py").write_text("y = 2\n", encoding="utf-8")
 
-        snapshot = DAGExecutionEngine._capture_file_snapshot(
+        snapshot = RetryPolicyEngine.capture_file_snapshot(
             work_dir, ["a.py", "b.py"],
         )
         assert snapshot == {"a.py": "x = 1\n", "b.py": "y = 2\n"}
@@ -30,13 +31,13 @@ class TestFileSnapshot:
         (tmp_path / "b.py").write_text("ALSO BROKEN\n", encoding="utf-8")
 
         # Restore
-        DAGExecutionEngine._restore_file_snapshot(work_dir, snapshot)
+        RetryPolicyEngine.restore_file_snapshot(work_dir, snapshot)
         assert (tmp_path / "a.py").read_text() == "x = 1\n"
         assert (tmp_path / "b.py").read_text() == "y = 2\n"
 
     def test_capture_ignores_missing_files(self, tmp_path):
         """Missing artifacts are silently skipped."""
-        snapshot = DAGExecutionEngine._capture_file_snapshot(
+        snapshot = RetryPolicyEngine.capture_file_snapshot(
             str(tmp_path), ["nonexistent.py"],
         )
         assert snapshot == {}
@@ -45,12 +46,12 @@ class TestFileSnapshot:
         """Restore creates intermediate directories if needed."""
         work_dir = str(tmp_path)
         snapshot = {"sub/deep/file.py": "content"}
-        DAGExecutionEngine._restore_file_snapshot(work_dir, snapshot)
+        RetryPolicyEngine.restore_file_snapshot(work_dir, snapshot)
         assert (tmp_path / "sub" / "deep" / "file.py").read_text() == "content"
 
     def test_capture_empty_artifacts(self, tmp_path):
         """Empty artifact list produces empty snapshot."""
-        snapshot = DAGExecutionEngine._capture_file_snapshot(
+        snapshot = RetryPolicyEngine.capture_file_snapshot(
             str(tmp_path), [],
         )
         assert snapshot == {}
@@ -62,7 +63,7 @@ class TestFileSnapshot:
         f.write_text("data", encoding="utf-8")
         f.chmod(0o000)
         try:
-            snapshot = DAGExecutionEngine._capture_file_snapshot(
+            snapshot = RetryPolicyEngine.capture_file_snapshot(
                 str(tmp_path), ["secret.py"],
             )
             # Should not crash, may be empty or contain the file
@@ -116,7 +117,7 @@ class TestRegressionRestore:
         )
         dag.add_node(node)
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         # After first attempt: files should be good, best attempt captured
         # With immutable nodes, use dag.nodes to get updated state (#486)
@@ -141,7 +142,7 @@ class TestRegressionRestore:
         # Reset node for retry using immutable update (#486)
         dag.update_node("gen_1", status=NodeStatus.RETRYING, error="", retry_count=0)
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         # After regression: files should be restored to best attempt
         assert dag.nodes["gen_1"].status == NodeStatus.FAILED  # Still failed but...
@@ -191,7 +192,7 @@ class TestRegressionRestore:
         )
         dag.add_node(node)
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         # Verify best attempt captured with artifact_set
         best = engine._best_attempts.get("gen_1")
@@ -220,7 +221,7 @@ class TestRegressionRestore:
         # Reset node for retry using immutable update (#486)
         dag.update_node("gen_1", status=NodeStatus.RETRYING, error="", retry_count=0)
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         # After regression restore:
         # 1. main.py should be restored to best content

@@ -136,7 +136,7 @@ class NodeExecutor:
         """Execute a single DAG node with retry loop (ADR-0015)."""
         # -- Gate check (outside loop — run once) --
         node = dag.nodes[node_id]
-        if self._is_terminal_success(node.status):
+        if QualityGate.is_terminal_success(node.status):
             return
         if node.status not in (NodeStatus.PENDING, NodeStatus.RETRYING):
             return
@@ -667,21 +667,3 @@ class NodeExecutor:
         return RetryPolicyEngine.compute_backoff(
             retry_count, base=self.backoff_base, cap=self.backoff_cap,
         )
-
-    @staticmethod
-    def _is_terminal_success(status: NodeStatus) -> bool:
-        return QualityGate.is_terminal_success(status)
-
-    @staticmethod
-    def _requires_output_artifacts(node: DAGNode) -> bool:
-        return RetryPolicyEngine.requires_output_artifacts(node)
-
-    # -- Backward compat proxies --
-
-    @classmethod
-    def _is_test_node(cls, node: DAGNode) -> bool:
-        return EvaluationPipeline._is_test_node(node)
-
-    @staticmethod
-    def _collect_upstream_artifacts(dag: DAG, node_id: str) -> list[str]:
-        return EvaluationPipeline._collect_upstream_artifacts(dag, node_id)

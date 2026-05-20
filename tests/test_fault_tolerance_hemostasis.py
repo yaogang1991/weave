@@ -241,7 +241,7 @@ class TestNodeTimeoutInDagEngine:
             enable_watchdog=False,
         )
         # Override timeout to 1s for fast test
-        engine._get_node_timeout = lambda agent_type, artifact_count=0: 1
+        engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 1
         await engine.execute(dag)
 
         assert dag.nodes["slow_node"].status == NodeStatus.FAILED
@@ -396,7 +396,7 @@ class TestProgressCallback:
             failure_handler=None,
             enable_watchdog=False,
         )
-        engine._get_node_timeout = lambda agent_type, artifact_count=0: 300
+        engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
 
         assert dag.nodes["test_node"].status == NodeStatus.SUCCESS
@@ -425,7 +425,7 @@ class TestProgressCallback:
             failure_handler=None,
             enable_watchdog=False,
         )
-        engine._get_node_timeout = lambda agent_type, artifact_count=0: 300
+        engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
 
         assert isinstance(received_cancel, threading.Event)

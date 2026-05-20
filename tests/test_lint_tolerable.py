@@ -6,7 +6,7 @@ and which indicate real functional issues.
 """
 import pytest
 
-from core.dag_engine import DAGExecutionEngine
+from core.retry_policy import RetryPolicyEngine
 
 
 class TestIsRetryTolerableLintIssue:
@@ -40,16 +40,16 @@ class TestIsRetryTolerableLintIssue:
 
     @pytest.mark.parametrize("issue,expected", TOLERABLE_CASES)
     def test_tolerable_issues(self, issue, expected):
-        assert DAGExecutionEngine._is_retry_tolerable_lint_issue(issue) == expected, \
+        assert RetryPolicyEngine.is_tolerable_lint_issue(issue) == expected, \
             f"Expected {expected} for: {issue}"
 
     @pytest.mark.parametrize("issue,expected", INTOLERABLE_CASES)
     def test_intolerable_issues(self, issue, expected):
-        assert DAGExecutionEngine._is_retry_tolerable_lint_issue(issue) == expected, \
+        assert RetryPolicyEngine.is_tolerable_lint_issue(issue) == expected, \
             f"Expected {expected} for: {issue}"
 
     def test_e999_never_tolerated(self):
         """E999 = SyntaxError, must never be treated as lint-only."""
-        assert not DAGExecutionEngine._is_retry_tolerable_lint_issue(
+        assert not RetryPolicyEngine.is_tolerable_lint_issue(
             "parser.py:1:E999 SyntaxError"
         )
