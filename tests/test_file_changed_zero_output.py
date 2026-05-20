@@ -128,3 +128,102 @@ class TestRequiresOutputArtifacts:
             success_criteria=[],
         )
         assert DAGExecutionEngine._requires_output_artifacts(node) is False
+
+
+# -- #626: Test node deep degeneration recovery --
+
+
+class TestIsTestNode:
+    """Verify _is_test_node heuristic (#626)."""
+
+    def _make_node(self, task):
+        return DAGNode(
+            id="n1", agent_type="generator", task_description=task,
+        )
+
+    def test_explicit_test_task(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Write unit tests for the API module")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_tests_keyword(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Create tests for authentication")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_spec_keyword(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Write spec verification for user model")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_implementation_task(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Implement REST API endpoints for users")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_case_insensitive(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Add TEST coverage for the parser")
+        assert NodeExecutor._is_test_node(node) is True
+
+
+class TestCollectUpstreamArtifacts:
+    """Verify _collect_upstream_artifacts (#626)."""
+
+    def test_collects_from_successful_deps(self):
+        from core.models import DAG, DAGNode, NodeStatus
+        from core.dag_models import DAGEdge
+        from core.node_executor import NodeExecutor
+
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.SUCCESS,
+            output_artifacts=["src/api.py", "src/models.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == ["src/api.py", "src/models.py"]
+
+    def test_skips_failed_deps(self):
+        from core.models import DAG, DAGNode, NodeStatus
+        from core.dag_models import DAGEdge
+        from core.node_executor import NodeExecutor
+
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.FAILED,
+            output_artifacts=["src/api.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == []
+
+    def test_no_deps_returns_empty(self):
+        from core.models import DAG, DAGNode
+        from core.node_executor import NodeExecutor
+
+        node = DAGNode(
+            id="plan", agent_type="planner",
+            task_description="Plan the project",
+        )
+        dag = DAG(nodes={"plan": node}, edges=[])
+        result = NodeExecutor._collect_upstream_artifacts(dag, "plan")
+        assert result == []

@@ -254,35 +254,64 @@ class NodeExecutor:
             )
 
             # -- Zero-output fast-fail (#229) --
+            # #626: For test nodes, check if upstream produced artifacts.
+            # If so, inherit them and continue instead of failing — the
+            # evaluator can still run on the implementation files.
             if (
                 not node.output_artifacts
                 and self._requires_output_artifacts(node)
             ):
-                node = dag.update_node(
-                    node_id,
-                    error=(
-                        f"Node produced zero output artifacts. "
-                        f"Agent type: {node.agent_type}, task: {node.task_description[:200]}. "
-                        f"This typically indicates the agent exhausted its iteration "
-                        f"budget without writing any files."
-                    ),
-                    status=NodeStatus.FAILED,
-                    completed_at=datetime.now(timezone.utc),
-                    retry_count=node.retry_count + 1,
+                upstream_artifacts = self._collect_upstream_artifacts(
+                    dag, node_id,
                 )
-                logger.warning(
-                    "Node %s (%s) fast-failed: zero output artifacts",
-                    node_id, node.agent_type,
-                )
-                await self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="failed",
-                    details={
-                        "reason": "zero_output_artifacts",
-                        "agent_type": node.agent_type,
-                    },
-                ))
-                return
+                if (
+                    upstream_artifacts
+                    and self._is_test_node(node)
+                ):
+                    logger.warning(
+                        "Node %s (%s) produced zero output but upstream has "
+                        "%d artifacts — inheriting for evaluation (#626)",
+                        node_id, node.agent_type, len(upstream_artifacts),
+                    )
+                    node = dag.update_node(
+                        node_id,
+                        output_artifacts=upstream_artifacts,
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="completed",
+                        details={
+                            "reason": "inherited_upstream_artifacts",
+                            "inherited_count": len(upstream_artifacts),
+                        },
+                    ))
+                else:
+                    node = dag.update_node(
+                        node_id,
+                        error=(
+                            f"Node produced zero output artifacts. "
+                            f"Agent type: {node.agent_type}, "
+                            f"task: {node.task_description[:200]}. "
+                            f"This typically indicates the agent exhausted "
+                            f"its iteration budget without writing any files."
+                        ),
+                        status=NodeStatus.FAILED,
+                        completed_at=datetime.now(timezone.utc),
+                        retry_count=node.retry_count + 1,
+                    )
+                    logger.warning(
+                        "Node %s (%s) fast-failed: zero output artifacts",
+                        node_id, node.agent_type,
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="failed",
+                        details={
+                            "reason": "zero_output_artifacts",
+                            "agent_type": node.agent_type,
+                        },
+                    ))
+                    return
 
             # Test file enforcement (#247): delegated to QualityGate.
             test_check = self._quality_gate.check_test_file_requirement(
@@ -735,3 +764,40 @@ class NodeExecutor:
     def _requires_output_artifacts(node: DAGNode) -> bool:
         """Check whether a node is expected to produce output file artifacts."""
         return RetryPolicyEngine.requires_output_artifacts(node)
+
+    # -- #626: Test node deep degeneration recovery helpers --
+
+    _TEST_NODE_KEYWORDS: frozenset[str] = frozenset({
+        "test", "tests", "spec", "specs", "verify", "coverage",
+    })
+
+    @classmethod
+    def _is_test_node(cls, node: DAGNode) -> bool:
+        """Heuristic: detect test-generation nodes by task description (#626)."""
+        task_lower = node.task_description.lower()
+        return any(kw in task_lower for kw in cls._TEST_NODE_KEYWORDS)
+
+    @staticmethod
+    def _collect_upstream_artifacts(dag: DAG, node_id: str) -> list[str]:
+        """Collect output_artifacts from successful upstream dependency nodes (#626).
+
+        Used when a test node fails to produce its own artifacts but upstream
+        implementation nodes succeeded — allows evaluation to continue on the
+        implementation files.
+        """
+        # Collect all dependency node IDs from DAG edges
+        dep_ids = set()
+        for edge in dag.edges:
+            if edge.to_node == node_id:
+                dep_ids.add(edge.from_node)
+
+        artifacts: list[str] = []
+        for dep_id in dep_ids:
+            dep_node = dag.nodes.get(dep_id)
+            if (
+                dep_node
+                and dep_node.status == NodeStatus.SUCCESS
+                and dep_node.output_artifacts
+            ):
+                artifacts.extend(dep_node.output_artifacts)
+        return artifacts
