@@ -65,16 +65,22 @@ class StallDetector:
 class AnomalyDetector:
     """Filter: detects repetition, oscillation, and cyclic progress patterns."""
 
+    _MAX_HISTORY = 100
+
     def __init__(self, max_repetitions: int = 3) -> None:
         self._max_repetitions = max_repetitions
         self._history: list[ProgressReport] = []
         self._anomalous = False
+        self._lock = threading.Lock()
 
     def should_extend(self, report: ProgressReport) -> bool:
-        self._history.append(report)
-        if self._detect_anomaly():
-            self._anomalous = True
-            return False  # Don't renew lease
+        with self._lock:
+            self._history.append(report)
+            if len(self._history) > self._MAX_HISTORY:
+                self._history = self._history[-self._MAX_HISTORY:]
+            if self._detect_anomaly():
+                self._anomalous = True
+                return False  # Don't renew lease
         return True
 
     def should_kill(self) -> tuple[bool, str]:
