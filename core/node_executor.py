@@ -378,6 +378,168 @@ class NodeExecutor:
                     )))
                 except RuntimeError:
                     pass
+            previous_artifacts = node.output_artifacts or []
+            reported_artifacts = result.get("artifacts", [])
+            # Preserve previous artifacts on retry: agent may only read/test
+            # without write/edit, leaving artifacts empty (#165).
+            if not reported_artifacts and previous_artifacts:
+                reported_artifacts = previous_artifacts
+                logger.info(
+                    "Node %s: retry produced no new artifacts, preserving %d from previous attempt",
+                    node_id, len(previous_artifacts),
+                )
+            node = dag.update_node(node_id, output_artifacts=reported_artifacts)
+            logger.debug(
+                "Node %s (%s) produced artifacts: %s",
+                node_id, node.agent_type, node.output_artifacts,
+            )
+
+            # -- Zero-output fast-fail (#229) --
+            # #626: For test nodes, check if upstream produced artifacts.
+            # If so, inherit them and continue instead of failing — the
+            # evaluator can still run on the implementation files.
+            if (
+                not node.output_artifacts
+                and self._requires_output_artifacts(node)
+            ):
+                upstream_artifacts = self._collect_upstream_artifacts(
+                    dag, node_id,
+                )
+                if (
+                    upstream_artifacts
+                    and self._is_test_node(node)
+                ):
+                    # Inherit artifacts but do NOT set SUCCESS or return —
+                    # let the node continue through quality gate and
+                    # evaluator, which decide the final status.
+                    logger.warning(
+                        "Node %s (%s) produced zero output but upstream has "
+                        "%d artifacts — inheriting for evaluation (#626)",
+                        node_id, node.agent_type, len(upstream_artifacts),
+                    )
+                    node = dag.update_node(
+                        node_id,
+                        output_artifacts=upstream_artifacts,
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="degeneration_recovered",
+                        details={
+                            "reason": "inherited_upstream_artifacts",
+                            "inherited_count": len(upstream_artifacts),
+                        },
+                    ))
+                    # Fall through to quality gate + evaluator
+                else:
+                    node = dag.update_node(
+                        node_id,
+                        error=(
+                            f"Node produced zero output artifacts. "
+                            f"Agent type: {node.agent_type}, "
+                            f"task: {node.task_description[:200]}. "
+                            f"This typically indicates the agent exhausted "
+                            f"its iteration budget without writing any files."
+                        ),
+                        status=NodeStatus.FAILED,
+                        completed_at=datetime.now(timezone.utc),
+                        retry_count=node.retry_count + 1,
+                    )
+                    logger.warning(
+                        "Node %s (%s) fast-failed: zero output artifacts",
+                        node_id, node.agent_type,
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="failed",
+                        details={
+                            "reason": "zero_output_artifacts",
+                            "agent_type": node.agent_type,
+                        },
+                    ))
+                    return
+
+            # Test file enforcement (#247): delegated to QualityGate.
+            test_check = self._quality_gate.check_test_file_requirement(
+                node, node_id,
+            )
+            if test_check is not None:
+                node = dag.update_node(
+                    node_id,
+                    eval_feedback=test_check.eval_feedback,
+                    error=test_check.error,
+                    status=test_check.node_status,
+                    completed_at=datetime.now(timezone.utc),
+                )
+                await self._emit(ExecutionEvent(
+                    node_id=node_id,
+                    event_type=test_check.event_type,
+                    details=test_check.event_details,
+                ))
+                return
+
+            if self.evaluator and node.success_criteria and node.agent_type == "generator":
+                if not self.work_dir:
+                    logger.error(
+                        "Node %s: work_dir not set — cannot evaluate safely. "
+                        "Aborting evaluation to prevent incorrect results.",
+                        node_id,
+                    )
+                    node = dag.update_node(
+                        node_id,
+                        status=NodeStatus.FAILED,
+                        error=(
+                            "Evaluation skipped: work_dir not configured. "
+                            "Pass --project to set the working directory."
+                        ),
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="failed",
+                        details={"reason": "no_work_dir"},
+                    ))
+                    return
+                eval_work_dir = workspace_path or self.work_dir
+                # M4.5: evaluate_stage with its own stall timeout
+                from core.progress import ProgressTracker
+                eval_stall_timeout = self._get_stall_timeout("evaluator")
+                eval_tracker = ProgressTracker(
+                    stall_timeout=eval_stall_timeout,
+                )
+                eval_timeout = self._get_node_timeout("evaluator")
+                try:
+                    eval_result = await asyncio.wait_for(
+                        asyncio.get_running_loop().run_in_executor(
+                            self._executor,
+                            functools.partial(
+                                self.evaluator.evaluate_stage,
+                                node_id, node_id, node.success_criteria, self.artifact_path,
+                                work_dir=eval_work_dir,
+                                output_artifacts=node.output_artifacts or None,
+                                owned_files=node.owned_files or None,
+                                progress_tracker=eval_tracker,  # M4.5
+                            ),
+                        ),
+                        timeout=eval_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Node %s: evaluate_stage timed out after %ds",
+                        node_id, eval_timeout,
+                    )
+                    node = dag.update_node(
+                        node_id,
+                        status=NodeStatus.FAILED,
+                        error=f"Evaluation timed out after {eval_timeout}s",
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="failed",
+                        details={"reason": "eval_timeout", "timeout": eval_timeout},
+                    ))
+                    return
+>>>>>>> origin/refactor/m45-timeout-redesign
 
         return _PrepareResult(
             input_artifacts=input_artifacts,
@@ -523,26 +685,19 @@ class NodeExecutor:
         input_artifacts: list[HandoffArtifact],
         workspace_path: str | None = None,
     ) -> dict[str, Any]:
-        """Execute a node with progress-driven timeout (M4.5)."""
-        from core.progress import ProgressTracker, estimate_max_timeout
+        """Execute a node with progress-driven timeout (M4.5).
 
-        configured_timeout = self._get_node_timeout(
-            node.agent_type,
-            artifact_count=sum(
-                len(a.file_paths) for a in input_artifacts
-            ),
-        )
-        estimated_timeout = estimate_max_timeout(
-            node.agent_type, node, workspace_path,
-        )
-        max_total = min(configured_timeout, estimated_timeout)
-        stall_timeout = min(
-            self._get_stall_timeout(node.agent_type), max_total,
+        Poll loop checks ProgressTracker.should_kill().  Work units (LLM calls,
+        subprocesses, tool execution) report progress via the shared tracker.
+        Stall detection is the sole kill mechanism (no max_total).
+        """
+        from core.progress import ProgressTracker
+
+        stall_timeout = self._get_stall_timeout(
+            node.agent_type, node=node, workspace_path=workspace_path,
         )
 
-        tracker = ProgressTracker(
-            stall_timeout=stall_timeout, max_total=max_total,
-        )
+        tracker = ProgressTracker(stall_timeout=stall_timeout)
         cancel_event = threading.Event()
 
         loop = asyncio.get_running_loop()
@@ -592,27 +747,28 @@ class NodeExecutor:
 
         try:
             while not task.done():
-                if node.health_status == NodeHealth.DEAD:
+                # Check if watchdog flagged this node (UNHEALTHY or DEAD)
+                if node.health_status in (NodeHealth.UNHEALTHY, NodeHealth.DEAD):
                     cancel_event.set()
                     if not task.done():
                         task.cancel()
                     raise NodeTimeoutError(
                         node_id=node.id,
                         agent_type=node.agent_type,
-                        timeout=max_total,
+                        timeout=stall_timeout,
                     )
                 should_kill, reason = tracker.should_kill()
                 if should_kill:
                     cancel_event.set()
                     logger.warning(
-                        "Node %s (%s) killed: %s (elapsed %.0fs, max %ds)",
+                        "Node %s (%s) killed: %s (elapsed %.0fs)",
                         node.id, node.agent_type, reason,
-                        tracker.elapsed, max_total,
+                        tracker.elapsed,
                     )
                     raise NodeTimeoutError(
                         node_id=node.id,
                         agent_type=node.agent_type,
-                        timeout=max_total,
+                        timeout=stall_timeout,
                     )
                 if tracker.has_recent_progress():
                     node.record_heartbeat()
@@ -650,10 +806,16 @@ class NodeExecutor:
         )
         return max(1, int(interval * threshold))
 
-    def _get_stall_timeout(self, agent_type: str) -> int:
+    def _get_stall_timeout(
+        self, agent_type: str, node: DAGNode | None = None,
+        workspace_path: str | None = None,
+    ) -> int:
+        """Return dynamic stall timeout (M4.5)."""
         if self._node_timeout_config is not None:
-            return self._node_timeout_config.stall_timeout_for(agent_type)
-        return 120
+            return self._node_timeout_config.stall_timeout_for(
+                agent_type, node=node, workspace_path=workspace_path,
+            )
+        return self._get_node_timeout(agent_type)
 
     def _collect_input_artifacts(
         self,

@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from core.progress import ProgressTracker
+from core.progress import ProgressTracker, ProgressReport
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,11 @@ def run_with_progress(
     env: dict[str, str] | None = None,
     shell: bool = False,
     poll_interval: float = 5.0,
+    # subprocess.run drop-in compatibility (accepted, no-op)
+    capture_output: bool = True,
+    text: bool = True,
+    encoding: str | None = None,
+    errors: str | None = None,
 ) -> SubprocessResult:
     """Run a subprocess with progress reporting and cancel support.
 
@@ -65,7 +70,7 @@ def run_with_progress(
     start = time.monotonic()
 
     if progress_tracker:
-        progress_tracker.report("subprocess_start")
+        progress_tracker.report(ProgressReport("subprocess_start"))
 
     try:
         proc = subprocess.Popen(
@@ -96,7 +101,9 @@ def run_with_progress(
                 elapsed = time.monotonic() - start
 
                 if progress_tracker:
-                    progress_tracker.report("subprocess_poll")
+                    progress_tracker.report(
+                        ProgressReport("subprocess_poll", f"elapsed {elapsed:.0f}s"),
+                    )
 
                 if cancel_event and cancel_event.is_set():
                     proc.kill()

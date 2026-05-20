@@ -139,6 +139,7 @@ class IntelligentOrchestrator:
         self.agent_registry = agent_registry
         self.learning_optimizer = learning_optimizer
         self.skill_registry = skill_registry
+        self._token_estimator = None  # M4.6: set externally for token-aware planning
         self._prompt_registry = prompt_registry or get_prompt_registry()
         if llm_router:
             self.llm = llm_router.get_client("orchestrator")
@@ -257,7 +258,7 @@ class IntelligentOrchestrator:
                     "role": "user",
                     "content": (
                         f"Validation error: {err_msg}. "
-                        "Reduce the plan to at most 10 nodes by combining "
+                        "Reduce the plan to at most 25 nodes by combining "
                         "related sub-tasks, and return a valid JSON plan."
                     ),
                 })
@@ -293,6 +294,9 @@ class IntelligentOrchestrator:
 
         if validator.rename_map:
             self._apply_rename_map(dag, validator.rename_map)
+
+        # M4.6: Estimate token counts for all planned nodes
+        dag = await self._estimate_dag_tokens(dag)
 
         return dag
 
@@ -662,6 +666,24 @@ class IntelligentOrchestrator:
                         result.append(task[i:pos + len(target)])
                         i = pos + len(target)
                 node.task_description = "".join(result)
+
+    async def _estimate_dag_tokens(self, dag: DAG) -> DAG:
+        """Estimate token counts for all planned nodes (M4.6)."""
+        if not self._token_estimator:
+            return dag
+        from core.token_estimator import build_node_context
+        from agent.prompts import SYSTEM_PROMPTS
+        nodes = []
+        for nid, node in dag.nodes.items():
+            ctx = build_node_context(node, SYSTEM_PROMPTS)
+            nodes.append((nid, ctx))
+        if not nodes:
+            return dag
+        estimates = await self._token_estimator.estimate_nodes_batch(nodes)
+        for est in estimates:
+            if est.node_id in dag.nodes:
+                dag.update_node(est.node_id, estimated_tokens=est.estimated_tokens)
+        return dag
 
     # -- Delegation to llm_utils for backward compat --
 

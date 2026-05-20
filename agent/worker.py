@@ -18,6 +18,8 @@ from typing import Any, Iterator, TYPE_CHECKING
 import json
 import logging
 import threading
+
+from core.progress import ProgressReport
 import uuid
 
 from core.models import AgentMessage, ToolCall, EventType
@@ -131,7 +133,7 @@ class AgentWorker:
             if progress_callback:
                 progress_callback()
             if progress_tracker:
-                progress_tracker.report("worker_iteration")
+                progress_tracker.report(ProgressReport("worker_iteration"))
 
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},

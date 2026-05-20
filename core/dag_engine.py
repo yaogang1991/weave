@@ -761,6 +761,13 @@ class DAGExecutionEngine:
             "total_output_tokens": total_output,
             "total_tokens": total_input + total_output,
         }
+        # M4.6: Aggregate actual_tokens
+        actual_total = sum(
+            n.actual_tokens for n in dag.nodes.values()
+            if hasattr(n, "actual_tokens")
+        )
+        if actual_total > 0:
+            summary["token_usage"]["actual_tokens_total"] = actual_total
         if self._budget_manager and not self._budget_manager.config.is_unlimited:
             summary["budget"] = self._budget_manager.to_dict()
 

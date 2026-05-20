@@ -49,6 +49,7 @@ class TestClaudeCodeBackendRegistryIntegration:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
+        mock_result.timed_out = False
         mock_result.stdout = json.dumps({
             "result": "API built successfully",
             "is_error": False,
@@ -57,7 +58,7 @@ class TestClaudeCodeBackendRegistryIntegration:
         })
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("subprocess.run", return_value=mock_result):
+            with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
                 result = await registry.execute_for_node("claude_code", ctx)
 
         assert result.status == BackendStatus.COMPLETED
@@ -120,6 +121,7 @@ class TestClaudeCodeBackendEndToEnd:
 
         mock_result = MagicMock()
         mock_result.returncode = 0
+        mock_result.timed_out = False
         mock_result.stdout = json.dumps({
             "result": "Created hello.py with basic Flask app",
             "is_error": False,
@@ -136,7 +138,7 @@ class TestClaudeCodeBackendEndToEnd:
         git_result.stdout = "hello.py\nrequirements.txt\n"
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("subprocess.run", side_effect=[mock_result, git_result]):
+            with patch("agent.backends.claude_code.run_with_progress", side_effect=[mock_result, git_result]):
                 result = await backend.execute(ctx)
 
         assert result.status == BackendStatus.COMPLETED

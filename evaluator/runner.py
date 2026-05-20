@@ -132,7 +132,6 @@ def run_tests(
     work_dir: Path,
     test_path: str | list[str] | None = None,
     eval_id: str = "",
-    progress_tracker=None,
 ) -> tuple[bool, str]:
     """Run pytest with a fixed command. Never executes arbitrary commands."""
     # Detect __init__.py in test subdirs that shadow project packages (#221).
@@ -152,11 +151,10 @@ def run_tests(
             timeout=180,
             cwd=str(work_dir) if work_dir.is_dir() else None,
             env=isolated_env(eval_id, work_dir),
-            progress_tracker=progress_tracker,
         )
         if rwp.timed_out:
             return False, (
-                "Tests timed out after 60s — likely a background thread or process leak. "
+                "Tests timed out after 180s — likely a background thread or process leak. "
                 "Ensure all threads use daemon=True and add proper cleanup in test teardown "
                 "(e.g. @pytest.fixture with yield + stop() call)."
             )
@@ -183,12 +181,6 @@ def run_tests(
                 + "\n".join(f"  - {w}" for w in shadow_warnings)
             )
         return passed, msg
-    except subprocess.TimeoutExpired:
-        return False, (
-            "Tests timed out after 180s — likely a background thread or process leak. "
-            "Ensure all threads use daemon=True and add proper cleanup in test teardown "
-            "(e.g. @pytest.fixture with yield + stop() call)."
-        )
     except FileNotFoundError:
         return False, "pytest not installed"
     except Exception as e:
@@ -199,7 +191,6 @@ def run_lint(
     targets: list[str],
     work_dir: Path,
     auto_format_before_eval: bool = False,
-    progress_tracker=None,
 ) -> tuple[bool, str, list[str], list[str], list[str], list[str]]:
     """Dry-run autofix then delta-lint resolved target files.
 
@@ -228,7 +219,7 @@ def run_lint(
         )
 
     # Auto-fix unused imports/variables via autoflake --in-place (#283).
-    autofixed_files = auto_fix_unused(resolved, work_dir, progress_tracker=progress_tracker)
+    autofixed_files = auto_fix_unused(resolved, work_dir)
     if autofixed_files:
         logger.info(
             "autoflake removed unused imports from %d file(s): %s",
@@ -236,7 +227,7 @@ def run_lint(
         )
 
     # Apply autopep8 in-place formatting to fix whitespace issues (#206).
-    formatted_files = auto_format_apply(resolved, work_dir, auto_format_before_eval, progress_tracker=progress_tracker)
+    formatted_files = auto_format_apply(resolved, work_dir, auto_format_before_eval)
     auto_formatted_files = formatted_files
     if formatted_files:
         logger.info(
@@ -251,7 +242,6 @@ def run_lint(
             [sys.executable, "-m", "flake8"] + resolved
             + ["--max-line-length=100"],
             timeout=60,
-            progress_tracker=progress_tracker,
         )
         lint_stdout = rwp.stdout
     except FileNotFoundError:
@@ -259,7 +249,6 @@ def run_lint(
             rwp = run_with_progress(
                 ["ruff", "check"] + resolved,
                 timeout=60,
-                progress_tracker=progress_tracker,
             )
             lint_stdout = rwp.stdout
         except FileNotFoundError:
@@ -383,7 +372,7 @@ def run_lint(
     )
 
 
-def auto_fix_unused(resolved: list[str], work_dir: Path, progress_tracker=None) -> list[str]:
+def auto_fix_unused(resolved: list[str], work_dir: Path) -> list[str]:
     """Remove unused imports and variables via autoflake --in-place (#283).
 
     Returns list of relative paths of files that were actually modified.
@@ -408,7 +397,6 @@ def auto_fix_unused(resolved: list[str], work_dir: Path, progress_tracker=None) 
                 "--remove-unused-variables",
             ] + resolved,
             timeout=30,
-            progress_tracker=progress_tracker,
         )
         if rwp.timed_out:
             logger.warning("autoflake timed out, skipping unused import fix")
@@ -435,7 +423,7 @@ def auto_fix_unused(resolved: list[str], work_dir: Path, progress_tracker=None) 
     return changed
 
 
-def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False, progress_tracker=None) -> list[str]:
+def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False) -> list[str]:
     """Apply autopep8 in-place formatting to fix whitespace issues (#206).
 
     Returns list of relative paths of files that were actually modified.
@@ -460,7 +448,6 @@ def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False
                 "--select=E203,E303,W291,W293,W605,E302",
             ] + resolved,
             timeout=30,
-            progress_tracker=progress_tracker,
         )
         if rwp.timed_out:
             logger.warning("autopep8 timed out, skipping auto-format")
@@ -496,7 +483,6 @@ def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False
 def import_smoke_test(
     artifacts: list[str],
     eval_dir: Path,
-    progress_tracker=None,
 ) -> list[tuple[str, str]]:
     """Try importing each generated .py source file.
 
@@ -530,7 +516,6 @@ def import_smoke_test(
                 [sys.executable, "-c", f"import {module}"],
                 timeout=10,
                 cwd=str(eval_dir),
-                progress_tracker=progress_tracker,
             )
             if rwp.timed_out:
                 errors.append((art, "import timed out (10s)"))
@@ -547,7 +532,6 @@ def check_coverage(
     target: int,
     output_artifacts: list[str] | None = None,
     eval_id: str = "",
-    progress_tracker=None,
 ) -> tuple[bool, str, bool]:
     """Check test coverage against target percentage.
 
@@ -602,7 +586,6 @@ def check_coverage(
             timeout=60,
             cwd=str(work_dir) if work_dir.is_dir() else None,
             env=isolated_env(eval_id, work_dir),
-            progress_tracker=progress_tracker,
         )
 
         if rwp.timed_out:

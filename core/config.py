@@ -380,9 +380,8 @@ class EvalTimeoutScaleConfig(BaseModel):
 class NodeTimeoutConfig(BaseModel):
     """Per-agent-type node execution timeout (#360 PR2, M4.5).
 
-    M4.5 adds progress-driven timeout with stall detection:
-    - stall_timeout: kill if no progress reported for this long
-    - max_total: hard cap regardless of progress (from L1 estimate)
+    M4.5 progress-driven stall timeout with dynamic complexity scaling.
+    stall_timeout is the sole kill mechanism (no max_total hard cap).
     """
 
     default_timeout: int = Field(
@@ -439,9 +438,51 @@ class NodeTimeoutConfig(BaseModel):
 
         return base
 
-    def stall_timeout_for(self, agent_type: str) -> int:
-        """Return stall timeout for the given agent type (M4.5)."""
-        return self.stall_overrides.get(agent_type, self.stall_timeout)
+    def stall_timeout_for(
+        self,
+        agent_type: str,
+        node: object | None = None,
+        workspace_path: str | None = None,
+    ) -> int:
+        """Return dynamic stall timeout: max(configured, complexity-based).
+
+        Merges estimate_max_timeout logic: file/test/dependency counts
+        drive dynamic scaling.  Configured value is always a floor.
+        """
+        from pathlib import Path as _Path
+        configured = self.stall_overrides.get(agent_type, self.stall_timeout)
+
+        dynamic = 0
+        if agent_type == "evaluator" and workspace_path:
+            base = int(os.getenv("WEAVE_EVAL_STALL_BASE", "120"))
+            per_file = int(os.getenv("WEAVE_EVAL_STALL_PER_FILE", "4"))
+            per_test = int(os.getenv("WEAVE_EVAL_STALL_PER_TEST", "3"))
+            cap = int(os.getenv("WEAVE_EVAL_STALL_CAP", "600"))
+            wp = _Path(workspace_path)
+            if wp.is_dir():
+                files = sum(
+                    1 for p in wp.rglob("*.py")
+                    if "test" not in p.name.lower()
+                    and "__pycache__" not in str(p)
+                )
+                tests = sum(
+                    1 for p in wp.rglob("*.py")
+                    if "test" in p.name.lower()
+                    and "__pycache__" not in str(p)
+                )
+                dynamic = min(
+                    base + files * per_file + tests * per_test,
+                    cap,
+                )
+        elif (agent_type == "generator" and node
+              and hasattr(node, 'dependencies')
+              and node.dependencies):
+            base = int(os.getenv("WEAVE_GEN_STALL_BASE", "120"))
+            per_dep = int(os.getenv("WEAVE_GEN_STALL_PER_DEP", "30"))
+            cap = int(os.getenv("WEAVE_GEN_STALL_CAP", "300"))
+            dynamic = min(base + len(node.dependencies) * per_dep, cap)
+
+        return max(configured, dynamic) if dynamic else configured
 
     @property
     def min_timeout(self) -> int:
@@ -490,6 +531,39 @@ class BudgetConfig(BaseModel):
                 os.getenv("WEAVE_BUDGET_PER_NODE_TOKENS", "0")
             ),
         )
+
+
+class TokenEstimationConfig(BaseModel):
+    """M4.6: Token estimation configuration for pre-execution planning."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Use Anthropic count_tokens() API for estimation",
+    )
+    fallback_to_heuristic: bool = Field(
+        default=True,
+        description="Fall back to char/3.5 heuristic on API failure",
+    )
+    target_budget: int = Field(
+        default=8192,
+        description="Default token budget per node",
+    )
+    overhead_margins: dict[str, int] = Field(
+        default_factory=lambda: {
+            "generator": 2200,
+            "evaluator": 900,
+            "planner": 550,
+        },
+        description="Per-agent-type overhead (system prompt + tools), measured + 5% buffer",
+    )
+    max_estimation_concurrency: int = Field(
+        default=10,
+        description="Max parallel count_tokens() calls",
+    )
+    cache_ttl_seconds: int = Field(
+        default=300,
+        description="Cache token estimation results for N seconds",
+    )
 
 
 class CodexBackendConfig(BaseModel):

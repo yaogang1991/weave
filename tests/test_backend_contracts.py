@@ -83,7 +83,7 @@ class TestBackendContract:
             # Mock git worktree add
             mock_result = MagicMock()
             mock_result.returncode = 0
-            with patch("backend.worktree.subprocess.run", return_value=mock_result):
+            with patch("backend.worktree.run_with_progress", return_value=mock_result):
                 work_dir = backend.setup("job-1", "run-1")
         else:
             work_dir = backend.setup("job-1", "run-1")
@@ -95,7 +95,7 @@ class TestBackendContract:
         if isinstance(backend, WorktreeBackend):
             mock_result = MagicMock()
             mock_result.returncode = 0
-            with patch("backend.worktree.subprocess.run", return_value=mock_result):
+            with patch("backend.worktree.run_with_progress", return_value=mock_result):
                 work_dir = backend.setup("job-1", "run-1")
         else:
             work_dir = backend.setup("job-1", "run-1")
@@ -143,7 +143,7 @@ class TestBackendContract:
             backend.worktrees["run-1"] = backend.base_path / "job-1" / "run-1"
             mock_result = MagicMock()
             mock_result.returncode = 0
-            with patch("backend.worktree.subprocess.run", return_value=mock_result):
+            with patch("backend.worktree.run_with_progress", return_value=mock_result):
                 backend.cleanup("job-1", "run-1")
                 backend.cleanup("job-1", "run-1")
         else:
@@ -215,7 +215,7 @@ class TestWorktreeBackendContract:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("backend.worktree.subprocess.run", return_value=mock_result):
+        with patch("backend.worktree.run_with_progress", return_value=mock_result):
             work_dir = backend.setup("job-1", "run-1")
             assert "job-1" in str(work_dir)
 
@@ -232,7 +232,7 @@ class TestWorktreeBackendContract:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("backend.worktree.subprocess.run", return_value=mock_result):
+        with patch("backend.worktree.run_with_progress", return_value=mock_result):
             work_dir = backend.setup("job-1", "run-1")
             # Manually create the directory for marker test
             work_dir.mkdir(parents=True, exist_ok=True)
@@ -252,7 +252,7 @@ class TestWorktreeBackendContract:
         mock_result = MagicMock()
         mock_result.returncode = 0
 
-        with patch("backend.worktree.subprocess.run", return_value=mock_result):
+        with patch("backend.worktree.run_with_progress", return_value=mock_result):
             dir_a = backend.setup("job-a", "run-1")
             dir_b = backend.setup("job-b", "run-1")
 

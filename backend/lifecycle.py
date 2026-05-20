@@ -29,6 +29,7 @@ from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.sandbox import SandboxProvider, LocalSandbox, DockerSandbox
 from core.models import NodeWorkspace
+from core.subprocess_runner import run_with_progress
 
 logger = logging.getLogger(__name__)
 
@@ -327,15 +328,14 @@ class BackendManager:
         if ws_strategy == NodeWorkspaceStrategy.WORKTREE and self.repo_root:
             # Create git worktree for the node
             try:
-                import subprocess
-                result = subprocess.run(
+                result = run_with_progress(
                     ["git", "rev-parse", "HEAD"],
                     capture_output=True, text=True,
                     cwd=self.repo_root, timeout=10,
                 )
                 if result.returncode == 0:
                     baseline_commit = result.stdout.strip()
-                wt_result = subprocess.run(
+                wt_result = run_with_progress(
                     ["git", "worktree", "add", str(node_work_dir), "HEAD"],
                     capture_output=True, text=True,
                     cwd=self.repo_root, timeout=30,
@@ -345,7 +345,7 @@ class BackendManager:
                         f"git worktree add failed (rc={wt_result.returncode}): "
                         f"{wt_result.stderr.strip()}"
                     )
-            except (FileNotFoundError, subprocess.TimeoutExpired, RuntimeError, Exception):
+            except (RuntimeError, Exception):
                 # Git not available or worktree failed, fall back to SHARED
                 import shutil
                 shutil.rmtree(node_work_dir, ignore_errors=True)
@@ -394,13 +394,12 @@ class BackendManager:
         if ws.strategy.value == "worktree" and self.repo_root:
             # Remove git worktree
             try:
-                import subprocess
-                subprocess.run(
+                run_with_progress(
                     ["git", "worktree", "remove", str(ws_path), "--force"],
                     capture_output=True, text=True,
                     cwd=self.repo_root, timeout=30,
                 )
-            except (FileNotFoundError, Exception):
+            except Exception:
                 pass
         elif ws.strategy.value == "copy" and ws_path.exists():
             import shutil

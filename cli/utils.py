@@ -5,12 +5,12 @@ Extracted from main.py as part of #438.
 """
 
 import json
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from core.config import WeaveConfig, _get_non_interactive_env
+from core.subprocess_runner import run_with_progress
 from core.agent_registry import AgentRegistry
 from core.models import DAG, SuccessCriterion
 
@@ -73,7 +73,7 @@ def _check_dirty_workspace(
         return
 
     try:
-        result = subprocess.run(
+        result = run_with_progress(
             ["git", "status", "--porcelain"],
             capture_output=True, text=True,
             timeout=10,
@@ -81,7 +81,7 @@ def _check_dirty_workspace(
         )
         if result.returncode != 0 or not result.stdout.strip():
             return
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+    except OSError:
         return
 
     dirty_files = result.stdout.strip().split("\n")

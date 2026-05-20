@@ -9,11 +9,12 @@ On success, the worktree is automatically cleaned up.
 from __future__ import annotations
 
 import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.base import ExecutionBackend, WorkspaceIsolation
+
+from core.subprocess_runner import run_with_progress
 
 
 class WorktreeBackend(ExecutionBackend):
@@ -54,7 +55,7 @@ class WorktreeBackend(ExecutionBackend):
             self._remove_worktree(str(worktree_path))
 
         # Create worktree
-        result = subprocess.run(
+        result = run_with_progress(
             ["git", "worktree", "add", "--detach", str(worktree_path)],
             cwd=str(self.repo_root) if self.repo_root else None,
             capture_output=True,
@@ -111,7 +112,7 @@ class WorktreeBackend(ExecutionBackend):
     def is_available(self) -> bool:
         """Check if git worktree is available."""
         try:
-            result = subprocess.run(
+            result = run_with_progress(
                 ["git", "worktree", "list"],
                 cwd=str(self.repo_root) if self.repo_root else None,
                 capture_output=True,
@@ -121,13 +122,13 @@ class WorktreeBackend(ExecutionBackend):
                 timeout=5,
             )
             return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        except OSError:
             return False
 
     def _remove_worktree(self, path: str) -> None:
         """Safely remove git worktree."""
         try:
-            result = subprocess.run(
+            result = run_with_progress(
                 ["git", "worktree", "remove", "--force", path],
                 cwd=str(self.repo_root) if self.repo_root else None,
                 capture_output=True,
@@ -136,14 +137,14 @@ class WorktreeBackend(ExecutionBackend):
             if result.returncode != 0 and Path(path).exists():
                 # git worktree remove failed (e.g. stale dir not a registered worktree)
                 shutil.rmtree(path, ignore_errors=True)
-        except (subprocess.TimeoutExpired, Exception):
+        except Exception:
             # Fallback: manual cleanup
             if Path(path).exists():
                 shutil.rmtree(path, ignore_errors=True)
 
     def list_active_worktrees(self) -> list[dict]:
         """List currently active worktrees."""
-        result = subprocess.run(
+        result = run_with_progress(
             ["git", "worktree", "list", "--porcelain"],
             cwd=str(self.repo_root),
             capture_output=True,
