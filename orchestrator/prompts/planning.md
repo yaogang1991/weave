@@ -68,8 +68,9 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
       ],
       "success_criteria": [...]
     }}
-14. **Force decomposition for large tasks**: A single generator node MUST NOT be
-    expected to create more than ~15 files. If the requirement needs more:
+14. **Force decomposition for large tasks**: Each generator node's task description
+    MUST stay within ~6000 tokens (8192 token budget minus ~2200 overhead for system
+    prompt + tools). If the requirement is large:
     a. Extract shared models/schemas/config into a `impl_foundation` node (Level 0)
     b. Create parallel `impl_<module>` nodes for each major subsystem, each depending
        only on the foundation node
@@ -77,10 +78,9 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     Example for a system with 6 modules: foundation → (impl_core, impl_api, impl_services) parallel → (impl_tests_core, impl_tests_api, impl_tests_services) parallel → eval.
     This prevents LLM context exhaustion where a node creates 27/50 files then stops.
 15. **Decompose by feature complexity**: A single generator node MUST NOT be tasked
-    with more than 3 distinct complex features. A "complex feature" requires its own
-    class, module, or significant algorithmic logic (e.g., "implement 3-way merge",
-    "build rate limiter with token buckets", "create patch parser with unified diff
-    support"). When a requirement includes 4+ complex features:
+    with more than 3 distinct complex features. If a task description would exceed
+    ~4000 tokens, split it. A "complex feature" requires its own class, module, or
+    significant algorithmic logic. When a requirement includes 4+ complex features:
     a. Group related features into 2-3 generator nodes, each with at most 2-3 features
     b. Extract shared models/types into a foundation node that feature nodes depend on
     c. Each feature node should own a clear, non-overlapping set of files
@@ -196,9 +196,9 @@ For simple cases you MAY use plain strings like "tests pass" or "lint clean" —
 - Every edge references valid node IDs
 - The DAG must be acyclic
 - Keep it minimal: don't add unnecessary nodes
-- **Maximum 10 nodes**: Plans with more than 10 nodes will be rejected. For
+- **Maximum 25 nodes**: Plans with more than 25 nodes will be rejected. For
   complex requirements, combine related sub-tasks into fewer, larger nodes
-  rather than creating one node per micro-feature. Prefer 4-8 nodes for
+  rather than creating one node per micro-feature. Prefer 4-12 nodes for
   most tasks.
 - **Keep JSON concise**: Use short reasoning (1-2 sentences). Task descriptions
   should be specific but not verbose (under 30 words each). Avoid long inline

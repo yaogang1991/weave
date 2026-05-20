@@ -88,23 +88,16 @@ def _get_stdlib_names() -> set[str]:
 class PlanValidator:
     """Validates orchestrator plan structure. No mutations."""
 
-    # Maximum allowed nodes in a plan (#292).
-    # Prevents JSON truncation when the LLM generates oversized DAGs.
-    MAX_NODES = 10
-
     # Maximum estimated file count per generator node (#284).
-    # Prevents a single node from being tasked with creating too many
-    # files, which causes LLM context exhaustion and partial output.
     MAX_FILES_PER_NODE = 15
 
     # Maximum distinct complex features per generator node (#409).
-    # Prevents a single node from being tasked with too many algorithmic
-    # features, which causes iteration budget exhaustion and zero output.
     MAX_FEATURES_PER_NODE = 3
 
-    def __init__(self, auto_fix: bool = False) -> None:
+    def __init__(self, auto_fix: bool = False, max_nodes: int = 25) -> None:
         # auto_fix is accepted for API compat but validation-only is always used
         self.auto_fix = auto_fix
+        self.max_nodes = max_nodes
         self.warnings: list[str] = []
         self.rename_map: dict[str, str] = {}  # stdlib name → prefixed alternative
 
@@ -128,9 +121,9 @@ class PlanValidator:
             node_ids.add(nid)
 
         # Node count limit (#292): prevents JSON truncation on oversized DAGs.
-        if len(node_ids) > self.MAX_NODES:
+        if len(node_ids) > self.max_nodes:
             raise PlanValidationError(
-                f"Plan has {len(node_ids)} nodes (maximum {self.MAX_NODES}). "
+                f"Plan has {len(node_ids)} nodes (maximum {self.max_nodes}). "
                 f"Combine related sub-tasks into fewer nodes."
             )
 
@@ -187,6 +180,8 @@ class PlanValidator:
         self._check_feature_complexity(nodes)
         # Parallel write conflict detection (#272)
         self._check_parallel_write_conflicts(nodes, edges)
+        # Token budget check (M4.6)
+        self._check_token_budget(nodes)
 
         return plan_data
 
@@ -511,3 +506,15 @@ class PlanValidator:
             # Check if it explicitly depends on both nodes
             # (Heuristic: if it's in common descendants, it likely merges)
         return bool(common)
+
+    def _check_token_budget(self, nodes: list[dict]) -> None:
+        """Warn if estimated_tokens exceeds token_budget (M4.6)."""
+        for node in nodes:
+            estimated = node.get("estimated_tokens", 0)
+            budget = node.get("token_budget", 8192)
+            if estimated > 0 and estimated > budget:
+                self.warnings.append(
+                    f"Node '{node.get('id')}' estimated at {estimated} tokens "
+                    f"exceeds budget of {budget} tokens. "
+                    f"Consider splitting into smaller nodes."
+                )

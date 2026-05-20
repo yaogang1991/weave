@@ -45,6 +45,11 @@ from core.dag_models import (
     NodeWorkspaceStrategy,
     OrchestratorPlan,
 )
+from core.token_estimator import (  # noqa: F401 — backward-compat re-export
+    NodeTokenContext,
+    TokenEstimateResult,
+    TokenEstimator,
+)
 from core.event_models import (
     Event,
     EventType,

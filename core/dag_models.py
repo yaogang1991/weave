@@ -145,6 +145,19 @@ class DAGNode(BaseModel):
         default_factory=dict,
         description="M4.2: Token usage {input_tokens, output_tokens, total_tokens}",
     )
+    # M4.6: Token budget for node context
+    token_budget: int = Field(
+        default=8192,
+        description="M4.6: Maximum allowed tokens for this node's context",
+    )
+    estimated_tokens: int = Field(
+        default=0,
+        description="M4.6: Pre-execution token estimate (set by TokenEstimator)",
+    )
+    actual_tokens: int = Field(
+        default=0,
+        description="M4.6: Actual tokens consumed during execution",
+    )
 
     @field_validator("success_criteria", mode="before")
     @classmethod
@@ -309,6 +322,11 @@ class DAG(BaseModel):
     def get_dependents(self, node_id: str) -> list[str]:
         """Get all successor nodes."""
         return [e.to_node for e in self.edges if e.from_node == node_id]
+
+    @property
+    def total_token_budget(self) -> int:
+        """Sum of all node token budgets."""
+        return sum(n.token_budget for n in self.nodes.values())
 
     def topological_levels(self) -> list[list[str]]:
         """
