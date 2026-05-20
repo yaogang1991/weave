@@ -184,3 +184,54 @@ class TestPromptCaching:
         # Should not log cache stats when both are 0
         info_calls = [str(c) for c in mock_logger.info.call_args_list]
         assert not any("cache" in c.lower() for c in info_calls)
+
+
+# ------------------------------------------------------------------------------
+# max_tokens_override (#621)
+# ------------------------------------------------------------------------------
+
+
+class TestMaxTokensOverride:
+    def test_override_used_in_anthropic_call(self, client):
+        """max_tokens_override replaces config.max_tokens in Anthropic calls."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="ok")]
+        mock_response.usage = MagicMock(
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        client._client.messages.create = MagicMock(return_value=mock_response)
+
+        client._call_anthropic(
+            [{"role": "user", "content": "test"}],
+            [],
+        )
+        call_kwargs = client._client.messages.create.call_args[1]
+        assert call_kwargs["max_tokens"] == 4096  # default
+
+        # Now with override
+        client._max_tokens_override = 8192
+        client._call_anthropic(
+            [{"role": "user", "content": "test"}],
+            [],
+        )
+        call_kwargs = client._client.messages.create.call_args[1]
+        assert call_kwargs["max_tokens"] == 8192
+
+    def test_override_none_uses_default(self, client):
+        """When _max_tokens_override is None, config default is used."""
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(type="text", text="ok")]
+        mock_response.usage = MagicMock(
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        client._client.messages.create = MagicMock(return_value=mock_response)
+
+        client._max_tokens_override = None
+        client._call_anthropic(
+            [{"role": "user", "content": "test"}],
+            [],
+        )
+        call_kwargs = client._client.messages.create.call_args[1]
+        assert call_kwargs["max_tokens"] == 4096  # config default

@@ -152,11 +152,14 @@ class TestRetryContextTruncation:
         call_count = 0
         messages_captured = []
 
-        def mock_call(messages, tools=None):
+        def mock_call(messages, tools=None, **kwargs):
             nonlocal call_count
             call_count += 1
             messages_captured.append(list(messages))  # snapshot
-            if call_count == 1:
+            # Call 1: structured output attempt (has tool_choice kwarg)
+            # Call 2: free-text first attempt → huge invalid JSON
+            # Call 3: free-text retry → valid JSON
+            if call_count <= 2:
                 return {"content": huge_invalid_json}
             return {"content": valid_json}
 
@@ -165,12 +168,14 @@ class TestRetryContextTruncation:
 
         dag = await orch.plan("Build a simple API")
 
-        # Verify: the second call should have truncated the failed response
-        assert call_count == 2
+        # Call 1 = structured output, Call 2 = free-text attempt,
+        # Call 3 = free-text retry with truncated failed response
+        assert call_count == 3
         assert len(dag.nodes) == 2
 
-        # The assistant message in the retry should be truncated
-        retry_messages = messages_captured[1]
+        # The third captured messages (free-text retry) should have
+        # the truncated assistant message.
+        retry_messages = messages_captured[2]
         assistant_msg = retry_messages[-2]  # second-to-last is assistant
         assert assistant_msg["role"] == "assistant"
         assert len(assistant_msg["content"]) <= 2500  # 2000 + truncation note
@@ -191,10 +196,12 @@ class TestRetryContextTruncation:
 
         call_count = 0
 
-        def mock_call(messages, tools=None):
+        def mock_call(messages, tools=None, **kwargs):
             nonlocal call_count
             call_count += 1
-            if call_count == 1:
+            # Call 1: structured output, Call 2: free-text (short invalid),
+            # Call 3: free-text retry (valid)
+            if call_count <= 2:
                 return {"content": short_invalid}
             return {"content": valid_json}
 
@@ -203,5 +210,5 @@ class TestRetryContextTruncation:
 
         await orch.plan("Build API")
 
-        # Short response should not be truncated
-        assert call_count == 2
+        # 3 calls: structured output + 2 free-text attempts
+        assert call_count == 3

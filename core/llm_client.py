@@ -171,6 +171,7 @@ class LLMClient:
         max_retries: int | None = None,
         agent_timeout: float | None = None,
         tool_choice: dict | None = None,
+        max_tokens_override: int | None = None,
     ) -> dict:
         """
         Call the configured LLM with automatic retry for transient errors.
@@ -187,12 +188,15 @@ class LLMClient:
                 cumulative rate-limit sleep is tracked and the call bails
                 early with RateLimitError if sleep exceeds 50% of this
                 budget (#432).
+            max_tokens_override: Override config.max_tokens for this call.
 
         Returns:
             dict with keys: ``role``, ``content``, and optionally
             ``tool_calls``.
         """
         retries = max_retries if max_retries is not None else self.max_retries
+        # #621: Allow per-call max_tokens override for planner output.
+        self._max_tokens_override = max_tokens_override
         # #432: Track cumulative sleep to bail before consuming too much
         # of the agent's wall-clock timeout budget.
         sleep_budget = (agent_timeout * 0.5) if agent_timeout else None
@@ -444,9 +448,13 @@ class LLMClient:
 
         flush_tool_results()
 
+        effective_max_tokens = (
+            getattr(self, "_max_tokens_override", None)
+            or self.config.max_tokens
+        )
         kwargs = {
             "model": self.config.model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": effective_max_tokens,
             "temperature": self.config.temperature,
             "messages": anthropic_messages,
         }
@@ -528,12 +536,16 @@ class LLMClient:
         self, messages: list[dict], tools: list[dict],
         tool_choice: dict | None = None,
     ) -> dict:
+        effective_max_tokens = (
+            getattr(self, "_max_tokens_override", None)
+            or self.config.max_tokens
+        )
         response = self._client.chat.completions.create(
             model=self.config.model,
             messages=messages,
             tools=tools if tools else None,
             tool_choice=tool_choice if tool_choice else ("auto" if tools else None),
-            max_tokens=self.config.max_tokens,
+            max_tokens=effective_max_tokens,
             temperature=self.config.temperature,
         )
 
