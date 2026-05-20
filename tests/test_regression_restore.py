@@ -74,7 +74,7 @@ class TestFileSnapshot:
 
 
 class TestRegressionRestore:
-    """Integration test: regression in _execute_single_node restores files."""
+    """Integration test: regression in execute_node restores files."""
 
     @pytest.mark.asyncio
     async def test_regression_restores_best_files(self, tmp_path):

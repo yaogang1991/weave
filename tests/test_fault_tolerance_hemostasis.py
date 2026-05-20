@@ -341,7 +341,7 @@ class TestNodeTimeoutConfig:
         from core.config import NodeTimeoutConfig
         cfg = NodeTimeoutConfig(default_timeout=300, overrides={"generator": 600, "evaluator": 120})
         assert cfg.min_timeout == 120
-        assert cfg.max_timeout == 600
+        assert cfg.max_timeout == 1200  # eval_scale.max_timeout dominates
 
     def test_evaluator_dynamic_scaling(self):
         """Evaluator timeout scales with artifact count (#621)."""

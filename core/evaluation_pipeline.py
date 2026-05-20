@@ -82,6 +82,14 @@ class EvaluationPipeline:
         self._node_timeout_config = node_timeout_config
         self._emit_func = emit_func
 
+    @property
+    def evaluator(self) -> Any | None:
+        return self._evaluator
+
+    @evaluator.setter
+    def evaluator(self, value: Any | None) -> None:
+        self._evaluator = value
+
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
@@ -372,7 +380,7 @@ class EvaluationPipeline:
 
         eval_work_dir = workspace_path or self._work_dir
 
-        eval_stall_timeout = self._get_stall_timeout("evaluator")
+        eval_stall_timeout = self._get_stall_timeout("evaluator", node=node)
         eval_tracker = ProgressTracker(stall_timeout=eval_stall_timeout)
         eval_timeout = self._get_node_timeout("evaluator")
 
@@ -470,9 +478,28 @@ class EvaluationPipeline:
     # Timeout helpers
     # ------------------------------------------------------------------
 
-    def _get_stall_timeout(self, agent_type: str) -> int:
+    def _get_stall_timeout(
+        self, agent_type: str, node: Any = None,
+    ) -> int:
         if self._node_timeout_config is not None:
-            return self._node_timeout_config.stall_timeout_for(agent_type)
+            file_count = 0
+            test_count = 0
+            dep_count = 0
+            if node:
+                artifacts = node.output_artifacts or []
+                test_count = sum(
+                    1 for a in artifacts
+                    if 'test' in a.lower()
+                )
+                file_count = len(artifacts) - test_count
+                if hasattr(node, 'dependencies') and node.dependencies:
+                    dep_count = len(node.dependencies)
+            return self._node_timeout_config.stall_timeout_for(
+                agent_type,
+                file_count=file_count,
+                test_count=test_count,
+                dep_count=dep_count,
+            )
         return 120
 
     def _get_node_timeout(self, agent_type: str) -> int:

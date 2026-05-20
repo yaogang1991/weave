@@ -443,7 +443,7 @@ class TestRegressionRestoreEvalResult:
     """
 
     def test_best_attempt_eval_preserved_after_regression(self):
-        """Simulates the full regression restore flow within _execute_single_node.
+        """Simulates the full regression restore flow within execute_node.
 
         Scenario:
         1. First attempt: score 6.0, passed=False -> tracked as best

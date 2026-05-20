@@ -125,7 +125,7 @@ class NodeExecutor:
     @evaluator.setter
     def evaluator(self, value):
         self._evaluator = value
-        self._eval_pipeline._evaluator = value
+        self._eval_pipeline.evaluator = value
 
     # ------------------------------------------------------------------
     # Main entry point: 3-stage pipeline with retry loop
@@ -166,7 +166,7 @@ class NodeExecutor:
                 ):
                     raise  # System errors -> outer catch
                 except Exception as exc:
-                    should_retry = self._handle_exec_error(
+                    should_retry = await self._handle_exec_error(
                         dag, node_id, node_workspace, exc,
                     )
                     if should_retry:
@@ -380,7 +380,7 @@ class NodeExecutor:
     # Error handling helpers
     # ------------------------------------------------------------------
 
-    def _handle_exec_error(
+    async def _handle_exec_error(
         self,
         dag: DAG,
         node_id: str,
@@ -408,18 +408,14 @@ class NodeExecutor:
 
         if node.retry_count < node.max_retries:
             dag.update_node(node_id, status=NodeStatus.RETRYING)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="retrying",
-                    details={
-                        "attempt": node.retry_count,
-                        "error": str(exc),
-                    },
-                )))
-            except RuntimeError:
-                pass
+            await self._emit(ExecutionEvent(
+                node_id=node_id,
+                event_type="retrying",
+                details={
+                    "attempt": node.retry_count,
+                    "error": str(exc),
+                },
+            ))
             return True
         else:
             dag.update_node(
@@ -428,18 +424,14 @@ class NodeExecutor:
                 completed_at=datetime.now(timezone.utc),
                 auto_eval_result=None,
             )
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._emit(ExecutionEvent(
-                    node_id=node_id,
-                    event_type="failed",
-                    details={
-                        "error": str(exc),
-                        "attempts": node.retry_count,
-                    },
-                )))
-            except RuntimeError:
-                pass
+            await self._emit(ExecutionEvent(
+                node_id=node_id,
+                event_type="failed",
+                details={
+                    "error": str(exc),
+                    "attempts": node.retry_count,
+                },
+            ))
             return False
 
     def _cleanup_for_retry(
@@ -523,7 +515,7 @@ class NodeExecutor:
         from core.progress import ProgressTracker
 
         stall_timeout = self._get_stall_timeout(
-            node.agent_type, node=node, workspace_path=workspace_path,
+            node.agent_type, node=node,
         )
 
         tracker = ProgressTracker(stall_timeout=stall_timeout)
@@ -637,12 +629,14 @@ class NodeExecutor:
 
     def _get_stall_timeout(
         self, agent_type: str, node: DAGNode | None = None,
-        workspace_path: str | None = None,
     ) -> int:
         """Return dynamic stall timeout (M4.5)."""
         if self._node_timeout_config is not None:
+            dep_count = 0
+            if node and hasattr(node, 'dependencies') and node.dependencies:
+                dep_count = len(node.dependencies)
             return self._node_timeout_config.stall_timeout_for(
-                agent_type, node=node, workspace_path=workspace_path,
+                agent_type, dep_count=dep_count,
             )
         return self._get_node_timeout(agent_type)
 

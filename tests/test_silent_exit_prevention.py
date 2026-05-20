@@ -67,7 +67,7 @@ class TestSilentExitPrevention:
     async def test_exception_caught_and_node_failed(self, engine):
         """Exception during node execution sets FAILED status (#304).
 
-        RuntimeError in agent execution is caught by _execute_single_node,
+        RuntimeError in agent execution is caught by execute_node,
         which retries then sets node to FAILED. The error is NOT re-raised
         through execute() — it becomes a failure_handler decision.
         """
