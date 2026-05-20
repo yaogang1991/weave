@@ -276,6 +276,8 @@ class NodeExecutor:
                     node = dag.update_node(
                         node_id,
                         output_artifacts=upstream_artifacts,
+                        status=NodeStatus.SUCCESS,
+                        completed_at=datetime.now(timezone.utc),
                     )
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
@@ -285,6 +287,7 @@ class NodeExecutor:
                             "inherited_count": len(upstream_artifacts),
                         },
                     ))
+                    return
                 else:
                     node = dag.update_node(
                         node_id,
