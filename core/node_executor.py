@@ -553,7 +553,13 @@ class NodeExecutor:
         - M4.0: When backend_registry is set, dispatches via BackendRegistry
           instead of the agent_executor closure.
         """
-        timeout = self._get_node_timeout(node.agent_type)
+        # #621: Pass artifact count for dynamic evaluator timeout scaling.
+        timeout = self._get_node_timeout(
+            node.agent_type,
+            artifact_count=sum(
+                len(a.file_paths) for a in input_artifacts
+            ),
+        )
         cancel_event = threading.Event()
 
         loop = asyncio.get_running_loop()
@@ -622,14 +628,18 @@ class NodeExecutor:
 
     # -- Helpers -------------------------------------------------------------
 
-    def _get_node_timeout(self, agent_type: str) -> int:
+    def _get_node_timeout(
+        self, agent_type: str, artifact_count: int = 0,
+    ) -> int:
         """Return node timeout for the given agent type.
 
         Uses NodeTimeoutConfig from config if available, otherwise falls
         back to watchdog-based calculation for backward compatibility.
         """
         if self._node_timeout_config is not None:
-            return self._node_timeout_config.timeout_for(agent_type)
+            return self._node_timeout_config.timeout_for(
+                agent_type, artifact_count=artifact_count,
+            )
         interval, threshold = self._watchdog.get_heartbeat_settings(agent_type)
         return max(1, int(interval * threshold))
 

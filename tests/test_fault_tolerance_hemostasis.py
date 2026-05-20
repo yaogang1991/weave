@@ -241,7 +241,7 @@ class TestNodeTimeoutInDagEngine:
             enable_watchdog=False,
         )
         # Override timeout to 1s for fast test
-        engine._get_node_timeout = lambda agent_type: 1
+        engine._get_node_timeout = lambda agent_type, artifact_count=0: 1
         await engine.execute(dag)
 
         assert dag.nodes["slow_node"].status == NodeStatus.FAILED
@@ -343,6 +343,32 @@ class TestNodeTimeoutConfig:
         assert cfg.min_timeout == 120
         assert cfg.max_timeout == 600
 
+    def test_evaluator_dynamic_scaling(self):
+        """Evaluator timeout scales with artifact count (#621)."""
+        from core.config import NodeTimeoutConfig
+        cfg = NodeTimeoutConfig(overrides={"evaluator": 480})
+        # No artifacts → base timeout
+        assert cfg.timeout_for("evaluator", artifact_count=0) == 480
+        # 50 artifacts → 480 + 50 * 5 = 730
+        assert cfg.timeout_for("evaluator", artifact_count=50) == 730
+        # 200 artifacts → capped at max_timeout (1200)
+        assert cfg.timeout_for("evaluator", artifact_count=200) == 1200
+
+    def test_evaluator_scaling_disabled(self):
+        """When eval_scale disabled, timeout is static (#621)."""
+        from core.config import NodeTimeoutConfig, EvalTimeoutScaleConfig
+        cfg = NodeTimeoutConfig(
+            overrides={"evaluator": 480},
+            eval_scale=EvalTimeoutScaleConfig(enabled=False),
+        )
+        assert cfg.timeout_for("evaluator", artifact_count=100) == 480
+
+    def test_non_evaluator_not_scaled(self):
+        """Dynamic scaling only applies to evaluator agent type (#621)."""
+        from core.config import NodeTimeoutConfig
+        cfg = NodeTimeoutConfig(overrides={"generator": 600})
+        assert cfg.timeout_for("generator", artifact_count=100) == 600
+
 
 # -- 7. PR3: progress_callback replaces _heartbeat_loop -------------------------
 
@@ -370,7 +396,7 @@ class TestProgressCallback:
             failure_handler=None,
             enable_watchdog=False,
         )
-        engine._get_node_timeout = lambda agent_type: 300
+        engine._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
 
         assert dag.nodes["test_node"].status == NodeStatus.SUCCESS
@@ -399,7 +425,7 @@ class TestProgressCallback:
             failure_handler=None,
             enable_watchdog=False,
         )
-        engine._get_node_timeout = lambda agent_type: 300
+        engine._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
 
         assert isinstance(received_cancel, threading.Event)
