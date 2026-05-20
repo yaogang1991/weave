@@ -7,6 +7,7 @@ instead of waiting for the broader EMPTY_TOOL_CALL_LIMIT (10).
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 from core.config import LLMConfig
@@ -252,3 +253,90 @@ def test_empty_args_skips_llm_retries():
     # Without the fix, would be ~(DEGENERATE_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1))
     # = 3 * 4 = 12 calls
     assert EMPTY_CALL_MAX_RETRIES == 3  # sanity check
+
+
+def test_recovery_hint_includes_workspace_files():
+    """Recovery hint includes known workspace files (#625).
+
+    When the agent has already created files and then enters a
+    degenerate loop, the recovery hint should include the file list
+    so the model knows what exists in the workspace.
+    """
+    import os
+    import tempfile
+
+    worker = _make_worker()
+
+    # Use a real temp dir so _track_artifact can verify file existence
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create the files so _track_artifact's is_file check passes
+        os.makedirs(os.path.join(tmpdir, "src"), exist_ok=True)
+        app_py = os.path.join(tmpdir, "src", "app.py")
+        models_py = os.path.join(tmpdir, "src", "models.py")
+        with open(app_py, "w") as f:
+            f.write("pass")
+        with open(models_py, "w") as f:
+            f.write("pass")
+
+        worker._base_cwd = Path(tmpdir)
+        worker.llm = MagicMock()
+
+        # Simulate: first call creates files, then degenerate, then valid
+        write_response = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{
+                "id": "call_1",
+                "name": "write",
+                "arguments": {
+                    "file_path": "src/app.py",
+                    "content": "pass",
+                },
+            }],
+        }
+        empty_response = {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [_empty_args_write_call()],
+        }
+        valid_response = {
+            "role": "assistant",
+            "content": "Done",
+            "tool_calls": [],
+        }
+
+        worker.llm.call.side_effect = [
+            write_response,
+            empty_response,  # triggers recovery hint
+            valid_response,  # model recovers
+        ]
+
+        tool_executor = MagicMock()
+        tool_executor.execute.side_effect = [
+            MagicMock(is_error=False, output="File written"),
+        ]
+
+        list(worker.run(
+            session_id="test",
+            system_prompt="You are a test agent.",
+            user_message="Write tests for app.py",
+            tools=[{
+                "name": "write",
+                "type": "function",
+                "function": {},
+            }],
+            tool_executor=tool_executor,
+            max_iterations=50,
+        ))
+
+        # The third call should include the recovery hint with files
+        all_calls = worker.llm.call.call_args_list
+        assert len(all_calls) >= 3
+
+        third_call_messages = all_calls[2][0][0]
+        user_msgs = [
+            m for m in third_call_messages if m["role"] == "user"
+        ]
+        hint_msg = user_msgs[-1]["content"]
+        assert "src/app.py" in hint_msg
+        assert "Known workspace files" in hint_msg
