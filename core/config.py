@@ -533,6 +533,39 @@ class BudgetConfig(BaseModel):
         )
 
 
+class TokenEstimationConfig(BaseModel):
+    """M4.6: Token estimation configuration for pre-execution planning."""
+
+    enabled: bool = Field(
+        default=True,
+        description="Use Anthropic count_tokens() API for estimation",
+    )
+    fallback_to_heuristic: bool = Field(
+        default=True,
+        description="Fall back to char/3.5 heuristic on API failure",
+    )
+    target_budget: int = Field(
+        default=8192,
+        description="Default token budget per node",
+    )
+    overhead_margins: dict[str, int] = Field(
+        default_factory=lambda: {
+            "generator": 2200,
+            "evaluator": 900,
+            "planner": 550,
+        },
+        description="Per-agent-type overhead (system prompt + tools), measured + 5% buffer",
+    )
+    max_estimation_concurrency: int = Field(
+        default=10,
+        description="Max parallel count_tokens() calls",
+    )
+    cache_ttl_seconds: int = Field(
+        default=300,
+        description="Cache token estimation results for N seconds",
+    )
+
+
 class CodexBackendConfig(BaseModel):
     """M4.4: Configuration for the Codex CLI backend."""
     enabled: bool = Field(

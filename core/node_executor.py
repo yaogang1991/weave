@@ -234,7 +234,7 @@ class NodeExecutor:
                     "input_tokens": token_usage.get("input_tokens", 0),
                     "output_tokens": token_usage.get("output_tokens", 0),
                     "total_tokens": total,
-                })
+                }, actual_tokens=total)
 
             # -- Evaluation gate --
             # Assign output_artifacts BEFORE evaluation so evaluator can use them

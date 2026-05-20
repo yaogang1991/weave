@@ -124,3 +124,92 @@ class TestEnums:
 
     def test_risk_level_ordering(self):
         assert RiskLevel.LOW < RiskLevel.MEDIUM < RiskLevel.HIGH < RiskLevel.CRITICAL
+
+
+class TestDAGNodeTokenBudget:
+    """M4.6 Phase 2: Token budget fields on DAGNode."""
+
+    def test_default_token_budget(self):
+        node = DAGNode(id="test", agent_type="generator", task_description="t")
+        assert node.token_budget == 8192
+        assert node.estimated_tokens == 0
+        assert node.actual_tokens == 0
+
+    def test_custom_token_budget(self):
+        node = DAGNode(
+            id="test", agent_type="generator", task_description="t",
+            token_budget=4096,
+        )
+        assert node.token_budget == 4096
+
+    def test_set_estimated_tokens(self):
+        node = DAGNode(
+            id="test", agent_type="generator", task_description="t",
+            estimated_tokens=3500,
+        )
+        assert node.estimated_tokens == 3500
+
+    def test_set_actual_tokens(self):
+        node = DAGNode(
+            id="test", agent_type="generator", task_description="t",
+            actual_tokens=4200,
+        )
+        assert node.actual_tokens == 4200
+
+    def test_backward_compat_no_new_fields(self):
+        node = DAGNode(id="test", agent_type="generator", task_description="t")
+        dumped = node.model_dump()
+        assert "token_budget" in dumped
+        assert dumped["token_budget"] == 8192
+
+    def test_model_copy_updates(self):
+        dag = DAG()
+        node = DAGNode(id="test", agent_type="generator", task_description="t")
+        dag.add_node(node)
+        updated = dag.update_node(
+            "test", estimated_tokens=3500, actual_tokens=4200,
+        )
+        assert updated.estimated_tokens == 3500
+        assert updated.actual_tokens == 4200
+
+    def test_serialization_round_trip(self):
+        node = DAGNode(
+            id="test", agent_type="gen", task_description="t",
+            token_budget=4096, estimated_tokens=3500, actual_tokens=4200,
+        )
+        dumped = node.model_dump()
+        restored = DAGNode.model_validate(dumped)
+        assert restored.token_budget == 4096
+        assert restored.estimated_tokens == 3500
+        assert restored.actual_tokens == 4200
+
+    def test_old_dict_backward_compat(self):
+        old = {"id": "x", "agent_type": "gen", "task_description": "test"}
+        node = DAGNode.model_validate(old)
+        assert node.token_budget == 8192
+        assert node.estimated_tokens == 0
+        assert node.actual_tokens == 0
+
+
+class TestDAGTokenBudget:
+    """M4.6 Phase 2: DAG total_token_budget property."""
+
+    def test_total_token_budget_default(self):
+        dag = DAG()
+        dag.add_node(DAGNode(id="a", agent_type="gen", task_description="t"))
+        dag.add_node(DAGNode(id="b", agent_type="gen", task_description="t"))
+        assert dag.total_token_budget == 16384
+
+    def test_total_token_budget_mixed(self):
+        dag = DAG()
+        dag.add_node(DAGNode(
+            id="a", agent_type="gen", task_description="t", token_budget=4096,
+        ))
+        dag.add_node(DAGNode(
+            id="b", agent_type="gen", task_description="t", token_budget=8192,
+        ))
+        assert dag.total_token_budget == 12288
+
+    def test_total_token_budget_empty(self):
+        dag = DAG()
+        assert dag.total_token_budget == 0
