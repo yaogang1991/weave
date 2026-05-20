@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
-import sys
 import threading
 import traceback
 from dataclasses import dataclass
@@ -146,7 +145,7 @@ class NodeExecutor:
         try:
             while True:
                 # === Stage 1: Prepare ===
-                prep = self._prepare_stage(dag, node_id)
+                prep = await self._prepare_stage(dag, node_id)
                 if prep is None:
                     return
                 node_workspace = prep.node_workspace
@@ -166,9 +165,9 @@ class NodeExecutor:
                     BudgetExhaustedError,
                 ):
                     raise  # System errors -> outer catch
-                except Exception:
+                except Exception as exc:
                     should_retry = self._handle_exec_error(
-                        dag, node_id, node_workspace,
+                        dag, node_id, node_workspace, exc,
                     )
                     if should_retry:
                         node_workspace = self._cleanup_for_retry(
@@ -270,7 +269,7 @@ class NodeExecutor:
     # Stage 1: Prepare
     # ------------------------------------------------------------------
 
-    def _prepare_stage(
+    async def _prepare_stage(
         self, dag: DAG, node_id: str,
     ) -> _PrepareResult | None:
         """Check deps, budget, set RUNNING, register watchdog, setup workspace."""
@@ -336,18 +335,14 @@ class NodeExecutor:
         if current_task:
             self._running_tasks[node_id] = current_task
 
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._emit(ExecutionEvent(
-                node_id=node_id,
-                event_type="started",
-                details={
-                    "agent_type": node.agent_type,
-                    "task": node.task_description[:100],
-                },
-            )))
-        except RuntimeError:
-            pass
+        await self._emit(ExecutionEvent(
+            node_id=node_id,
+            event_type="started",
+            details={
+                "agent_type": node.agent_type,
+                "task": node.task_description[:100],
+            },
+        ))
 
         from core.models import NodeWorkspaceStrategy
         node_workspace = None
@@ -369,177 +364,11 @@ class NodeExecutor:
                     "Node %s: setup_node failed (%s), using shared workspace",
                     node_id, exc,
                 )
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="workspace_isolation_failed",
-                        details={"error": str(exc)},
-                    )))
-                except RuntimeError:
-                    pass
-            previous_artifacts = node.output_artifacts or []
-            reported_artifacts = result.get("artifacts", [])
-            # Preserve previous artifacts on retry: agent may only read/test
-            # without write/edit, leaving artifacts empty (#165).
-            if not reported_artifacts and previous_artifacts:
-                reported_artifacts = previous_artifacts
-                logger.info(
-                    "Node %s: retry produced no new artifacts, preserving %d from previous attempt",
-                    node_id, len(previous_artifacts),
-                )
-            node = dag.update_node(node_id, output_artifacts=reported_artifacts)
-            logger.debug(
-                "Node %s (%s) produced artifacts: %s",
-                node_id, node.agent_type, node.output_artifacts,
-            )
-
-            # -- Zero-output fast-fail (#229) --
-            # #626: For test nodes, check if upstream produced artifacts.
-            # If so, inherit them and continue instead of failing — the
-            # evaluator can still run on the implementation files.
-            if (
-                not node.output_artifacts
-                and self._requires_output_artifacts(node)
-            ):
-                upstream_artifacts = self._collect_upstream_artifacts(
-                    dag, node_id,
-                )
-                if (
-                    upstream_artifacts
-                    and self._is_test_node(node)
-                ):
-                    # Inherit artifacts but do NOT set SUCCESS or return —
-                    # let the node continue through quality gate and
-                    # evaluator, which decide the final status.
-                    logger.warning(
-                        "Node %s (%s) produced zero output but upstream has "
-                        "%d artifacts — inheriting for evaluation (#626)",
-                        node_id, node.agent_type, len(upstream_artifacts),
-                    )
-                    node = dag.update_node(
-                        node_id,
-                        output_artifacts=upstream_artifacts,
-                    )
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="degeneration_recovered",
-                        details={
-                            "reason": "inherited_upstream_artifacts",
-                            "inherited_count": len(upstream_artifacts),
-                        },
-                    ))
-                    # Fall through to quality gate + evaluator
-                else:
-                    node = dag.update_node(
-                        node_id,
-                        error=(
-                            f"Node produced zero output artifacts. "
-                            f"Agent type: {node.agent_type}, "
-                            f"task: {node.task_description[:200]}. "
-                            f"This typically indicates the agent exhausted "
-                            f"its iteration budget without writing any files."
-                        ),
-                        status=NodeStatus.FAILED,
-                        completed_at=datetime.now(timezone.utc),
-                        retry_count=node.retry_count + 1,
-                    )
-                    logger.warning(
-                        "Node %s (%s) fast-failed: zero output artifacts",
-                        node_id, node.agent_type,
-                    )
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="failed",
-                        details={
-                            "reason": "zero_output_artifacts",
-                            "agent_type": node.agent_type,
-                        },
-                    ))
-                    return
-
-            # Test file enforcement (#247): delegated to QualityGate.
-            test_check = self._quality_gate.check_test_file_requirement(
-                node, node_id,
-            )
-            if test_check is not None:
-                node = dag.update_node(
-                    node_id,
-                    eval_feedback=test_check.eval_feedback,
-                    error=test_check.error,
-                    status=test_check.node_status,
-                    completed_at=datetime.now(timezone.utc),
-                )
                 await self._emit(ExecutionEvent(
                     node_id=node_id,
-                    event_type=test_check.event_type,
-                    details=test_check.event_details,
+                    event_type="workspace_isolation_failed",
+                    details={"error": str(exc)},
                 ))
-                return
-
-            if self.evaluator and node.success_criteria and node.agent_type == "generator":
-                if not self.work_dir:
-                    logger.error(
-                        "Node %s: work_dir not set — cannot evaluate safely. "
-                        "Aborting evaluation to prevent incorrect results.",
-                        node_id,
-                    )
-                    node = dag.update_node(
-                        node_id,
-                        status=NodeStatus.FAILED,
-                        error=(
-                            "Evaluation skipped: work_dir not configured. "
-                            "Pass --project to set the working directory."
-                        ),
-                        completed_at=datetime.now(timezone.utc),
-                    )
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="failed",
-                        details={"reason": "no_work_dir"},
-                    ))
-                    return
-                eval_work_dir = workspace_path or self.work_dir
-                # M4.5: evaluate_stage with its own stall timeout
-                from core.progress import ProgressTracker
-                eval_stall_timeout = self._get_stall_timeout("evaluator")
-                eval_tracker = ProgressTracker(
-                    stall_timeout=eval_stall_timeout,
-                )
-                eval_timeout = self._get_node_timeout("evaluator")
-                try:
-                    eval_result = await asyncio.wait_for(
-                        asyncio.get_running_loop().run_in_executor(
-                            self._executor,
-                            functools.partial(
-                                self.evaluator.evaluate_stage,
-                                node_id, node_id, node.success_criteria, self.artifact_path,
-                                work_dir=eval_work_dir,
-                                output_artifacts=node.output_artifacts or None,
-                                owned_files=node.owned_files or None,
-                                progress_tracker=eval_tracker,  # M4.5
-                            ),
-                        ),
-                        timeout=eval_timeout,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Node %s: evaluate_stage timed out after %ds",
-                        node_id, eval_timeout,
-                    )
-                    node = dag.update_node(
-                        node_id,
-                        status=NodeStatus.FAILED,
-                        error=f"Evaluation timed out after {eval_timeout}s",
-                        completed_at=datetime.now(timezone.utc),
-                    )
-                    await self._emit(ExecutionEvent(
-                        node_id=node_id,
-                        event_type="failed",
-                        details={"reason": "eval_timeout", "timeout": eval_timeout},
-                    ))
-                    return
->>>>>>> origin/refactor/m45-timeout-redesign
 
         return _PrepareResult(
             input_artifacts=input_artifacts,
@@ -556,6 +385,7 @@ class NodeExecutor:
         dag: DAG,
         node_id: str,
         node_workspace: Any,
+        exc: Exception,
     ) -> bool:
         """Classify execution error and decide retry.
 
@@ -566,10 +396,9 @@ class NodeExecutor:
         if node.health_status == NodeHealth.DEAD:
             return False
 
-        exc_type, exc_value, exc_tb = sys.exc_info()
         error_str = (
-            f"{exc_type.__name__}: {exc_value}\n"
-            f"{''.join(traceback.format_tb(exc_tb))}"
+            f"{type(exc).__name__}: {exc}\n"
+            f"{''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))}"
         )
         dag.update_node(node_id, error=error_str)
 
@@ -586,7 +415,7 @@ class NodeExecutor:
                     event_type="retrying",
                     details={
                         "attempt": node.retry_count,
-                        "error": str(exc_value),
+                        "error": str(exc),
                     },
                 )))
             except RuntimeError:
@@ -605,7 +434,7 @@ class NodeExecutor:
                     node_id=node_id,
                     event_type="failed",
                     details={
-                        "error": str(exc_value),
+                        "error": str(exc),
                         "attempts": node.retry_count,
                     },
                 )))
