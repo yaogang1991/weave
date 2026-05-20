@@ -345,8 +345,8 @@ class BackendManager:
                         f"git worktree add failed (rc={wt_result.returncode}): "
                         f"{wt_result.stderr.strip()}"
                     )
-            except (RuntimeError, Exception):
-                # Git not available or worktree failed, fall back to SHARED
+            except Exception:
+                logger.debug("Worktree setup failed, falling back to SHARED", exc_info=True)
                 import shutil
                 shutil.rmtree(node_work_dir, ignore_errors=True)
                 return NodeWorkspace(
@@ -400,7 +400,7 @@ class BackendManager:
                     cwd=self.repo_root, timeout=30,
                 )
             except Exception:
-                pass
+                logger.debug("Worktree cleanup failed", exc_info=True)
         elif ws.strategy.value == "copy" and ws_path.exists():
             import shutil
             shutil.rmtree(ws_path, ignore_errors=True)
