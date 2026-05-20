@@ -143,7 +143,7 @@ class TestPlanIntegration:
         call_count = 0
         captured_messages = []
 
-        def mock_call(messages, tools=None):
+        def mock_call(messages, tools=None, **kwargs):
             nonlocal call_count
             call_count += 1
             captured_messages.append([dict(m) for m in messages])
