@@ -277,15 +277,27 @@ class AgentWorker:
                     "role": "assistant",
                     "content": "I need to call a tool to continue.",
                 })
+                # #625: Include known workspace files in recovery hint
+                # to help test nodes understand the generated codebase.
+                recovery_hint = (
+                    "CRITICAL: Your previous tool call had empty arguments {}. "
+                    "You MUST provide complete arguments in the correct format. "
+                    "For example, when calling 'write', include both 'file_path' "
+                    "and 'content'. When calling 'edit', include 'file_path', "
+                    "'old_string', and 'new_string'. Do NOT repeat the empty call."
+                )
+                if self.artifacts:
+                    file_list = "\n".join(
+                        f"  - {f}" for f in self.artifacts[:50]
+                    )
+                    recovery_hint += (
+                        f"\n\nKnown workspace files:\n{file_list}\n"
+                        "Use the READ tool to inspect these files before "
+                        "writing tests or making changes."
+                    )
                 messages.append({
                     "role": "user",
-                    "content": (
-                        "CRITICAL: Your previous tool call had empty arguments {}. "
-                        "You MUST provide complete arguments in the correct format. "
-                        "For example, when calling 'write', include both 'file_path' "
-                        "and 'content'. When calling 'edit', include 'file_path', "
-                        "'old_string', and 'new_string'. Do NOT repeat the empty call."
-                    ),
+                    "content": recovery_hint,
                 })
                 continue  # Give model another chance without counting toward limit
 
