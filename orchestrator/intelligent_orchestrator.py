@@ -262,7 +262,10 @@ class IntelligentOrchestrator:
                     ),
                 })
                 messages = self._prune_messages_for_size(messages)
-                response = self.llm.call(messages, tools=[])
+                response = self.llm.call(
+                    messages, tools=[],
+                    max_tokens_override=self._PLANNER_MAX_TOKENS,
+                )
                 plan_data = extract_json(response.get("content", ""))
                 if plan_data is None:
                     raise ValueError(
@@ -557,7 +560,10 @@ class IntelligentOrchestrator:
             {"role": "user", "content": f"Handle failure of node {failed_node_id}"},
         ]
 
-        response = self.llm.call(messages, tools=[])
+        response = self.llm.call(
+            messages, tools=[],
+            max_tokens_override=self._PLANNER_MAX_TOKENS,
+        )
 
         try:
             decision_data = extract_json(response.get("content", ""))
@@ -728,7 +734,10 @@ class IntelligentOrchestrator:
         plan_data = None
         for attempt in range(max_retries + 1):
             messages = self._prune_messages_for_size(messages)
-            response = self.llm.call(messages, tools=[])
+            response = self.llm.call(
+                messages, tools=[],
+                max_tokens_override=self._PLANNER_MAX_TOKENS,
+            )
             plan_data = extract_json(response.get("content", ""))
             if plan_data is not None:
                 break
