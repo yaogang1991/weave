@@ -227,3 +227,85 @@ class TestUpstreamRetryGuard:
         # No upstream_retry event should be emitted
         upstream_events = [e for e in events if e.event_type == "upstream_retry"]
         assert len(upstream_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_no_upstream_retry_when_target_partial_pass(self):
+        """PARTIAL_PASS target should also skip UPSTREAM_RETRY (#630)."""
+        dag = DAG(reasoning="test")
+        gen_node = DAGNode(
+            id="gen",
+            agent_type="generator",
+            task_description="impl",
+            max_retries=3,
+        )
+        eval_node = DAGNode(
+            id="eval",
+            agent_type="evaluator",
+            task_description="eval",
+        )
+        dag.add_node(gen_node)
+        dag.add_node(eval_node)
+        dag.add_edge("gen", "eval")
+
+        gen_node.status = NodeStatus.PARTIAL_PASS
+        gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
+        gen_node.output_artifacts = ["main.py"]
+
+        eval_node.status = NodeStatus.FAILED
+        eval_node.error = "Eval timeout"
+
+        executed_nodes = []
+
+        async def capturing_executor(node, artifacts, **kwargs):
+            executed_nodes.append(node.id)
+            return {"status": "completed", "summary": "ok", "artifacts": []}
+
+        async def failure_handler(dag, node_id, error):
+            return FailureDecision(action="retry", reasoning="fix")
+
+        engine = DAGExecutionEngine(capturing_executor, failure_handler)
+        await engine.execute(dag)
+
+        assert "gen" not in executed_nodes
+        assert "eval" in executed_nodes
+
+    @pytest.mark.asyncio
+    async def test_no_upstream_retry_when_target_warned(self):
+        """WARNED target should also skip UPSTREAM_RETRY (#630)."""
+        dag = DAG(reasoning="test")
+        gen_node = DAGNode(
+            id="gen",
+            agent_type="generator",
+            task_description="impl",
+            max_retries=3,
+        )
+        eval_node = DAGNode(
+            id="eval",
+            agent_type="evaluator",
+            task_description="eval",
+        )
+        dag.add_node(gen_node)
+        dag.add_node(eval_node)
+        dag.add_edge("gen", "eval")
+
+        gen_node.status = NodeStatus.WARNED
+        gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
+        gen_node.output_artifacts = ["main.py"]
+
+        eval_node.status = NodeStatus.FAILED
+        eval_node.error = "Eval timeout"
+
+        executed_nodes = []
+
+        async def capturing_executor(node, artifacts, **kwargs):
+            executed_nodes.append(node.id)
+            return {"status": "completed", "summary": "ok", "artifacts": []}
+
+        async def failure_handler(dag, node_id, error):
+            return FailureDecision(action="retry", reasoning="fix")
+
+        engine = DAGExecutionEngine(capturing_executor, failure_handler)
+        await engine.execute(dag)
+
+        assert "gen" not in executed_nodes
+        assert "eval" in executed_nodes

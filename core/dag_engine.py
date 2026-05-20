@@ -463,7 +463,7 @@ class DAGExecutionEngine:
                                 target_succeeded = (
                                     target_id
                                     and dag.nodes[target_id].agent_type == "generator"
-                                    and dag.nodes[target_id].status == NodeStatus.SUCCESS
+                                    and self._is_terminal_success(dag.nodes[target_id].status)
                                 )
                                 if target_succeeded:
                                     # Target already passed — just retry the evaluator
