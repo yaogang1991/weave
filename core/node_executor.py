@@ -618,9 +618,26 @@ class NodeExecutor:
         Stall detection is the sole kill mechanism (no max_total).
         """
         from core.progress import ProgressTracker
+        from pathlib import Path as _Path
+
+        file_count = 0
+        test_count = 0
+        dep_count = len(getattr(node, 'dependencies', None) or [])
+        if workspace_path:
+            wp = _Path(workspace_path)
+            if wp.is_dir():
+                file_count = sum(
+                    1 for p in wp.rglob("*.py")
+                    if "test" not in p.name.lower() and "__pycache__" not in str(p)
+                )
+                test_count = sum(
+                    1 for p in wp.rglob("*.py")
+                    if "test" in p.name.lower() and "__pycache__" not in str(p)
+                )
 
         stall_timeout = self._get_stall_timeout(
-            node.agent_type, node=node, workspace_path=workspace_path,
+            node.agent_type,
+            file_count=file_count, test_count=test_count, dep_count=dep_count,
         )
 
         tracker = ProgressTracker(stall_timeout=stall_timeout)
@@ -730,13 +747,14 @@ class NodeExecutor:
         return max(1, int(interval * threshold))
 
     def _get_stall_timeout(
-        self, agent_type: str, node: DAGNode | None = None,
-        workspace_path: str | None = None,
+        self, agent_type: str, *,
+        file_count: int = 0, test_count: int = 0, dep_count: int = 0,
     ) -> int:
         """Return dynamic stall timeout (M4.5)."""
         if self._node_timeout_config is not None:
             return self._node_timeout_config.stall_timeout_for(
-                agent_type, node=node, workspace_path=workspace_path,
+                agent_type,
+                file_count=file_count, test_count=test_count, dep_count=dep_count,
             )
         return self._get_node_timeout(agent_type)
 
