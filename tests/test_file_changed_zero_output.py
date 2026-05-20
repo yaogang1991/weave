@@ -128,3 +128,173 @@ class TestRequiresOutputArtifacts:
             success_criteria=[],
         )
         assert DAGExecutionEngine._requires_output_artifacts(node) is False
+
+
+# -- #626: Test node deep degeneration recovery --
+
+from core.node_executor import NodeExecutor  # noqa: E402
+from core.models import DAG, NodeStatus  # noqa: E402
+from core.dag_models import DAGEdge  # noqa: E402
+
+
+class TestIsTestNode:
+    """Verify _is_test_node heuristic (#626)."""
+
+    def _make_node(self, task):
+        return DAGNode(
+            id="n1", agent_type="generator", task_description=task,
+        )
+
+    def test_explicit_test_task(self):
+        node = self._make_node("Write unit tests for the API module")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_tests_keyword(self):
+        node = self._make_node("Create tests for authentication")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_spec_keyword(self):
+        node = self._make_node("Write spec verification for user model")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_implementation_task(self):
+        node = self._make_node("Implement REST API endpoints for users")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_case_insensitive(self):
+        node = self._make_node("Add TEST coverage for the parser")
+        assert NodeExecutor._is_test_node(node) is True
+
+    def test_contest_no_false_positive(self):
+        node = self._make_node("Contest registration system")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_investigate_no_false_positive(self):
+        node = self._make_node("Investigate memory leaks in production")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_verify_no_false_positive(self):
+        node = self._make_node("Verify the output format is correct")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_coverage_no_false_positive(self):
+        node = self._make_node("Build coverage report dashboard for metrics")
+        assert NodeExecutor._is_test_node(node) is False
+
+
+class TestCollectUpstreamArtifacts:
+    """Verify _collect_upstream_artifacts (#626)."""
+
+    def test_collects_from_successful_deps(self):
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.SUCCESS,
+            output_artifacts=["src/api.py", "src/models.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == ["src/api.py", "src/models.py"]
+
+    def test_skips_failed_deps(self):
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.FAILED,
+            output_artifacts=["src/api.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == []
+
+    def test_no_deps_returns_empty(self):
+        node = DAGNode(
+            id="plan", agent_type="planner",
+            task_description="Plan the project",
+        )
+        dag = DAG(nodes={"plan": node}, edges=[])
+        result = NodeExecutor._collect_upstream_artifacts(dag, "plan")
+        assert result == []
+
+    def test_collects_from_partial_pass_deps(self):
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.PARTIAL_PASS,
+            output_artifacts=["src/api.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == ["src/api.py"]
+
+    def test_collects_from_warned_deps(self):
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.WARNED,
+            output_artifacts=["src/api.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == ["src/api.py"]
+
+    def test_deduplicates_overlapping_artifacts(self):
+        impl_a = DAGNode(
+            id="impl_a", agent_type="generator",
+            task_description="Implement API core",
+            status=NodeStatus.SUCCESS,
+            output_artifacts=["src/api.py", "src/utils.py"],
+        )
+        impl_b = DAGNode(
+            id="impl_b", agent_type="generator",
+            task_description="Implement API extras",
+            status=NodeStatus.SUCCESS,
+            output_artifacts=["src/api.py", "src/helpers.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl_a": impl_a, "impl_b": impl_b, "test": test_node},
+            edges=[
+                DAGEdge(from_node="impl_a", to_node="test"),
+                DAGEdge(from_node="impl_b", to_node="test"),
+            ],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert sorted(result) == ["src/api.py", "src/helpers.py", "src/utils.py"]
+        assert len(result) == 3  # no duplicates
