@@ -290,7 +290,7 @@ class NodeExecutor:
                         },
                     ))
                     # Fall through to quality gate + evaluator
-                elif not upstream_artifacts or not self._is_test_node(node):
+                else:
                     node = dag.update_node(
                         node_id,
                         error=(
