@@ -347,6 +347,34 @@ class ImpactConfig(BaseModel):
     )
 
 
+class EvalTimeoutScaleConfig(BaseModel):
+    """Dynamic evaluator timeout scaling based on project size (#621).
+
+    When enabled, the evaluator timeout is calculated as:
+        base_timeout + (file_count * per_file_seconds)
+    This prevents timeout failures on large generated projects.
+    """
+
+    enabled: bool = Field(
+        default=os.getenv(
+            "WEAVE_EVAL_TIMEOUT_SCALE", "true",
+        ).lower() not in ("false", "0", "no"),
+        description="Enable dynamic evaluator timeout scaling",
+    )
+    per_file_seconds: int = Field(
+        default=int(os.getenv(
+            "WEAVE_EVAL_TIMEOUT_PER_FILE", "5",
+        )),
+        description="Additional seconds per output file for evaluator timeout",
+    )
+    max_timeout: int = Field(
+        default=int(os.getenv(
+            "WEAVE_EVAL_TIMEOUT_MAX", "1200",
+        )),
+        description="Upper cap for dynamically scaled evaluator timeout",
+    )
+
+
 class NodeTimeoutConfig(BaseModel):
     """Per-agent-type node execution timeout (#360 PR2).
 
@@ -373,10 +401,31 @@ class NodeTimeoutConfig(BaseModel):
         },
         description="Per-agent-type timeout overrides (agent_type -> seconds)",
     )
+    eval_scale: EvalTimeoutScaleConfig = Field(
+        default_factory=EvalTimeoutScaleConfig,
+        description="Dynamic evaluator timeout scaling (#621)",
+    )
 
-    def timeout_for(self, agent_type: str) -> int:
-        """Return timeout for the given agent type."""
-        return self.overrides.get(agent_type, self.default_timeout)
+    def timeout_for(
+        self, agent_type: str, artifact_count: int = 0,
+    ) -> int:
+        """Return timeout for the given agent type.
+
+        For evaluator nodes with eval_scale enabled, dynamically adjusts
+        the timeout based on the number of output artifacts from upstream
+        nodes (proxy for project size).
+        """
+        base = self.overrides.get(agent_type, self.default_timeout)
+
+        if (
+            agent_type == "evaluator"
+            and self.eval_scale.enabled
+            and artifact_count > 0
+        ):
+            scaled = base + artifact_count * self.eval_scale.per_file_seconds
+            return min(scaled, self.eval_scale.max_timeout)
+
+        return base
 
     @property
     def min_timeout(self) -> int:
