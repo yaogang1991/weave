@@ -3,7 +3,7 @@ import asyncio
 import time
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from core.config import TokenEstimationConfig
 from core.dag_models import DAGNode
@@ -72,7 +72,7 @@ class TestAPIEstimation:
     def _mock_client(self, input_tokens=500):
         mock_result = MagicMock(input_tokens=input_tokens)
         client = MagicMock()
-        client.messages.count_tokens.return_value = mock_result
+        client.messages.count_tokens = AsyncMock(return_value=mock_result)
         return client
 
     def test_api_success(self):
@@ -87,7 +87,7 @@ class TestAPIEstimation:
 
     def test_api_failure_fallback(self):
         client = MagicMock()
-        client.messages.count_tokens.side_effect = Exception("rate limit")
+        client.messages.count_tokens = AsyncMock(side_effect=Exception("rate limit"))
         est = _estimator(client=client)
         ctx = _ctx(task="test")
         result = asyncio.get_event_loop().run_until_complete(
@@ -97,7 +97,7 @@ class TestAPIEstimation:
 
     def test_api_failure_no_fallback_raises(self):
         client = MagicMock()
-        client.messages.count_tokens.side_effect = Exception("fail")
+        client.messages.count_tokens = AsyncMock(side_effect=Exception("fail"))
         est = _estimator(client=client, fallback_to_heuristic=False)
         ctx = _ctx(task="test")
         with pytest.raises(Exception, match="fail"):
@@ -119,7 +119,7 @@ class TestCaching:
     def test_cache_hit(self):
         client = MagicMock()
         mock_result = MagicMock(input_tokens=100)
-        client.messages.count_tokens.return_value = mock_result
+        client.messages.count_tokens = AsyncMock(return_value=mock_result)
         est = _estimator(client=client)
         ctx = _ctx(task="same task")
         loop = asyncio.get_event_loop()
@@ -132,7 +132,7 @@ class TestCaching:
     def test_cache_expiry(self):
         client = MagicMock()
         mock_result = MagicMock(input_tokens=100)
-        client.messages.count_tokens.return_value = mock_result
+        client.messages.count_tokens = AsyncMock(return_value=mock_result)
         est = _estimator(client=client, cache_ttl_seconds=0)
         ctx = _ctx(task="same task")
         loop = asyncio.get_event_loop()
@@ -147,7 +147,7 @@ class TestBatchEstimation:
     def test_batch_all_succeed(self):
         client = MagicMock()
         mock_result = MagicMock(input_tokens=100)
-        client.messages.count_tokens.return_value = mock_result
+        client.messages.count_tokens = AsyncMock(return_value=mock_result)
         est = _estimator(client=client)
         nodes = [(f"n{i}", _ctx(task=f"task {i}")) for i in range(5)]
         results = asyncio.get_event_loop().run_until_complete(
@@ -167,7 +167,7 @@ class TestBatchEstimation:
             return MagicMock(input_tokens=100)
 
         client = MagicMock()
-        client.messages.count_tokens.side_effect = side_effect
+        client.messages.count_tokens = AsyncMock(side_effect=side_effect)
         est = _estimator(client=client)
         nodes = [(f"n{i}", _ctx(task=f"task {i}")) for i in range(3)]
         results = asyncio.get_event_loop().run_until_complete(

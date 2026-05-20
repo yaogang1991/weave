@@ -2,7 +2,7 @@
 import asyncio
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from core.config import TokenEstimationConfig
 from core.dag_models import DAG, DAGNode
@@ -58,7 +58,7 @@ class TestTokenEstimationPipeline:
     def test_api_estimation_with_mock(self):
         mock_result = MagicMock(input_tokens=3500)
         client = MagicMock()
-        client.messages.count_tokens.return_value = mock_result
+        client.messages.count_tokens = AsyncMock(return_value=mock_result)
         cfg = TokenEstimationConfig()
         est = TokenEstimator(cfg, client=client)
         ctx = NodeTokenContext(
