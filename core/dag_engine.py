@@ -456,7 +456,29 @@ class DAGExecutionEngine:
                             # re-run the evaluator.
                             if node.agent_type == "evaluator":
                                 target_id = self._find_evaluator_target(dag, failed_id)
-                                if target_id and dag.nodes[target_id].agent_type == "generator":
+                                # #630: Skip UPSTREAM_RETRY when the target node
+                                # already succeeded. Re-triggering a successful
+                                # node can cause regression if the API is in a
+                                # low-quality phase (degenerate empty-args).
+                                target_succeeded = (
+                                    target_id
+                                    and dag.nodes[target_id].agent_type == "generator"
+                                    and self._is_terminal_success(dag.nodes[target_id].status)
+                                )
+                                if target_succeeded:
+                                    # Target already passed — just retry the evaluator
+                                    logger.info(
+                                        "Evaluator %s failed but target %s already "
+                                        "succeeded — retrying evaluator directly (#630)",
+                                        failed_id, target_id,
+                                    )
+                                    dag.update_node(
+                                        failed_id,
+                                        status=NodeStatus.RETRYING,
+                                        error="",
+                                    )
+                                    await self._node_executor.execute_node(dag, failed_id)
+                                elif target_id and dag.nodes[target_id].agent_type == "generator":
                                     # Check retry budget for upstream generator
                                     gen_node = dag.nodes[target_id]
                                     if gen_node.retry_count >= gen_node.max_retries:
