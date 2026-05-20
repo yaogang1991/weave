@@ -166,6 +166,21 @@ class TestIsTestNode:
         node = self._make_node("Add TEST coverage for the parser")
         assert NodeExecutor._is_test_node(node) is True
 
+    def test_contest_no_false_positive(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Contest registration system")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_investigate_no_false_positive(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Investigate memory leaks in production")
+        assert NodeExecutor._is_test_node(node) is False
+
+    def test_verify_keyword(self):
+        from core.node_executor import NodeExecutor
+        node = self._make_node("Verify the output format is correct")
+        assert NodeExecutor._is_test_node(node) is True
+
 
 class TestCollectUpstreamArtifacts:
     """Verify _collect_upstream_artifacts (#626)."""
@@ -227,3 +242,49 @@ class TestCollectUpstreamArtifacts:
         dag = DAG(nodes={"plan": node}, edges=[])
         result = NodeExecutor._collect_upstream_artifacts(dag, "plan")
         assert result == []
+
+    def test_collects_from_partial_pass_deps(self):
+        from core.models import DAG, DAGNode, NodeStatus
+        from core.dag_models import DAGEdge
+        from core.node_executor import NodeExecutor
+
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.PARTIAL_PASS,
+            output_artifacts=["src/api.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == ["src/api.py"]
+
+    def test_collects_from_warned_deps(self):
+        from core.models import DAG, DAGNode, NodeStatus
+        from core.dag_models import DAGEdge
+        from core.node_executor import NodeExecutor
+
+        impl_node = DAGNode(
+            id="impl", agent_type="generator",
+            task_description="Implement API",
+            status=NodeStatus.WARNED,
+            output_artifacts=["src/api.py"],
+        )
+        test_node = DAGNode(
+            id="test", agent_type="generator",
+            task_description="Write tests for API",
+            status=NodeStatus.RUNNING,
+        )
+        dag = DAG(
+            nodes={"impl": impl_node, "test": test_node},
+            edges=[DAGEdge(from_node="impl", to_node="test")],
+        )
+        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        assert result == ["src/api.py"]

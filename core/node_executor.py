@@ -19,6 +19,7 @@ import asyncio
 import concurrent.futures
 import functools
 import logging
+import re
 import threading
 import traceback
 from datetime import datetime, timezone
@@ -770,15 +771,14 @@ class NodeExecutor:
 
     # -- #626: Test node deep degeneration recovery helpers --
 
-    _TEST_NODE_KEYWORDS: frozenset[str] = frozenset({
-        "test", "tests", "spec", "specs", "verify", "coverage",
-    })
+    _TEST_NODE_PATTERN: re.Pattern = re.compile(
+        r'\b(tests?|spec|specs|verify|coverage)\b', re.IGNORECASE,
+    )
 
     @classmethod
     def _is_test_node(cls, node: DAGNode) -> bool:
         """Heuristic: detect test-generation nodes by task description (#626)."""
-        task_lower = node.task_description.lower()
-        return any(kw in task_lower for kw in cls._TEST_NODE_KEYWORDS)
+        return bool(cls._TEST_NODE_PATTERN.search(node.task_description))
 
     @staticmethod
     def _collect_upstream_artifacts(dag: DAG, node_id: str) -> list[str]:
@@ -799,7 +799,7 @@ class NodeExecutor:
             dep_node = dag.nodes.get(dep_id)
             if (
                 dep_node
-                and dep_node.status == NodeStatus.SUCCESS
+                and QualityGate.is_terminal_success(dep_node.status)
                 and dep_node.output_artifacts
             ):
                 artifacts.extend(dep_node.output_artifacts)
