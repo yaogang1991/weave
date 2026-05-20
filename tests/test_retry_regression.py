@@ -8,6 +8,7 @@ Verifies:
 """
 from unittest.mock import MagicMock, patch
 
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 from core.models import SuccessCriterion, CriterionType
 
@@ -19,9 +20,9 @@ class TestCoverageParseTolerance:
         engine = EvaluatorEngine(MagicMock())
         (tmp_path / "test_module.py").write_text("def test_x(): pass\n")
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
+        with patch("evaluator.runner.run_with_progress") as mock_run:
             # pytest+coverage runs with returncode 0 (tests pass) but no TOTAL line
-            mock_run.return_value = MagicMock(
+            mock_run.return_value = SubprocessResult(
                 returncode=0,
                 stdout="test_session starts\n2 passed\n",
                 stderr="",
@@ -39,8 +40,8 @@ class TestCoverageParseTolerance:
         """When tests fail AND coverage can't be parsed, evaluation should fail."""
         engine = EvaluatorEngine(MagicMock())
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = SubprocessResult(
                 returncode=1,
                 stdout="1 failed\n",
                 stderr="",
@@ -54,8 +55,8 @@ class TestCoverageParseTolerance:
         """Normal coverage parsing still works correctly."""
         engine = EvaluatorEngine(MagicMock())
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = SubprocessResult(
                 returncode=0,
                 stdout="Name        Stmts   Miss  Cover\n"
                        "module.py      20      4    80%\n"
@@ -71,8 +72,8 @@ class TestCoverageParseTolerance:
         """Coverage below target returns False."""
         engine = EvaluatorEngine(MagicMock())
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = SubprocessResult(
                 returncode=0,
                 stdout="TOTAL  20  10  50%\n",
                 stderr="",
@@ -97,20 +98,20 @@ class TestCoverageInEvaluationStage:
             SuccessCriterion(type=CriterionType.COVERAGE, target=80, description="coverage"),
         ]
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
+        with patch("evaluator.runner.run_with_progress") as mock_run:
             def fake_run(cmd, **kwargs):
                 if "pytest" in cmd and "--cov" in cmd:
                     # Coverage run: tests pass but no TOTAL line
-                    return MagicMock(returncode=0, stdout="2 passed\n", stderr="")
+                    return SubprocessResult(returncode=0, stdout="2 passed\n", stderr="")
                 if "pytest" in cmd:
-                    return MagicMock(returncode=0, stdout="2 passed\n", stderr="")
+                    return SubprocessResult(returncode=0, stdout="2 passed\n", stderr="")
                 if "autoflake" in cmd:
-                    return MagicMock(returncode=0, stdout="", stderr="")
+                    return SubprocessResult(returncode=0, stdout="", stderr="")
                 if "autopep8" in cmd:
-                    return MagicMock(returncode=0, stdout="", stderr="")
+                    return SubprocessResult(returncode=0, stdout="", stderr="")
                 if "flake8" in cmd:
-                    return MagicMock(returncode=0, stdout="", stderr="")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                    return SubprocessResult(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
 
             mock_run.side_effect = fake_run
             result = engine.evaluate_stage(

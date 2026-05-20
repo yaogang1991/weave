@@ -14,6 +14,7 @@ import pytest
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core.subprocess_runner import SubprocessResult  # noqa: E402
 from evaluator.engine import EvaluatorEngine  # noqa: E402
 from core.models import (  # noqa: E402, F401
     CriterionType,
@@ -75,7 +76,7 @@ class TestCoverageFileIsolation:
             captured_env.update(kwargs.get("env", {}))
             return original_run(cmd, **{k: v for k, v in kwargs.items() if k != "env"})
 
-        with patch("evaluator.runner.subprocess.run", side_effect=mock_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=mock_run):
             passed, msg = engine._run_tests(
                 work_dir, str(test_file), eval_id="sess-x_impl_mod",
             )
@@ -101,7 +102,7 @@ class TestCoverageFileIsolation:
             captured_env.update(kwargs.get("env", {}))
             return original_run(cmd, **{k: v for k, v in kwargs.items() if k != "env"})
 
-        with patch("evaluator.runner.subprocess.run", side_effect=mock_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=mock_run):
             passed, msg, auto = engine._check_coverage(
                 work_dir, 50,
                 output_artifacts=["mymod/core.py"],
@@ -130,13 +131,9 @@ class TestCoverageFileIsolation:
             cov = kwargs.get("env", {}).get("COVERAGE_FILE", "")
             if cov:
                 envs.append(cov)
-            result = MagicMock()
-            result.stdout = "TOTAL  100  10  90%"
-            result.stderr = ""
-            result.returncode = 0
-            return result
+            return SubprocessResult(returncode=0, stdout="TOTAL  100  10  90%", stderr="")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=capture_env):
+        with patch("evaluator.runner.run_with_progress", side_effect=capture_env):
             engine.evaluate_stage(
                 session_id="sess-par",
                 stage_name="impl_a",

@@ -378,11 +378,11 @@ class EvalTimeoutScaleConfig(BaseModel):
 
 
 class NodeTimeoutConfig(BaseModel):
-    """Per-agent-type node execution timeout (#360 PR2).
+    """Per-agent-type node execution timeout (#360 PR2, M4.5).
 
-    Replaces the former agent_timeout (flat int) and watchdog_overrides
-    with a unified configuration.  Timeout enforcement lives in
-    dag_engine._execute_with_timeout, NOT in agent_pool.
+    M4.5 adds progress-driven timeout with stall detection:
+    - stall_timeout: kill if no progress reported for this long
+    - max_total: hard cap regardless of progress (from L1 estimate)
     """
 
     default_timeout: int = Field(
@@ -408,6 +408,16 @@ class NodeTimeoutConfig(BaseModel):
         description="Dynamic evaluator timeout scaling (#621)",
     )
 
+    # M4.5: Progress-driven stall timeout per agent type
+    stall_timeout: int = Field(
+        default=int(os.getenv("WEAVE_STALL_TIMEOUT", "120")),
+        description="Kill node if no progress reported for this many seconds",
+    )
+    stall_overrides: dict[str, int] = Field(
+        default_factory=dict,
+        description="Per-agent-type stall timeout overrides",
+    )
+
     def timeout_for(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
@@ -428,6 +438,10 @@ class NodeTimeoutConfig(BaseModel):
             return min(scaled, self.eval_scale.max_timeout)
 
         return base
+
+    def stall_timeout_for(self, agent_type: str) -> int:
+        """Return stall timeout for the given agent type (M4.5)."""
+        return self.stall_overrides.get(agent_type, self.stall_timeout)
 
     @property
     def min_timeout(self) -> int:

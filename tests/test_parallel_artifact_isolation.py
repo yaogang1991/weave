@@ -15,6 +15,7 @@ from agent.agent_pool import AgentPool, WorkerAgent
 from core.agent_registry import AgentRegistry
 from core.config import LLMConfig
 from core.models import DAGNode
+from core.subprocess_runner import SubprocessResult
 
 
 @pytest.fixture
@@ -114,13 +115,9 @@ class TestEvaluatorArtifactScope:
 
         # Mock subprocess.run to simulate flake8 results
         def fake_run(cmd, **kwargs):
-            r = MagicMock()
-            r.returncode = 0
-            r.stdout = ""
-            r.stderr = ""
-            return r
+            return SubprocessResult(returncode=0, stdout="", stderr="")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             _, msg_b = engine._run_lint(["b.py"], tmp_path)
 
         # Must NOT mention a.py or c.py

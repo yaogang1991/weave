@@ -19,6 +19,7 @@ read blocks indefinitely).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -172,6 +173,8 @@ class LLMClient:
         agent_timeout: float | None = None,
         tool_choice: dict | None = None,
         max_tokens_override: int | None = None,
+        progress_tracker: object | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict:
         """
         Call the configured LLM with automatic retry for transient errors.
@@ -215,7 +218,7 @@ class LLMClient:
 
         for attempt in range(retries + 1):
             try:
-                result = self._call_once(messages, tools, tool_choice)
+                result = self._call_once(messages, tools, tool_choice, progress_tracker, cancel_event)
                 # Mark rate-limit recovery time (#583)
                 if rate_limited_in_this_call:
                     self._last_rate_limit_recovery = time.monotonic()
@@ -280,6 +283,8 @@ class LLMClient:
     def _call_once(
         self, messages: list[dict], tools: list[dict] | None = None,
         tool_choice: dict | None = None,
+        progress_tracker: object | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict:
         """Single LLM call with hard wall-clock timeout (#401, #367).
 
@@ -290,7 +295,19 @@ class LLMClient:
 
         Semaphore is acquired in the main thread so the permit is released
         immediately on hard timeout, preventing permit leak and deadlock (#367).
+
+        Args:
+            messages: Chat messages.
+            tools: Tool schemas.
+            tool_choice: Tool choice override.
+            progress_tracker: Optional progress reporter with a ``report(key)``
+                method, used to signal liveness while waiting for the LLM.
+            cancel_event: Optional threading.Event; when set, the waiting loop
+                aborts immediately with asyncio.CancelledError.
         """
+        if progress_tracker:
+            progress_tracker.report("llm_call_start")
+
         result: dict | None = None
         exc: Exception | None = None
 
@@ -308,7 +325,16 @@ class LLMClient:
         try:
             thread = threading.Thread(target=_target, daemon=True)
             thread.start()
-            thread.join(timeout=self._hard_timeout)
+            deadline = time.monotonic() + self._hard_timeout
+            while thread.is_alive():
+                thread.join(timeout=5.0)
+                if time.monotonic() >= deadline:
+                    break
+                if cancel_event and cancel_event.is_set():
+                    logger.info("LLM call cancelled via cancel_event")
+                    raise asyncio.CancelledError("LLM call cancelled by node timeout")
+                if progress_tracker:
+                    progress_tracker.report("llm_call_waiting")
             if thread.is_alive():
                 logger.error(
                     "LLM call exceeded hard timeout (%ds). "

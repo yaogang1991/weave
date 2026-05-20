@@ -138,8 +138,10 @@ class EvaluatorEngine:
         work_dir: str | None = None,
         output_artifacts: list[str] | None = None,
         owned_files: list[str] | None = None,
+        progress_tracker: Any | None = None,  # M4.5
     ) -> EvaluationResult:
         """Evaluate a stage against its success criteria."""
+        self._progress_tracker = progress_tracker
         eval_dir = work_dir or artifact_path
         eval_id = f"{session_id}_{stage_name}"
 
@@ -410,7 +412,7 @@ class EvaluatorEngine:
     def _run_tests(
         self, work_dir: Path, test_path: str | list[str] | None = None, eval_id: str = "",
     ) -> tuple[bool, str]:
-        return run_tests(work_dir, test_path, eval_id)
+        return run_tests(work_dir, test_path, eval_id, progress_tracker=getattr(self, '_progress_tracker', None))
 
     @staticmethod
     def _detect_shadowing_test_inits(work_dir: Path) -> list[str]:
@@ -419,6 +421,7 @@ class EvaluatorEngine:
     def _run_lint(self, targets: list[str], work_dir: Path) -> tuple[bool, str]:
         passed, msg, autofixed, formatted, new_issues, all_issues = run_lint(
             targets, work_dir, self.auto_format_before_eval,
+            progress_tracker=getattr(self, '_progress_tracker', None),
         )
         self._last_autofixed = autofixed
         self._last_auto_formatted = formatted
@@ -427,10 +430,10 @@ class EvaluatorEngine:
         return passed, msg
 
     def _auto_fix_unused(self, resolved: list[str], work_dir: Path) -> list[str]:
-        return auto_fix_unused(resolved, work_dir)
+        return auto_fix_unused(resolved, work_dir, progress_tracker=getattr(self, '_progress_tracker', None))
 
     def _auto_format_apply(self, resolved: list[str], work_dir: Path) -> list[str]:
-        return auto_format_apply(resolved, work_dir, self.auto_format_before_eval)
+        return auto_format_apply(resolved, work_dir, self.auto_format_before_eval, progress_tracker=getattr(self, '_progress_tracker', None))
 
     def _check_files_exist(self, files: list[str], base: Path) -> tuple[bool, str]:
         return check_files_exist(files, base)

@@ -217,6 +217,10 @@ class NodeExecutor:
                 workspace_path=workspace_path,
             )
 
+            # Defensive: agent_executor may return None (e.g. in tests)
+            if result is None:
+                result = {}
+
             # M4.2: Record token usage from node result
             token_usage = result.get("token_usage", {})
             if token_usage and self._budget_manager:
@@ -322,16 +326,45 @@ class NodeExecutor:
                     ))
                     return
                 eval_work_dir = workspace_path or self.work_dir
-                eval_result = await asyncio.get_running_loop().run_in_executor(
-                    self._executor,
-                    functools.partial(
-                        self.evaluator.evaluate_stage,
-                        node_id, node_id, node.success_criteria, self.artifact_path,
-                        work_dir=eval_work_dir,
-                        output_artifacts=node.output_artifacts or None,
-                        owned_files=node.owned_files or None,
-                    ),
+                # M4.5: evaluate_stage with its own timeout + progress tracker
+                from core.progress import ProgressTracker, estimate_max_timeout as _est
+                eval_max_total = _est("evaluator", node, eval_work_dir)
+                eval_tracker = ProgressTracker(
+                    stall_timeout=self._get_stall_timeout("evaluator"),
+                    max_total=eval_max_total,
                 )
+                try:
+                    eval_result = await asyncio.wait_for(
+                        asyncio.get_running_loop().run_in_executor(
+                            self._executor,
+                            functools.partial(
+                                self.evaluator.evaluate_stage,
+                                node_id, node_id, node.success_criteria, self.artifact_path,
+                                work_dir=eval_work_dir,
+                                output_artifacts=node.output_artifacts or None,
+                                owned_files=node.owned_files or None,
+                                progress_tracker=eval_tracker,  # M4.5
+                            ),
+                        ),
+                        timeout=eval_max_total,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Node %s: evaluate_stage timed out after %ds",
+                        node_id, eval_max_total,
+                    )
+                    node = dag.update_node(
+                        node_id,
+                        status=NodeStatus.FAILED,
+                        error=f"Evaluation timed out after {eval_max_total}s",
+                        completed_at=datetime.now(timezone.utc),
+                    )
+                    await self._emit(ExecutionEvent(
+                        node_id=node_id,
+                        event_type="failed",
+                        details={"reason": "eval_timeout", "timeout": eval_max_total},
+                    ))
+                    return
 
                 # Delegate evaluation result processing to QualityGate.
                 outcome = self._quality_gate.evaluate(
@@ -544,22 +577,29 @@ class NodeExecutor:
         input_artifacts: list[HandoffArtifact],
         workspace_path: str | None = None,
     ) -> dict[str, Any]:
-        """Execute a node with unified wall-clock timeout (#360 PR3).
+        """Execute a node with progress-driven timeout (M4.5).
 
-        - Timeout is per-agent-type via node_timeout config
-        - Cooperative cancellation: threading.Event passed to agent thread
-        - Progress reporting: agent reports heartbeat after each LLM call and
-          tool execution via progress_callback.
-        - M4.0: When backend_registry is set, dispatches via BackendRegistry
-          instead of the agent_executor closure.
+        Replaces static wall-clock ``asyncio.wait_for`` with a poll loop
+        that checks ProgressTracker.should_kill().  Work units (LLM calls,
+        subprocesses, tool execution) report progress via the shared tracker.
         """
+        from core.progress import ProgressTracker, estimate_max_timeout
+
         # #621: Pass artifact count for dynamic evaluator timeout scaling.
-        timeout = self._get_node_timeout(
+        configured_timeout = self._get_node_timeout(
             node.agent_type,
             artifact_count=sum(
                 len(a.file_paths) for a in input_artifacts
             ),
         )
+        estimated_timeout = estimate_max_timeout(node.agent_type, node, workspace_path)
+        max_total = min(configured_timeout, estimated_timeout)
+        # Stall timeout: use configured value, but never exceed max_total
+        stall_timeout = min(
+            self._get_stall_timeout(node.agent_type), max_total,
+        )
+
+        tracker = ProgressTracker(stall_timeout=stall_timeout, max_total=max_total)
         cancel_event = threading.Event()
 
         loop = asyncio.get_running_loop()
@@ -568,10 +608,9 @@ class NodeExecutor:
             try:
                 loop.call_soon_threadsafe(node.record_heartbeat)
             except RuntimeError:
-                pass  # Event loop closed
+                pass
 
         if self._backend_registry is not None:
-            # M4.0: Use BackendRegistry path
             context = BackendContext(
                 node=node,
                 artifacts=input_artifacts,
@@ -581,6 +620,7 @@ class NodeExecutor:
                 run_id=self._run_id,
                 cancel_event=cancel_event,
                 progress_callback=_on_progress,
+                progress_tracker=tracker,  # M4.5
             )
             backend_name = getattr(node, 'backend', 'builtin')
 
@@ -592,30 +632,52 @@ class NodeExecutor:
 
             task = asyncio.create_task(_run_via_registry())
         else:
-            # Legacy path: use agent_executor closure directly
             async def _run_with_cancel(n: DAGNode, arts: list[HandoffArtifact]) -> dict:
                 return await self.agent_executor(
                     n, arts,
                     cancel_event=cancel_event,
                     progress_callback=_on_progress,
                     workspace_path=workspace_path,
+                    progress_tracker=tracker,  # M4.5
                 )
 
             task = asyncio.create_task(_run_with_cancel(node, input_artifacts))
 
+        # M4.5: Poll loop replacing asyncio.wait_for
         try:
-            return await asyncio.wait_for(task, timeout=timeout)
-        except asyncio.TimeoutError:
-            cancel_event.set()
-            logger.warning(
-                "Node %s (%s) timed out after %ds — cancel event set",
-                node.id, node.agent_type, timeout,
-            )
-            raise NodeTimeoutError(
-                node_id=node.id,
-                agent_type=node.agent_type,
-                timeout=timeout,
-            )
+            while not task.done():
+                # Check if watchdog killed this node
+                if node.health_status == NodeHealth.DEAD:
+                    cancel_event.set()
+                    if not task.done():
+                        task.cancel()
+                    raise NodeTimeoutError(
+                        node_id=node.id,
+                        agent_type=node.agent_type,
+                        timeout=max_total,
+                    )
+                should_kill, reason = tracker.should_kill()
+                if should_kill:
+                    cancel_event.set()
+                    logger.warning(
+                        "Node %s (%s) killed: %s (elapsed %.0fs, max %ds)",
+                        node.id, node.agent_type, reason,
+                        tracker.elapsed, max_total,
+                    )
+                    raise NodeTimeoutError(
+                        node_id=node.id,
+                        agent_type=node.agent_type,
+                        timeout=max_total,
+                    )
+                # Sync heartbeat to watchdog when progress reported
+                if tracker.has_recent_progress():
+                    node.record_heartbeat()
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                    return task.result()
+                except asyncio.TimeoutError:
+                    continue  # Poll loop: check tracker again
+            return task.result()
         except asyncio.CancelledError:
             cancel_event.set()
             if not task.done():
@@ -642,6 +704,12 @@ class NodeExecutor:
             )
         interval, threshold = self._watchdog.get_heartbeat_settings(agent_type)
         return max(1, int(interval * threshold))
+
+    def _get_stall_timeout(self, agent_type: str) -> int:
+        """Return stall timeout for the given agent type (M4.5)."""
+        if self._node_timeout_config is not None:
+            return self._node_timeout_config.stall_timeout_for(agent_type)
+        return 120  # Default stall timeout
 
     def _collect_input_artifacts(
         self,

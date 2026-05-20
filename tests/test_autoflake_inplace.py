@@ -4,10 +4,13 @@ Tests for #283: autoflake --in-place auto-fix before lint scoring.
 Verifies that unused imports (F401) and unused variables (F841) are
 automatically removed before flake8 scoring, preventing the retry loop
 where the generator regenerates files with the same unused imports.
+
+M4.5: Updated to mock run_with_progress instead of subprocess.run.
 """
 import pytest
 from unittest.mock import MagicMock, patch
 
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 from session.store import SessionStore
 
@@ -22,21 +25,28 @@ def engine(tmp_store):
     return EvaluatorEngine(tmp_store)
 
 
+def _mock_result(returncode=0, stdout="", stderr="", timed_out=False):
+    """Helper to create a SubprocessResult for mocking."""
+    return SubprocessResult(
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        timed_out=timed_out,
+    )
+
+
 class TestAutoFixUnused:
     def test_removes_unused_imports_in_place(self, engine, tmp_path):
         """autoflake --in-place actually removes unused imports from files."""
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\nimport json\n\nx = 1\n", encoding="utf-8")
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
-            # First call: autoflake in-place (modifies the file)
-            # Second call: flake8 (returns clean)
-            mock_run.return_value = MagicMock(returncode=0, stdout="")
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = _mock_result(returncode=0, stdout="")
 
             passed, msg = engine._run_lint(["mod.py"], tmp_path)
 
         assert passed
-        # The autoflake in-place call should have been made
         autoflake_call = mock_run.call_args_list[0]
         assert "--in-place" in autoflake_call[0][0]
 
@@ -45,14 +55,12 @@ class TestAutoFixUnused:
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\nimport json\n\nx = 1\n", encoding="utf-8")
 
-        # Simulate autoflake actually modifying the file
         def fake_run(cmd, **kwargs):
             if "autoflake" in cmd:
-                # Simulate in-place fix: remove unused imports
                 code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
-            return MagicMock(returncode=0, stdout="")
+            return _mock_result(returncode=0, stdout="")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert len(changed) == 1
@@ -63,8 +71,8 @@ class TestAutoFixUnused:
         code_file = tmp_path / "clean.py"
         code_file.write_text("import os\n\nos.path.exists('.')\n", encoding="utf-8")
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stdout="")
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = _mock_result(returncode=0, stdout="")
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert changed == []
@@ -74,19 +82,19 @@ class TestAutoFixUnused:
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=FileNotFoundError):
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = _mock_result(returncode=127, stderr="not found")
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert changed == []
 
     def test_autoflake_timeout_graceful(self, engine, tmp_path):
         """Gracefully handles autoflake timing out."""
-        import subprocess
         code_file = tmp_path / "mod.py"
         code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
 
-        with patch("evaluator.runner.subprocess.run",
-                   side_effect=subprocess.TimeoutExpired("autoflake", 30)):
+        with patch("evaluator.runner.run_with_progress") as mock_run:
+            mock_run.return_value = _mock_result(timed_out=True)
             changed = engine._auto_fix_unused([str(code_file)], tmp_path)
 
         assert changed == []
@@ -99,9 +107,9 @@ class TestAutoFixUnused:
         def fake_run(cmd, **kwargs):
             if "autoflake" in cmd:
                 code_file.write_text("import os\n\nx = 1\n", encoding="utf-8")
-            return MagicMock(returncode=0, stdout="")
+            return _mock_result(returncode=0, stdout="")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             engine._run_lint(["mod.py"], tmp_path)
 
         assert len(engine._last_autofixed) == 1
@@ -121,11 +129,11 @@ class TestAutoFixUnused:
 
         def fake_run(cmd, **kwargs):
             if "autoflake" in cmd:
-                f1.write_text("import os\n\nx = 1\n", encoding="utf-8")  # unchanged
-                f2.write_text("y = 2\n", encoding="utf-8")  # changed
-            return MagicMock(returncode=0, stdout="")
+                f1.write_text("import os\n\nx = 1\n", encoding="utf-8")
+                f2.write_text("y = 2\n", encoding="utf-8")
+            return _mock_result(returncode=0, stdout="")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             changed = engine._auto_fix_unused([str(f1), str(f2)], tmp_path)
 
         assert len(changed) == 1

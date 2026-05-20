@@ -7,6 +7,7 @@ to the current DAG node's output_artifacts, not all test files in the workspace.
 import pytest  # noqa: F401
 from unittest.mock import MagicMock, patch
 
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 from core.models import SuccessCriterion, CriterionType
 
@@ -71,14 +72,14 @@ class TestFindTestFiles:
 class TestTestScopingIntegration:
     """Integration tests that pytest is scoped to relevant files."""
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_tests_pass_scoped_to_artifact_tests(self, mock_run, tmp_path):
         """_check_criterion for TESTS_PASS passes scoped test paths to _run_tests."""
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_parser.py").write_text("def test_x(): pass")
         (tmp_path / "parser.py").write_text("x = 1")
 
-        mock_run.return_value = MagicMock(returncode=0, stdout="1 passed", stderr="")
+        mock_run.return_value = SubprocessResult(returncode=0, stdout="1 passed", stderr="")
 
         engine = EvaluatorEngine(MagicMock())
         crit = SuccessCriterion(type=CriterionType.TESTS_PASS, description="tests pass")

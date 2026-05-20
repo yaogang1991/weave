@@ -313,7 +313,8 @@ class TestRuntimeContextInjection:
             last_token_usage: dict = {}
 
             def run(self, session_id, system_prompt, user_message,
-                    tools, tool_executor, max_iterations=50, **kwargs):
+                    tools, tool_executor, max_iterations=50, *,
+                    cancel_event=None, progress_callback=None, **kwargs):
                 captured_prompts.append(user_message)
                 return []
 

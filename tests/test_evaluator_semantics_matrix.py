@@ -17,6 +17,7 @@ from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 from core.models import CriterionType, EvalStatus, SuccessCriterion
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 
 
@@ -146,18 +147,18 @@ class TestFilePatternSemantics:
 class TestTestsPassSemantics:
     """TESTS_PASS: pytest execution against scoped test files."""
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_pass_all_tests_pass(self, mock_run, evaluator, tmp_path):
-        mock_run.return_value = MagicMock(returncode=0, stdout="2 passed")
+        mock_run.return_value = SubprocessResult(returncode=0, stdout="2 passed", stderr="")
         r = evaluator.evaluate_stage("s1", "impl", [
             SuccessCriterion(type=CriterionType.TESTS_PASS, description="tests"),
         ], str(tmp_path))
         assert r.passed
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_fail_tests_fail(self, mock_run, evaluator, tmp_path):
-        mock_run.return_value = MagicMock(returncode=1,
-                                          stdout="FAILED test_x - AssertionError")
+        mock_run.return_value = SubprocessResult(returncode=1,
+                                          stdout="FAILED test_x - AssertionError", stderr="")
         r = evaluator.evaluate_stage("s1", "impl", [
             SuccessCriterion(type=CriterionType.TESTS_PASS,
                              test_path=str(tmp_path / "test_x.py"),
@@ -174,7 +175,7 @@ class TestTestsPassSemantics:
         assert r.passed
         assert "WARN" in r.feedback
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_timeout_actionable_feedback(self, mock_run, evaluator, tmp_path):
         import subprocess
         mock_run.side_effect = subprocess.TimeoutExpired(cmd="pytest", timeout=60)
@@ -302,13 +303,14 @@ class TestTestFileExistsSemantics:
 class TestCoverageSemantics:
     """COVERAGE: test coverage percentage target check."""
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_pass_above_target(self, mock_run, evaluator, tmp_path):
         _file(tmp_path / "test_app.py")
         _file(tmp_path / "app.py")
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = SubprocessResult(
             returncode=0,
             stdout="test_app.py .\nTOTAL   10   1   90%\n",
+            stderr="",
         )
         r = evaluator.evaluate_stage("s1", "impl", [
             SuccessCriterion(type=CriterionType.COVERAGE, target=80,
@@ -316,11 +318,12 @@ class TestCoverageSemantics:
         ], str(tmp_path), output_artifacts=["app.py"])
         assert r.passed
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_fail_below_target(self, mock_run, evaluator, tmp_path):
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = SubprocessResult(
             returncode=0,
             stdout="TOTAL   10   8   20%\n",
+            stderr="",
         )
         r = evaluator.evaluate_stage("s1", "impl", [
             SuccessCriterion(type=CriterionType.COVERAGE, target=80,
@@ -344,10 +347,10 @@ class TestCoverageSemantics:
 class TestLintSemantics:
     """LINT: no new lint issues on changed lines."""
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_pass_clean(self, mock_run, evaluator, tmp_path):
         _file(tmp_path / "app.py", "x = 1\n")
-        mock_run.return_value = MagicMock(returncode=0, stdout="")
+        mock_run.return_value = SubprocessResult(returncode=0, stdout="", stderr="")
         r = evaluator.evaluate_stage("s1", "impl", [
             SuccessCriterion(type=CriterionType.LINT, description="lint"),
         ], str(tmp_path), output_artifacts=["app.py"])
@@ -359,7 +362,7 @@ class TestLintSemantics:
         ], str(tmp_path), output_artifacts=[])
         assert r.passed
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_warn_no_linter_available(self, mock_run, evaluator, tmp_path):
         """No flake8/ruff → WARN (not hard FAIL)."""
         _file(tmp_path / "app.py")
@@ -368,7 +371,7 @@ class TestLintSemantics:
         def _mock_run(cmd, **kwargs):
             # Import smoke test calls should succeed
             if cmd[1:3] == ["-c", "import app"]:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise FileNotFoundError("no flake8")
 
         mock_run.side_effect = _mock_run
@@ -632,10 +635,10 @@ class TestFalseFailPrevention:
         def _mock_run(cmd, **kwargs):
             # Import smoke test calls should succeed
             if len(cmd) >= 3 and cmd[1] == "-c" and "import" in cmd[2]:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise FileNotFoundError("no flake8")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=_mock_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=_mock_run):
             r = ev.evaluate_stage("s1", "impl", [
                 SuccessCriterion(type=CriterionType.LINT, description="lint"),
             ], str(tmp_path), output_artifacts=["app.py"])

@@ -72,3 +72,4 @@ class BackendContext(BaseModel):
 
     cancel_event: threading.Event | None = None
     progress_callback: Callable[[], None] | None = None
+    progress_tracker: Any | None = None  # M4.5: ProgressTracker for progress-driven timeout

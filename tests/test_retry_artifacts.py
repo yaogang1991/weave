@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from core.models import SuccessCriterion, CriterionType
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 from session.store import SessionStore
 
@@ -53,10 +54,10 @@ class TestRetryArtifactPreservation:
 class TestCoverageScope:
     """Verify coverage check doesn't scan globally when artifacts empty."""
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_coverage_no_artifacts_fails_gracefully(self, mock_run, evaluator, work_dir):
         """Without output_artifacts, coverage is unverifiable → WARN (#152, #165)."""
-        mock_run.return_value = MagicMock(
+        mock_run.return_value = SubprocessResult(
             returncode=0, stdout="2 passed in 0.01s\n", stderr="",
         )
         crit = SuccessCriterion(type=CriterionType.COVERAGE, target=80)
