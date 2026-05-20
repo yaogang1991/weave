@@ -5,12 +5,12 @@ import asyncio
 import json
 import logging
 import shutil
-import subprocess
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
 from core.config import CodexBackendConfig
 from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
+from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
 
 logger = logging.getLogger(__name__)
@@ -238,7 +238,7 @@ class CodexBackend(AgentBackend):
             return []
 
         try:
-            result = subprocess.run(
+            result = run_with_progress(
                 ["git", "diff", "--name-only", "--diff-filter=ACMR"],
                 cwd=workspace,
                 capture_output=True,
@@ -251,7 +251,7 @@ class CodexBackend(AgentBackend):
                     for f in result.stdout.strip().split("\n")
                     if f.strip()
                 ]
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        except OSError as exc:
             logger.debug("Codex artifact discovery failed: %s", exc)
 
         return []

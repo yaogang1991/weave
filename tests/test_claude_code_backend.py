@@ -1,6 +1,5 @@
 """Tests for M4.1 ClaudeCodeBackend implementation."""
 import json
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -155,8 +154,9 @@ class TestClaudeCodeBackendExecuteCLI:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = self._make_cli_output()
+        mock_result.timed_out = False
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             result = asyncio.get_event_loop().run_until_complete(
                 backend._execute_via_cli(ctx, "test prompt"),
@@ -175,8 +175,9 @@ class TestClaudeCodeBackendExecuteCLI:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Something went wrong"
+        mock_result.timed_out = False
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             result = asyncio.get_event_loop().run_until_complete(
                 backend._execute_via_cli(ctx, "test prompt"),
@@ -193,8 +194,9 @@ class TestClaudeCodeBackendExecuteCLI:
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stdout = "not valid json {{{"
+        mock_result.timed_out = False
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             result = asyncio.get_event_loop().run_until_complete(
                 backend._execute_via_cli(ctx, "test prompt"),
@@ -208,7 +210,11 @@ class TestClaudeCodeBackendExecuteCLI:
         backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
         ctx = _make_context()
 
-        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("claude", 30)):
+        mock_result = MagicMock()
+        mock_result.timed_out = True
+        mock_result.returncode = -1
+
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             with pytest.raises(NodeTimeoutError):
                 asyncio.get_event_loop().run_until_complete(
@@ -223,8 +229,9 @@ class TestClaudeCodeBackendExecuteCLI:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Error: rate limit exceeded"
+        mock_result.timed_out = False
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             with pytest.raises(RateLimitError):
                 asyncio.get_event_loop().run_until_complete(
@@ -239,8 +246,9 @@ class TestClaudeCodeBackendExecuteCLI:
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Budget exhausted"
+        mock_result.timed_out = False
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             with pytest.raises(BudgetExhaustedError):
                 asyncio.get_event_loop().run_until_complete(
@@ -253,7 +261,11 @@ class TestClaudeCodeBackendExecuteCLI:
         backend = ClaudeCodeBackend(config=cfg)
         ctx = _make_context()
 
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
+        mock_result = MagicMock()
+        mock_result.returncode = 127
+        mock_result.timed_out = False
+
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             result = asyncio.get_event_loop().run_until_complete(
                 backend._execute_via_cli(ctx, "test prompt"),
@@ -272,6 +284,7 @@ class TestClaudeCodeBackendExecuteDispatch:
 
         mock_cli_result = MagicMock()
         mock_cli_result.returncode = 0
+        mock_cli_result.timed_out = False
         mock_cli_result.stdout = json.dumps({
             "result": "CLI fallback worked",
             "is_error": False,
@@ -279,7 +292,7 @@ class TestClaudeCodeBackendExecuteDispatch:
         })
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("subprocess.run", return_value=mock_cli_result):
+            with patch("agent.backends.claude_code.run_with_progress", return_value=mock_cli_result):
                 with patch.object(
                     backend, "_execute_via_sdk",
                     side_effect=RuntimeError("SDK crashed"),
@@ -381,7 +394,7 @@ class TestClaudeCodeBackendArtifactDiscovery:
         mock_result.returncode = 0
         mock_result.stdout = "src/main.py\nsrc/utils.py\n"
 
-        with patch("subprocess.run", return_value=mock_result):
+        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             artifacts = backend._discover_artifacts(ctx)
 
         assert artifacts == ["src/main.py", "src/utils.py"]
@@ -397,7 +410,7 @@ class TestClaudeCodeBackendArtifactDiscovery:
         backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
         ctx = _make_context(workspace_path="/tmp")
 
-        with patch("subprocess.run", side_effect=FileNotFoundError()):
+        with patch("agent.backends.claude_code.run_with_progress", side_effect=FileNotFoundError()):
             assert backend._discover_artifacts(ctx) == []
 
 

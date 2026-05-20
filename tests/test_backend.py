@@ -143,7 +143,7 @@ class TestWorktreeBackend:
     def test_is_available_false_when_no_git(self, tmp_path):
         """is_available() should return False when git is not available."""
         backend = WorktreeBackend(repo_root=str(tmp_path))
-        with patch("backend.worktree.subprocess.run") as mock_run:
+        with patch("backend.worktree.run_with_progress") as mock_run:
             mock_run.side_effect = FileNotFoundError("git not found")
             assert backend.is_available() is False
 

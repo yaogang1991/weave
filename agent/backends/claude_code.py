@@ -16,11 +16,11 @@ import asyncio
 import json
 import logging
 import shutil
-import subprocess
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
 from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
+from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
 
 logger = logging.getLogger(__name__)
@@ -288,25 +288,26 @@ class ClaudeCodeBackend(AgentBackend):
         cmd = self._build_cli_command(context, prompt)
         cwd = context.workspace_path or "."
 
-        try:
-            loop = asyncio.get_running_loop()
-            proc = await loop.run_in_executor(
-                None,
-                lambda: subprocess.run(
-                    cmd,
-                    cwd=cwd,
-                    capture_output=True,
-                    text=True,
-                    timeout=self._get_cli_timeout(),
-                ),
-            )
-        except subprocess.TimeoutExpired as exc:
+        loop = asyncio.get_running_loop()
+        proc = await loop.run_in_executor(
+            None,
+            lambda: run_with_progress(
+                cmd,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=self._get_cli_timeout(),
+            ),
+        )
+
+        if proc.timed_out:
             raise NodeTimeoutError(
                 node_id=context.node.id,
                 agent_type=context.node.agent_type,
                 timeout=self._get_cli_timeout(),
-            ) from exc
-        except FileNotFoundError:
+            )
+
+        if proc.returncode == 127:
             return BackendResult(
                 status=BackendStatus.FAILED,
                 error=f"Claude CLI not found at: {self._config.cli_path}",
@@ -459,7 +460,7 @@ class ClaudeCodeBackend(AgentBackend):
             return []
 
         try:
-            result = subprocess.run(
+            result = run_with_progress(
                 ["git", "diff", "--name-only", "--diff-filter=ACMR"],
                 cwd=workspace,
                 capture_output=True,
@@ -472,7 +473,7 @@ class ClaudeCodeBackend(AgentBackend):
                     for f in result.stdout.strip().split("\n")
                     if f.strip()
                 ]
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+        except OSError as exc:
             logger.debug("Artifact discovery failed: %s", exc)
 
         return []

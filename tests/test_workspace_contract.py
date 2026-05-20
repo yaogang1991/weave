@@ -221,7 +221,7 @@ class TestBackendManagerSetupNode:
             manager.setup("job1", "run1")
 
         # Mock subprocess.run so git worktree add fails
-        with patch("subprocess.run") as mock_run:
+        with patch("agent.backends.claude_code.run_with_progress") as mock_run:
             mock_run.side_effect = [
                 MagicMock(returncode=0, stdout="abc123"),  # git rev-parse
                 MagicMock(returncode=1, stderr="worktree add failed"),  # git worktree add

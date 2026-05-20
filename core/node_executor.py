@@ -360,13 +360,13 @@ class NodeExecutor:
                     ))
                     return
                 eval_work_dir = workspace_path or self.work_dir
-                # M4.5: evaluate_stage with its own timeout + progress tracker
-                from core.progress import ProgressTracker, estimate_max_timeout as _est
-                eval_max_total = _est("evaluator", node, eval_work_dir)
+                # M4.5: evaluate_stage with its own stall timeout
+                from core.progress import ProgressTracker
+                eval_stall_timeout = self._get_stall_timeout("evaluator")
                 eval_tracker = ProgressTracker(
-                    stall_timeout=self._get_stall_timeout("evaluator"),
-                    max_total=eval_max_total,
+                    stall_timeout=eval_stall_timeout,
                 )
+                eval_timeout = self._get_node_timeout("evaluator")
                 try:
                     eval_result = await asyncio.wait_for(
                         asyncio.get_running_loop().run_in_executor(
@@ -380,23 +380,23 @@ class NodeExecutor:
                                 progress_tracker=eval_tracker,  # M4.5
                             ),
                         ),
-                        timeout=eval_max_total,
+                        timeout=eval_timeout,
                     )
                 except asyncio.TimeoutError:
                     logger.warning(
                         "Node %s: evaluate_stage timed out after %ds",
-                        node_id, eval_max_total,
+                        node_id, eval_timeout,
                     )
                     node = dag.update_node(
                         node_id,
                         status=NodeStatus.FAILED,
-                        error=f"Evaluation timed out after {eval_max_total}s",
+                        error=f"Evaluation timed out after {eval_timeout}s",
                         completed_at=datetime.now(timezone.utc),
                     )
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
                         event_type="failed",
-                        details={"reason": "eval_timeout", "timeout": eval_max_total},
+                        details={"reason": "eval_timeout", "timeout": eval_timeout},
                     ))
                     return
 
@@ -613,27 +613,17 @@ class NodeExecutor:
     ) -> dict[str, Any]:
         """Execute a node with progress-driven timeout (M4.5).
 
-        Replaces static wall-clock ``asyncio.wait_for`` with a poll loop
-        that checks ProgressTracker.should_kill().  Work units (LLM calls,
+        Poll loop checks ProgressTracker.should_kill().  Work units (LLM calls,
         subprocesses, tool execution) report progress via the shared tracker.
+        Stall detection is the sole kill mechanism (no max_total).
         """
-        from core.progress import ProgressTracker, estimate_max_timeout
+        from core.progress import ProgressTracker
 
-        # #621: Pass artifact count for dynamic evaluator timeout scaling.
-        configured_timeout = self._get_node_timeout(
-            node.agent_type,
-            artifact_count=sum(
-                len(a.file_paths) for a in input_artifacts
-            ),
-        )
-        estimated_timeout = estimate_max_timeout(node.agent_type, node, workspace_path)
-        max_total = min(configured_timeout, estimated_timeout)
-        # Stall timeout: use configured value, but never exceed max_total
-        stall_timeout = min(
-            self._get_stall_timeout(node.agent_type), max_total,
+        stall_timeout = self._get_stall_timeout(
+            node.agent_type, node=node, workspace_path=workspace_path,
         )
 
-        tracker = ProgressTracker(stall_timeout=stall_timeout, max_total=max_total)
+        tracker = ProgressTracker(stall_timeout=stall_timeout)
         cancel_event = threading.Event()
 
         loop = asyncio.get_running_loop()
@@ -680,28 +670,28 @@ class NodeExecutor:
         # M4.5: Poll loop replacing asyncio.wait_for
         try:
             while not task.done():
-                # Check if watchdog killed this node
-                if node.health_status == NodeHealth.DEAD:
+                # Check if watchdog flagged this node (UNHEALTHY or DEAD)
+                if node.health_status in (NodeHealth.UNHEALTHY, NodeHealth.DEAD):
                     cancel_event.set()
                     if not task.done():
                         task.cancel()
                     raise NodeTimeoutError(
                         node_id=node.id,
                         agent_type=node.agent_type,
-                        timeout=max_total,
+                        timeout=stall_timeout,
                     )
                 should_kill, reason = tracker.should_kill()
                 if should_kill:
                     cancel_event.set()
                     logger.warning(
-                        "Node %s (%s) killed: %s (elapsed %.0fs, max %ds)",
+                        "Node %s (%s) killed: %s (elapsed %.0fs)",
                         node.id, node.agent_type, reason,
-                        tracker.elapsed, max_total,
+                        tracker.elapsed,
                     )
                     raise NodeTimeoutError(
                         node_id=node.id,
                         agent_type=node.agent_type,
-                        timeout=max_total,
+                        timeout=stall_timeout,
                     )
                 # Sync heartbeat to watchdog when progress reported
                 if tracker.has_recent_progress():
@@ -739,11 +729,16 @@ class NodeExecutor:
         interval, threshold = self._watchdog.get_heartbeat_settings(agent_type)
         return max(1, int(interval * threshold))
 
-    def _get_stall_timeout(self, agent_type: str) -> int:
-        """Return stall timeout for the given agent type (M4.5)."""
+    def _get_stall_timeout(
+        self, agent_type: str, node: DAGNode | None = None,
+        workspace_path: str | None = None,
+    ) -> int:
+        """Return dynamic stall timeout (M4.5)."""
         if self._node_timeout_config is not None:
-            return self._node_timeout_config.stall_timeout_for(agent_type)
-        return 120  # Default stall timeout
+            return self._node_timeout_config.stall_timeout_for(
+                agent_type, node=node, workspace_path=workspace_path,
+            )
+        return self._get_node_timeout(agent_type)
 
     def _collect_input_artifacts(
         self,

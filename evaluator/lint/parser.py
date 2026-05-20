@@ -6,8 +6,9 @@ Extracted from EvaluatorEngine as part of #178 PR 3.
 from __future__ import annotations
 
 import re
-import subprocess
 from dataclasses import dataclass
+
+from core.subprocess_runner import run_with_progress
 from pathlib import Path
 
 
@@ -54,7 +55,7 @@ def get_changed_lines(
         abs_path = work_dir / fp
         try:
             p = abs_path if abs_path.exists() else Path(fp)
-            diff_out = subprocess.run(
+            diff_out = run_with_progress(
                 ["git", "diff", "--unified=0", "--", str(p)],
                 capture_output=True, text=True,
                 encoding="utf-8", errors="replace",
@@ -78,6 +79,6 @@ def get_changed_lines(
                 except ValueError:
                     rel = fp
                 result[rel] = lines
-        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        except (FileNotFoundError, OSError):
             continue
     return result
