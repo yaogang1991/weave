@@ -46,7 +46,7 @@ class TestPytestTimeoutIncreased:
         """run_tests calls subprocess.run with timeout=180 (#601)."""
         (tmp_path / "test_dummy.py").write_text("def test_ok(): pass")
 
-        with patch("evaluator.runner.subprocess.run") as mock_run:
+        with patch("evaluator.runner.run_with_progress") as mock_run:
             mock_run.return_value = MagicMock(
                 returncode=0, stdout="1 passed", stderr="",
             )

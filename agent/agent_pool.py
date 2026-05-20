@@ -28,6 +28,7 @@ from session.store import SessionStore
 from agent.worker import AgentWorker
 from tools.registry import ToolRegistry
 from guardrails.policy import Guardrails, GuardrailResult
+from core.subprocess_runner import run_with_progress
 from core.models import ToolResult
 from agent.prompts import SYSTEM_PROMPTS, TOOL_ALLOWLIST
 
@@ -372,7 +373,7 @@ Execute using your available tools. Produce clear, verifiable output.
             return
 
         try:
-            result = subprocess.run(
+            result = run_with_progress(
                 [
                     _sys.executable, "-m", "autoflake",
                     "--in-place",

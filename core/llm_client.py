@@ -32,6 +32,7 @@ import httpx
 from openai import OpenAI
 
 from core.config import LLMConfig
+from core.progress import ProgressReport
 from core.exceptions import RateLimitError
 from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
 
@@ -306,7 +307,7 @@ class LLMClient:
                 aborts immediately with asyncio.CancelledError.
         """
         if progress_tracker:
-            progress_tracker.report("llm_call_start")
+            progress_tracker.report(ProgressReport("llm_call_start"))
 
         result: dict | None = None
         exc: Exception | None = None
@@ -334,7 +335,7 @@ class LLMClient:
                     logger.info("LLM call cancelled via cancel_event")
                     raise asyncio.CancelledError("LLM call cancelled by node timeout")
                 if progress_tracker:
-                    progress_tracker.report("llm_call_waiting")
+                    progress_tracker.report(ProgressReport("llm_call_waiting"))
             if thread.is_alive():
                 logger.error(
                     "LLM call exceeded hard timeout (%ds). "

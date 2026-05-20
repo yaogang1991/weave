@@ -8,7 +8,7 @@ Self-hosted unattended software development system based on [Anthropic Managed A
 
 Python 3.11+, Pydantic models, async/await throughout.
 
-**Current version:** M3.5 + Refactoring (domain module splits). See `docs/roadmap.md` for milestone history.
+**Current version:** M4.5 (progress-driven timeout + universal subprocess reporting). See `docs/roadmap.md` for milestone history.
 
 ## Commands
 
@@ -108,12 +108,14 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `core/mcp_models.py` — MCPToolInfo, MCPServerStatus
 - `core/artifact_handoff.py` — HandoffArtifact, artifact collection/transfer
 - `core/exceptions.py` — Custom exception hierarchy
-- `core/config.py` — WeaveConfig, LLMConfig, SandboxConfig, MemoryConfig, LearningConfig, ImpactConfig
+- `core/config.py` — WeaveConfig, LLMConfig, SandboxConfig, MemoryConfig, LearningConfig, ImpactConfig, NodeTimeoutConfig (stall_timeout with dynamic complexity scaling)
 - `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.weave/agents.yaml`)
 - `core/dag_engine.py` — Topological sort, parallel execution with `asyncio.gather`, failure callback
 - `core/node_executor.py` — Single node execution logic (extracted from dag_engine)
 - `core/quality_gate.py` — Post-node quality checks (extracted from dag_engine)
 - `core/retry_policy.py` — Retry/backoff logic (extracted from dag_engine)
+- `core/progress.py` — ProgressReport, ProgressTracker (Filter/Observer pub/sub), StallDetector, AnomalyDetector, AuditLogger (M4.5)
+- `core/subprocess_runner.py` — SubprocessResult, run_with_progress: universal subprocess execution with progress reporting (M4.5)
 - `core/watchdog.py` — Watchdog coroutine for heartbeat monitoring (M2)
 - `core/llm_client.py` — Unified LLM client (Anthropic/OpenAI)
 - `core/llm_router.py` — M3.1: Multi-model routing per agent type

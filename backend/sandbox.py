@@ -16,6 +16,7 @@ import abc
 from dataclasses import dataclass
 
 from backend.base import ExecutionSandbox
+from core.subprocess_runner import run_with_progress
 
 
 @dataclass
@@ -328,15 +329,13 @@ class DockerSandbox(SandboxProvider):
 
     def is_available(self) -> bool:
         """Check if Docker CLI is available on the host."""
-        import subprocess
-
         try:
-            result = subprocess.run(
+            result = run_with_progress(
                 ["docker", "info"],
                 capture_output=True,
                 text=True,
                 timeout=5,
             )
             return result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        except OSError:
             return False
