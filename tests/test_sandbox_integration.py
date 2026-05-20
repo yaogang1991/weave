@@ -413,7 +413,8 @@ class TestRiskBasedSandboxSelection:
             workspace=WorkspaceIsolation.LOCAL,
             sandbox=ExecutionSandbox.LOCAL,
         )
-        sandbox = manager._select_sandbox("high")
+        with patch.object(DockerSandbox, "is_available", return_value=False):
+            sandbox = manager._select_sandbox("high")
         # Docker is not available in test env, so falls back to LocalSandbox
         assert isinstance(sandbox, LocalSandbox)
 

@@ -102,41 +102,19 @@ class TestHardTimeout:
             assert result["content"] == "hello"
 
     def test_hard_timeout_is_config_timeout_plus_buffer(self):
-        """Hard timeout = config.timeout + 30s buffer."""
+        """Hard timeout = config.timeout * 2 + 30s buffer."""
         config = _make_config(timeout=2)
-        thread_timeout = None
-
-        original_join = threading.Thread.join
-
-        def patched_join(self, timeout=None):
-            nonlocal thread_timeout
-            thread_timeout = timeout
-            # Don't actually wait — simulate immediate completion
-            return original_join(self, timeout=0.001)
 
         with patch("core.llm_client.OpenAI") as mock_openai:
             mock_client = MagicMock()
-
-            def instant_call(*args, **kwargs):
-                return MagicMock(
-                    choices=[MagicMock(
-                        message=MagicMock(content="ok", tool_calls=None)
-                    )]
-                )
-
-            mock_client.chat.completions.create = instant_call
             mock_openai.return_value = mock_client
 
-            with patch.object(threading.Thread, "join", patched_join):
-                client = LLMClient(config)
-                # The thread won't actually complete in 1ms, so we'll get
-                # a TimeoutError or result. We just want to capture the timeout value.
-                try:
-                    client.call([{"role": "user", "content": "hi"}])
-                except (TimeoutError, RuntimeError):
-                    pass
+            client = LLMClient(config)
 
-        assert thread_timeout == 34  # 2s config * 2 + 30s buffer
+        # _call_once now uses a segmented join loop with 5s intervals,
+        # so we verify the computed hard_timeout value directly instead of
+        # trying to capture the thread.join() timeout argument.
+        assert client._hard_timeout == 34  # 2s config * 2 + 30s buffer
 
     def test_semaphore_released_on_hard_timeout(self):
         """Semaphore permit must be released even when hard timeout fires (#367 review)."""

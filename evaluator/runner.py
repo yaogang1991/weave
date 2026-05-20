@@ -9,10 +9,10 @@ from __future__ import annotations
 import logging
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
+from core.subprocess_runner import run_with_progress
 from evaluator.lint.parser import LintIssue, parse_flake8_output, get_changed_lines
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,7 @@ def run_tests(
     work_dir: Path,
     test_path: str | list[str] | None = None,
     eval_id: str = "",
+    progress_tracker=None,
 ) -> tuple[bool, str]:
     """Run pytest with a fixed command. Never executes arbitrary commands."""
     # Detect __init__.py in test subdirs that shadow project packages (#221).
@@ -144,15 +145,22 @@ def run_tests(
                 cmd.extend(str(work_dir / t) if not Path(t).is_absolute() else t for t in test_path)
             else:
                 cmd.append(test_path)
-        result = subprocess.run(
+        rwp = run_with_progress(
             cmd,
             capture_output=True, text=True,
             encoding="utf-8", errors="replace",
             timeout=180,
             cwd=str(work_dir) if work_dir.is_dir() else None,
             env=isolated_env(eval_id, work_dir),
+            progress_tracker=progress_tracker,
         )
-        passed = result.returncode == 0
+        if rwp.timed_out:
+            return False, (
+                "Tests timed out after 60s — likely a background thread or process leak. "
+                "Ensure all threads use daemon=True and add proper cleanup in test teardown "
+                "(e.g. @pytest.fixture with yield + stop() call)."
+            )
+        passed = rwp.returncode == 0
         if passed:
             if shadow_warnings:
                 return passed, (
@@ -163,10 +171,10 @@ def run_tests(
             return passed, "Tests passed"
         # Extract specific failure lines for actionable feedback
         failure_lines = []
-        for line in result.stdout.split("\n"):
+        for line in rwp.stdout.split("\n"):
             if any(kw in line for kw in ("FAILED", "AssertionError", "Error:", "error")):
                 failure_lines.append(line)
-        detail = "\n".join(failure_lines[-20:]) if failure_lines else result.stdout[-500:]
+        detail = "\n".join(failure_lines[-20:]) if failure_lines else rwp.stdout[-500:]
         msg = f"Tests failed:\n{detail}"
         if shadow_warnings:
             msg += (
@@ -191,6 +199,7 @@ def run_lint(
     targets: list[str],
     work_dir: Path,
     auto_format_before_eval: bool = False,
+    progress_tracker=None,
 ) -> tuple[bool, str, list[str], list[str], list[str], list[str]]:
     """Dry-run autofix then delta-lint resolved target files.
 
@@ -219,7 +228,7 @@ def run_lint(
         )
 
     # Auto-fix unused imports/variables via autoflake --in-place (#283).
-    autofixed_files = auto_fix_unused(resolved, work_dir)
+    autofixed_files = auto_fix_unused(resolved, work_dir, progress_tracker=progress_tracker)
     if autofixed_files:
         logger.info(
             "autoflake removed unused imports from %d file(s): %s",
@@ -227,7 +236,7 @@ def run_lint(
         )
 
     # Apply autopep8 in-place formatting to fix whitespace issues (#206).
-    formatted_files = auto_format_apply(resolved, work_dir, auto_format_before_eval)
+    formatted_files = auto_format_apply(resolved, work_dir, auto_format_before_eval, progress_tracker=progress_tracker)
     auto_formatted_files = formatted_files
     if formatted_files:
         logger.info(
@@ -238,21 +247,21 @@ def run_lint(
     # Run flake8 (or ruff fallback)
     lint_stdout = ""
     try:
-        result = subprocess.run(
+        rwp = run_with_progress(
             [sys.executable, "-m", "flake8"] + resolved
             + ["--max-line-length=100"],
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=60,
+            timeout=60,
+            progress_tracker=progress_tracker,
         )
-        lint_stdout = result.stdout
+        lint_stdout = rwp.stdout
     except FileNotFoundError:
         try:
-            result = subprocess.run(
+            rwp = run_with_progress(
                 ["ruff", "check"] + resolved,
-                capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=60,
+                timeout=60,
+                progress_tracker=progress_tracker,
             )
-            lint_stdout = result.stdout
+            lint_stdout = rwp.stdout
         except FileNotFoundError:
             return (
                 False, "No linter available (install flake8 or ruff)",
@@ -264,7 +273,7 @@ def run_lint(
             autofixed_files, auto_formatted_files, lint_new_issues, lint_all_issues,
         )
 
-    if result.returncode == 0:
+    if rwp.returncode == 0:
         msg = "Lint clean"
         if autofixed_files:
             msg = (
@@ -374,7 +383,7 @@ def run_lint(
     )
 
 
-def auto_fix_unused(resolved: list[str], work_dir: Path) -> list[str]:
+def auto_fix_unused(resolved: list[str], work_dir: Path, progress_tracker=None) -> list[str]:
     """Remove unused imports and variables via autoflake --in-place (#283).
 
     Returns list of relative paths of files that were actually modified.
@@ -391,20 +400,21 @@ def auto_fix_unused(resolved: list[str], work_dir: Path) -> list[str]:
             pass
 
     try:
-        subprocess.run(
+        rwp = run_with_progress(
             [
                 sys.executable, "-m", "autoflake",
                 "--in-place",
                 "--remove-all-unused-imports",
                 "--remove-unused-variables",
             ] + resolved,
-            capture_output=True, text=True, timeout=30,
+            timeout=30,
+            progress_tracker=progress_tracker,
         )
+        if rwp.timed_out:
+            logger.warning("autoflake timed out, skipping unused import fix")
+            return []
     except FileNotFoundError:
         logger.debug("autoflake not installed, skipping unused import fix")
-        return []
-    except subprocess.TimeoutExpired:
-        logger.warning("autoflake timed out, skipping unused import fix")
         return []
     except Exception as exc:
         logger.warning("autoflake error: %s", exc)
@@ -425,7 +435,7 @@ def auto_fix_unused(resolved: list[str], work_dir: Path) -> list[str]:
     return changed
 
 
-def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False) -> list[str]:
+def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False, progress_tracker=None) -> list[str]:
     """Apply autopep8 in-place formatting to fix whitespace issues (#206).
 
     Returns list of relative paths of files that were actually modified.
@@ -443,25 +453,26 @@ def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False
             pass
 
     try:
-        result = subprocess.run(
+        rwp = run_with_progress(
             [
                 sys.executable, "-m", "autopep8",
                 "--in-place",
                 "--select=E203,E303,W291,W293,W605,E302",
             ] + resolved,
-            capture_output=True, text=True, timeout=30,
+            timeout=30,
+            progress_tracker=progress_tracker,
         )
-        if result.returncode != 0:
+        if rwp.timed_out:
+            logger.warning("autopep8 timed out, skipping auto-format")
+            return []
+        if rwp.returncode != 0:
             logger.debug(
                 "autopep8 skipped (rc=%d): %s",
-                result.returncode, result.stderr[-500:],
+                rwp.returncode, rwp.stderr[-500:],
             )
             return []
     except FileNotFoundError:
         logger.debug("autopep8 not installed, skipping auto-format")
-        return []
-    except subprocess.TimeoutExpired:
-        logger.warning("autopep8 timed out, skipping auto-format")
         return []
     except Exception as exc:
         logger.warning("autopep8 error: %s", exc)
@@ -485,6 +496,7 @@ def auto_format_apply(resolved: list[str], work_dir: Path, enabled: bool = False
 def import_smoke_test(
     artifacts: list[str],
     eval_dir: Path,
+    progress_tracker=None,
 ) -> list[tuple[str, str]]:
     """Try importing each generated .py source file.
 
@@ -514,18 +526,17 @@ def import_smoke_test(
             "\\", ".",
         )
         try:
-            result = subprocess.run(
+            rwp = run_with_progress(
                 [sys.executable, "-c", f"import {module}"],
-                capture_output=True,
-                text=True,
                 timeout=10,
                 cwd=str(eval_dir),
+                progress_tracker=progress_tracker,
             )
-            if result.returncode != 0:
-                err = result.stderr.strip().split("\n")[-1]
+            if rwp.timed_out:
+                errors.append((art, "import timed out (10s)"))
+            elif rwp.returncode != 0:
+                err = rwp.stderr.strip().split("\n")[-1]
                 errors.append((art, err))
-        except subprocess.TimeoutExpired:
-            errors.append((art, "import timed out (10s)"))
         except Exception as exc:
             errors.append((art, str(exc)))
     return errors
@@ -536,6 +547,7 @@ def check_coverage(
     target: int,
     output_artifacts: list[str] | None = None,
     eval_id: str = "",
+    progress_tracker=None,
 ) -> tuple[bool, str, bool]:
     """Check test coverage against target percentage.
 
@@ -585,18 +597,24 @@ def check_coverage(
             # scanning historical files that may have import errors (#165).
             cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"]
 
-        result = subprocess.run(
+        rwp = run_with_progress(
             cmd,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=60,
+            timeout=60,
             cwd=str(work_dir) if work_dir.is_dir() else None,
             env=isolated_env(eval_id, work_dir),
+            progress_tracker=progress_tracker,
         )
+
+        if rwp.timed_out:
+            return False, (
+                "Coverage check timed out after 60s — likely a background thread leak. "
+                "Use daemon threads and proper test teardown."
+            ), True
 
         # Parse TOTAL line via regex — handles both compact and wide formats:
         #   TOTAL  123  4  97%
         #   TOTAL  123  4  5  97.5%
-        for line in result.stdout.split("\n"):
+        for line in rwp.stdout.split("\n"):
             stripped = line.strip()
             if stripped.startswith("TOTAL"):
                 m = re.search(r"(\d+(?:\.\d+)?)%", stripped)
@@ -609,9 +627,9 @@ def check_coverage(
                     )
 
         # Could not parse TOTAL line — coverage target is unverifiable.
-        stdout_tail = result.stdout[-500:] if result.stdout else ""
-        stderr_tail = result.stderr[-500:] if result.stderr else ""
-        if result.returncode == 0:
+        stdout_tail = rwp.stdout[-500:] if rwp.stdout else ""
+        stderr_tail = rwp.stderr[-500:] if rwp.stderr else ""
+        if rwp.returncode == 0:
             if not output_artifacts:
                 return True, (
                     f"Coverage could not be verified: no output_artifacts "
@@ -628,11 +646,6 @@ def check_coverage(
             f"Tests failed and coverage report could not be parsed. "
             f"stdout_tail=...{stdout_tail} "
             f"stderr_tail=...{stderr_tail}"
-        ), True
-    except subprocess.TimeoutExpired:
-        return False, (
-            "Coverage check timed out after 60s — likely a background thread leak. "
-            "Use daemon threads and proper test teardown."
         ), True
     except Exception as e:
         return False, f"Coverage check error: {e}", True

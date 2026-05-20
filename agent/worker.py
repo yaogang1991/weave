@@ -112,6 +112,7 @@ class AgentWorker:
         max_iterations: int = 50,
         cancel_event: threading.Event | None = None,
         progress_callback: Any | None = None,
+        progress_tracker=None,
     ) -> Iterator[AgentMessage]:
         """
         Run the agent loop until no more tool calls or max iterations reached.
@@ -122,7 +123,16 @@ class AgentWorker:
                 at the next iteration boundary (#360 PR2).
             progress_callback: Called after each LLM response and tool
                 execution to report progress to the watchdog (#360 PR3).
+            progress_tracker: Optional progress tracker with a report() method
+                for structured progress reporting.
         """
+
+        def _report_progress():
+            if progress_callback:
+                progress_callback()
+            if progress_tracker:
+                progress_tracker.report("worker_iteration")
+
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
@@ -183,8 +193,7 @@ class AgentWorker:
                 self._run_token_usage["output_tokens"] += usage.get("output_tokens", 0)
 
                 # Report progress: LLM responded (#360 PR3)
-                if progress_callback:
-                    progress_callback()
+                _report_progress()
 
                 self.session_store.emit_event(
                     session_id,
@@ -258,11 +267,11 @@ class AgentWorker:
 
             # M4.2: Stuck detection via composable StuckDetector
             stuck_result = stuck_detector.observe(assistant_message, any_tool_executed)
-
             # P1 (#607): Inject recovery hint on first degenerate detection
             if stuck_result.needs_hint:
                 logger.warning(
                     "Degenerate empty-args detected — injecting recovery hint (#607)",
+
                 )
                 self.session_store.emit_event(
                     session_id,
@@ -313,6 +322,7 @@ class AgentWorker:
                     session_id,
                     EventType.AGENT_STUCK,
                     {
+
                         "pattern": stuck_result.pattern.value if stuck_result.pattern else None,
                         "consecutive_count": stuck_result.consecutive_count,
                         "threshold": stuck_result.threshold,

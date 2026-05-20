@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 from tools.registry import ToolRegistry
 
@@ -34,14 +35,14 @@ class TestAutopep8Format:
                     if p.suffix == ".py" and p.exists():
                         content = p.read_text()
                         p.write_text(content.replace("   \n", "\n"))
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "autoflake" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -58,12 +59,12 @@ class TestAutopep8Format:
             if "autopep8" in cmd:
                 raise FileNotFoundError("autopep8 not found")
             if "autoflake" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -79,12 +80,12 @@ class TestAutopep8Format:
             if "autopep8" in cmd:
                 raise RuntimeError("autopep8 crashed")
             if "autoflake" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -98,14 +99,14 @@ class TestAutopep8Format:
 
         def fake_run(cmd, **kwargs):
             if "autopep8" in cmd:
-                return MagicMock(returncode=1, stdout="", stderr="parse error")
+                return SubprocessResult(returncode=1, stdout="", stderr="parse error")
             if "autoflake" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -122,16 +123,16 @@ class TestAutopep8Format:
         def fake_run(cmd, **kwargs):
             if "autoflake" in cmd:
                 order.append("autoflake")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "autopep8" in cmd:
                 order.append("autopep8")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
                 order.append("flake8")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             engine._run_lint(["target.py"], tmp_path)
 
         assert order == ["autoflake", "autopep8", "flake8"]
@@ -147,16 +148,16 @@ class TestAutopep8Format:
         def fake_run(cmd, **kwargs):
             if "autoflake" in cmd:
                 order.append("autoflake")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "autopep8" in cmd:
                 order.append("autopep8")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
                 order.append("flake8")
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             passed, msg = engine._run_lint(["target.py"], tmp_path)
 
         assert passed
@@ -180,14 +181,14 @@ class TestAutopep8Format:
                     p = Path(arg)
                     if p.suffix == ".py" and p.exists():
                         p.write_text(p.read_text().replace("   \n", "\n"))
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "autoflake" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             engine._run_lint(["pkg/a.py", "a.py"], tmp_path)
 
         assert sorted(p.replace("\\", "/") for p in engine._last_auto_formatted) == ["a.py", "pkg/a.py"]
@@ -205,14 +206,14 @@ class TestAutopep8Format:
                 assert "E501" not in select_arg
                 assert "E203" in select_arg
                 assert "W291" in select_arg
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "autoflake" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return MagicMock(returncode=0, stdout="", stderr="")
+                return SubprocessResult(returncode=0, stdout="", stderr="")
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
-        with patch("evaluator.runner.subprocess.run", side_effect=fake_run):
+        with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
             engine._run_lint(["target.py"], tmp_path)
 
 

@@ -26,7 +26,8 @@ class TestRateLimitCooldown:
         client = self._make_client()
         call_count = 0
 
-        def mock_call_once(messages, tools=None, tool_choice=None):
+        def mock_call_once(messages, tools=None, tool_choice=None,
+                           progress_tracker=None, cancel_event=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:

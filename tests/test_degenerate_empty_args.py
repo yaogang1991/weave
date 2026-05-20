@@ -167,7 +167,9 @@ def test_degenerate_counter_resets_on_valid_call():
         empty_response,   # iter 5: empty (degenerate=3) → break
     ]
 
-    def next_response(messages, tools=None, max_retries=None):
+    def next_response(messages, tools=None, max_retries=None,
+                      agent_timeout=None, tool_choice=None,
+                      progress_tracker=None, cancel_event=None):
         idx = min(call_count[0], len(responses) - 1)
         call_count[0] += 1
         return responses[idx]

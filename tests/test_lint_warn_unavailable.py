@@ -8,6 +8,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from core.models import CriterionType, SuccessCriterion
+from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine
 
 
@@ -25,7 +26,7 @@ def evaluator(tmp_store):
 class TestLintWarnWhenUnavailable:
     """When no linter is installed, lint becomes WARN instead of FAIL."""
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_no_linter_returns_warn(self, mock_run, evaluator, tmp_path):
         """Both flake8 and ruff missing → WARN, not FAIL."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
@@ -46,14 +47,14 @@ class TestLintWarnWhenUnavailable:
         assert "lint skipped" in msg.lower()
         assert "No linter available" in msg
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_lint_with_real_issues_still_fails(self, mock_run, evaluator, tmp_path):
         """When linter runs and finds issues, it still fails."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),  # autoflake ok
-            MagicMock(returncode=0, stdout=""),  # autopep8 ok
-            MagicMock(returncode=1, stdout="code.py:1: E501 line too long"),  # flake8 issues
+            SubprocessResult(returncode=0, stdout="", stderr=""),  # autoflake ok
+            SubprocessResult(returncode=0, stdout="", stderr=""),  # autopep8 ok
+            SubprocessResult(returncode=1, stdout="code.py:1: E501 line too long", stderr=""),  # flake8 issues
         ]
         passed, msg, auto = evaluator._check_criterion(
             SuccessCriterion(type=CriterionType.LINT, description="lint clean"),
@@ -63,14 +64,14 @@ class TestLintWarnWhenUnavailable:
         assert not passed
         assert auto
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_lint_clean_still_passes(self, mock_run, evaluator, tmp_path):
         """When linter runs and finds nothing, it passes."""
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
         mock_run.side_effect = [
-            MagicMock(returncode=0, stdout=""),  # autoflake ok
-            MagicMock(returncode=0, stdout=""),  # autopep8 ok
-            MagicMock(returncode=0, stdout=""),  # flake8 clean
+            SubprocessResult(returncode=0, stdout="", stderr=""),  # autoflake ok
+            SubprocessResult(returncode=0, stdout="", stderr=""),  # autopep8 ok
+            SubprocessResult(returncode=0, stdout="", stderr=""),  # flake8 clean
         ]
         passed, msg, auto = evaluator._check_criterion(
             SuccessCriterion(type=CriterionType.LINT, description="lint clean"),
@@ -80,7 +81,7 @@ class TestLintWarnWhenUnavailable:
         assert passed
         assert auto
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_no_linter_in_evaluate_stage(self, mock_run, evaluator, tmp_path):
         """Full evaluate_stage: no linter → WARN, overall still passes."""
         (tmp_path / "hello.py").write_text("x = 1\n", encoding="utf-8")
@@ -89,7 +90,7 @@ class TestLintWarnWhenUnavailable:
             FileNotFoundError("autopep8"),
             FileNotFoundError("flake8"),
             FileNotFoundError("ruff"),
-            MagicMock(returncode=0, stdout="", stderr=""),  # import smoke test
+            SubprocessResult(returncode=0, stdout="", stderr=""),  # import smoke test
         ]
         result = evaluator.evaluate_stage(
             "s1", "impl",
@@ -108,7 +109,7 @@ class TestLintWarnWhenUnavailable:
         assert "WARN" in result.feedback
         assert "lint skipped" in result.feedback.lower()
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_no_files_to_lint_passes(self, mock_run, evaluator, tmp_path):
         """No output_artifacts → lint passes by default."""
         passed, msg, auto = evaluator._check_criterion(

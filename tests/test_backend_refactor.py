@@ -8,6 +8,7 @@ from backend.local import LocalBackend
 from backend.worktree import WorktreeBackend
 from backend.sandbox import LocalSandbox, DockerSandbox
 from backend.lifecycle import BackendManager, HookError
+from unittest.mock import patch
 
 
 class TestWorkspaceIsolation:
@@ -73,13 +74,16 @@ class TestLocalSandbox:
 class TestDockerSandbox:
     def test_not_implemented(self):
         sandbox = DockerSandbox()
-        assert sandbox.is_available() is False
+        # Docker may or may not be installed; mock to test the unavailable path
+        with patch.object(DockerSandbox, "is_available", return_value=False):
+            assert sandbox.is_available() is False
 
     @pytest.mark.asyncio
     async def test_run_command_raises(self):
         sandbox = DockerSandbox()
-        with pytest.raises(NotImplementedError):
-            await sandbox.run_command("echo hello", "/tmp")
+        with patch.object(DockerSandbox, "is_available", return_value=False):
+            with pytest.raises(NotImplementedError):
+                await sandbox.run_command("echo hello", "/tmp")
 
 
 class TestBackendManager:

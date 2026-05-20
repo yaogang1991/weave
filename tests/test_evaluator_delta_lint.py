@@ -73,7 +73,7 @@ class TestLintIssue:
 
 
 class TestDeltaLint:
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_existing_lint_not_counted_as_failure(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -97,7 +97,7 @@ class TestDeltaLint:
         # (fallback behavior — can't distinguish)
         assert not passed
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_new_issue_on_changed_line_is_failure(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -124,7 +124,7 @@ class TestDeltaLint:
         assert "1 new issue" in msg
         assert "E501" in msg
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_existing_issue_on_unchanged_line_is_ignored(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -150,7 +150,7 @@ class TestDeltaLint:
         assert passed
         assert "pre-existing" in msg
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_mixed_new_and_existing(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -180,7 +180,7 @@ class TestDeltaLint:
         assert "1 new issue" in msg
         assert "1 existing ignored" in msg
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_no_git_diff_falls_back_to_all_issues(
         self, mock_run, evaluator, tmp_path,
     ):
@@ -206,7 +206,7 @@ class TestDeltaLint:
         assert not passed
         assert "delta unavailable" in msg
 
-    @patch("evaluator.runner.subprocess.run")
+    @patch("evaluator.runner.run_with_progress")
     def test_lint_clean_still_passes(
         self, mock_run, evaluator, tmp_path,
     ):

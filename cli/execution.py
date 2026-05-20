@@ -348,6 +348,7 @@ def _build_runtime(
         cc_backend = ClaudeCodeBackend(config=cc_config)
         backend_registry.register("claude_code", cc_backend)
 
+
     # M4.2: Budget manager from CLI args
     budget_manager = None
     budget_tokens = getattr(args, "budget_tokens", None)

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.models import ToolResult
+from core.subprocess_runner import run_with_progress
 from tools.command_runner import ToolCommandRunner
 from tools.schemas import TOOL_SCHEMAS
 from tools.validators import validate_bash_command
@@ -56,6 +57,7 @@ class ToolRegistry:
         self._tools: dict[str, Callable] = {}
         self._schemas: dict[str, dict] = {}
         self.sandbox_runner: ToolCommandRunner | None = sandbox_runner
+        self.progress_tracker = None
         # Track whether base_cwd was explicitly set for containment enforcement
         self._base_cwd_explicit = base_cwd is not None
         self.base_cwd = Path(base_cwd).resolve() if base_cwd else None
@@ -428,19 +430,13 @@ class ToolRegistry:
                         error=f"Command timed out after {timeout}s",
                     )
             else:
-                result = subprocess.run(
-                    command,
-                    shell=True,
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    timeout=timeout,
-                    cwd=str(run_cwd),
+                rwp = run_with_progress(
+                    command, shell=True, timeout=timeout, cwd=str(run_cwd),
+                    progress_tracker=self.progress_tracker,
                 )
-                returncode = result.returncode
-                stdout = result.stdout
-                stderr = result.stderr
+                returncode = rwp.returncode
+                stdout = rwp.stdout
+                stderr = rwp.stderr
             output = f"[cwd] {run_cwd}\n{stdout}"
             if stderr:
                 output += "\n" + stderr
@@ -549,23 +545,18 @@ class ToolRegistry:
         args = args or []
         full_cmd = ["git", command] + args
         try:
-            result = subprocess.run(
-                full_cmd,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-                cwd=str(self._get_effective_cwd()),
+            rwp = run_with_progress(
+                full_cmd, timeout=60, cwd=str(self._get_effective_cwd()),
+                progress_tracker=self.progress_tracker,
             )
-            output = result.stdout
-            if result.stderr:
-                output += "\n" + result.stderr
+            output = rwp.stdout
+            if rwp.stderr:
+                output += "\n" + rwp.stderr
             return ToolResult(
                 tool_call_id="",
-                success=result.returncode == 0,
+                success=rwp.returncode == 0,
                 output=output,
-                error=result.stderr if result.returncode != 0 else "",
+                error=rwp.stderr if rwp.returncode != 0 else "",
             )
         except Exception as e:
             return ToolResult(tool_call_id="", success=False, error=str(e))
