@@ -269,6 +269,9 @@ class NodeExecutor:
                     upstream_artifacts
                     and self._is_test_node(node)
                 ):
+                    # Inherit artifacts but do NOT set SUCCESS or return —
+                    # let the node continue through quality gate and
+                    # evaluator, which decide the final status.
                     logger.warning(
                         "Node %s (%s) produced zero output but upstream has "
                         "%d artifacts — inheriting for evaluation (#626)",
@@ -277,19 +280,17 @@ class NodeExecutor:
                     node = dag.update_node(
                         node_id,
                         output_artifacts=upstream_artifacts,
-                        status=NodeStatus.SUCCESS,
-                        completed_at=datetime.now(timezone.utc),
                     )
                     await self._emit(ExecutionEvent(
                         node_id=node_id,
-                        event_type="completed",
+                        event_type="degeneration_recovered",
                         details={
                             "reason": "inherited_upstream_artifacts",
                             "inherited_count": len(upstream_artifacts),
                         },
                     ))
-                    return
-                else:
+                    # Fall through to quality gate + evaluator
+                elif not upstream_artifacts or not self._is_test_node(node):
                     node = dag.update_node(
                         node_id,
                         error=(
@@ -772,7 +773,7 @@ class NodeExecutor:
     # -- #626: Test node deep degeneration recovery helpers --
 
     _TEST_NODE_PATTERN: re.Pattern = re.compile(
-        r'\b(tests?|spec|specs|verify|coverage)\b', re.IGNORECASE,
+        r'\b(tests?|specs?)\b', re.IGNORECASE,
     )
 
     @classmethod
@@ -794,6 +795,7 @@ class NodeExecutor:
             if edge.to_node == node_id:
                 dep_ids.add(edge.from_node)
 
+        seen: set[str] = set()
         artifacts: list[str] = []
         for dep_id in dep_ids:
             dep_node = dag.nodes.get(dep_id)
@@ -802,5 +804,8 @@ class NodeExecutor:
                 and QualityGate.is_terminal_success(dep_node.status)
                 and dep_node.output_artifacts
             ):
-                artifacts.extend(dep_node.output_artifacts)
+                for a in dep_node.output_artifacts:
+                    if a not in seen:
+                        seen.add(a)
+                        artifacts.append(a)
         return artifacts
