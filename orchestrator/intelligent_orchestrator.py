@@ -262,7 +262,10 @@ class IntelligentOrchestrator:
                     ),
                 })
                 messages = self._prune_messages_for_size(messages)
-                response = self.llm.call(messages, tools=[])
+                response = self.llm.call(
+                    messages, tools=[],
+                    max_tokens_override=self._PLANNER_MAX_TOKENS,
+                )
                 plan_data = extract_json(response.get("content", ""))
                 if plan_data is None:
                     raise ValueError(
@@ -320,6 +323,7 @@ class IntelligentOrchestrator:
                 messages_copy,
                 tools=[structured_tool],
                 tool_choice={"type": "tool", "name": "generate_dag"},
+                max_tokens_override=self._PLANNER_MAX_TOKENS,
             )
 
             # Extract tool_use input from response
@@ -371,10 +375,16 @@ class IntelligentOrchestrator:
             )
             return None
 
+    # Named constant: planner uses higher max_tokens to avoid truncation (#621).
+    _PLANNER_MAX_TOKENS = 8192
+
     def _plan_free_text(self, messages: list[dict]) -> dict:
         """Fallback: free-text JSON parsing with retry (original behavior).
 
         Used when structured output is unavailable or fails.
+        Uses higher max_tokens to prevent JSON truncation on complex plans (#621).
+        On persistent truncation, retries with a simplified prompt requesting
+        fewer nodes.
         """
         max_retries = 2
         plan_data = None
@@ -382,12 +392,16 @@ class IntelligentOrchestrator:
 
         for attempt in range(max_retries + 1):
             messages = self._prune_messages_for_size(messages)
-            response = self.llm.call(messages, tools=[])
+            response = self.llm.call(
+                messages, tools=[],
+                max_tokens_override=self._PLANNER_MAX_TOKENS,
+            )
             plan_data = extract_json(response.get("content", ""))
             if plan_data is not None:
                 break
             if attempt < max_retries:
                 failed_content = response.get("content", "")
+                is_truncated = self._is_response_truncated(failed_content)
                 if len(failed_content) > 2000:
                     failed_content = (
                         failed_content[:2000]
@@ -397,13 +411,31 @@ class IntelligentOrchestrator:
                     "role": "assistant",
                     "content": failed_content,
                 })
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Your previous response could not be parsed as valid JSON. "
-                        "Please provide the plan as a valid JSON object."
-                    ),
-                })
+                if is_truncated:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Your previous response was truncated. "
+                            "CRITICAL: produce a SIMPLER plan with at most "
+                            "6 nodes. Use very short task descriptions "
+                            "(under 20 words each). Keep reasoning to one "
+                            "sentence. The total response MUST be valid JSON "
+                            "that fits within the output token limit."
+                        ),
+                    }),
+                    logger.info(
+                        "Planner response truncated on attempt %d, "
+                        "retrying with simplified prompt (#621)",
+                        attempt + 1,
+                    )
+                else:
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Your previous response could not be parsed as valid JSON. "
+                            "Please provide the plan as a valid JSON object."
+                        ),
+                    })
 
         if plan_data is None:
             last_response = response.get("content", "")
@@ -420,6 +452,26 @@ class IntelligentOrchestrator:
             )
 
         return plan_data
+
+    @staticmethod
+    def _is_response_truncated(content: str) -> bool:
+        """Detect if planner JSON response was truncated (#621).
+
+        Truncation is indicated by:
+        - Content starts with '{' but doesn't end with '}'
+        - Content ends mid-string or mid-key
+        """
+        if not content:
+            return False
+        stripped = content.strip()
+        if not stripped.startswith("{"):
+            return False
+        if stripped.endswith("}"):
+            return False
+        # Count braces — if more opens than closes, likely truncated.
+        opens = stripped.count("{")
+        closes = stripped.count("}")
+        return opens > closes
 
     async def plan_from_template(
         self,
@@ -508,7 +560,10 @@ class IntelligentOrchestrator:
             {"role": "user", "content": f"Handle failure of node {failed_node_id}"},
         ]
 
-        response = self.llm.call(messages, tools=[])
+        response = self.llm.call(
+            messages, tools=[],
+            max_tokens_override=self._PLANNER_MAX_TOKENS,
+        )
 
         try:
             decision_data = extract_json(response.get("content", ""))
@@ -679,7 +734,10 @@ class IntelligentOrchestrator:
         plan_data = None
         for attempt in range(max_retries + 1):
             messages = self._prune_messages_for_size(messages)
-            response = self.llm.call(messages, tools=[])
+            response = self.llm.call(
+                messages, tools=[],
+                max_tokens_override=self._PLANNER_MAX_TOKENS,
+            )
             plan_data = extract_json(response.get("content", ""))
             if plan_data is not None:
                 break

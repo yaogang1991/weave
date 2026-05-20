@@ -265,7 +265,7 @@ class TestCooperativeCancellation:
         worker = AgentWorker(config, store)
 
         # Mock LLM to return a tool call every time
-        def mock_call(messages, tools):
+        def mock_call(messages, tools, **kwargs):
             nonlocal call_count
             call_count += 1
             return {

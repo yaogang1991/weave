@@ -103,7 +103,7 @@ def test_plan_receives_existing_files_in_prompt(tmp_path):
     captured_messages = []
 
     class FakeLLM:
-        def call(self, messages, tools=None, max_retries=None):
+        def call(self, messages, tools=None, max_retries=None, **kwargs):
             captured_messages.append(messages)
             # Return a valid plan JSON
             return {
@@ -160,7 +160,7 @@ def test_plan_no_existing_files_section_when_empty():
     captured_messages = []
 
     class FakeLLM:
-        def call(self, messages, tools=None, max_retries=None):
+        def call(self, messages, tools=None, max_retries=None, **kwargs):
             captured_messages.append(messages)
             return {
                 "content": json.dumps({
