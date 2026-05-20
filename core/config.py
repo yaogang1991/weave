@@ -365,12 +365,14 @@ class EvalTimeoutScaleConfig(BaseModel):
         default=int(os.getenv(
             "WEAVE_EVAL_TIMEOUT_PER_FILE", "5",
         )),
+        ge=1,
         description="Additional seconds per output file for evaluator timeout",
     )
     max_timeout: int = Field(
         default=int(os.getenv(
             "WEAVE_EVAL_TIMEOUT_MAX", "1200",
         )),
+        ge=1,
         description="Upper cap for dynamically scaled evaluator timeout",
     )
 
@@ -435,6 +437,8 @@ class NodeTimeoutConfig(BaseModel):
     @property
     def max_timeout(self) -> int:
         values = [self.default_timeout, *self.overrides.values()]
+        if self.eval_scale.enabled:
+            values.append(self.eval_scale.max_timeout)
         return max(values)
 
 
