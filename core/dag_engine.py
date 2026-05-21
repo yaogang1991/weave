@@ -248,18 +248,34 @@ class DAGExecutionEngine:
         For each node that succeeded in old_dag and also exists in new_dag,
         copy over its status, result, output_artifacts, and timestamps so
         the re-executed plan does not re-run already-completed work.
+
+        Nodes in old_dag that don't exist in new_dag are also preserved
+        so the execution summary counts ALL nodes, not just the replan
+        subset (#720).
         """
         merged = new_dag
         for node_id, node in old_dag.nodes.items():
-            if QualityGate.is_terminal_success(node.status) and node_id in merged.nodes:
-                merged.update_node(
-                    node_id,
-                    status=node.status,
-                    result=node.result,
-                    output_artifacts=node.output_artifacts,
-                    started_at=node.started_at,
-                    completed_at=node.completed_at,
-                )
+            if node_id in merged.nodes:
+                # Node exists in both — preserve success state
+                if QualityGate.is_terminal_success(node.status):
+                    merged.update_node(
+                        node_id,
+                        status=node.status,
+                        result=node.result,
+                        output_artifacts=node.output_artifacts,
+                        started_at=node.started_at,
+                        completed_at=node.completed_at,
+                    )
+            else:
+                # Node only in old DAG — preserve it so summary is
+                # accurate (#720).  Pending nodes become SKIPPED since
+                # the replan replaced them.
+                if node.status == NodeStatus.PENDING:
+                    merged.add_node(node.model_copy(update={
+                        "status": NodeStatus.SKIPPED,
+                    }))
+                else:
+                    merged.add_node(node.model_copy())
         return merged
 
     # ------------------------------------------------------------------
