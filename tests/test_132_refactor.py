@@ -219,7 +219,7 @@ class TestWorkerAgentExecutionContext:
 
         call_count = [0]
 
-        def mock_llm_call(messages, tools):
+        def mock_llm_call(messages, tools, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 return {

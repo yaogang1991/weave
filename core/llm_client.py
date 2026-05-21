@@ -43,6 +43,11 @@ _TRANSIENT_MARKERS = frozenset(
     ("rate", "timeout", "connection", "overload", "429", "503", "502", "ratelimit")
 )
 
+
+class _HardTimeoutError(TimeoutError):
+    """Hard wall-clock timeout or cancel_event — NOT transient, do not retry (#674)."""
+    pass
+
 # Process-global semaphore to limit concurrent API calls across all
 # parallel DAG nodes (#300).  Initialized on first use.
 _global_api_semaphore: threading.Semaphore | None = None
@@ -225,6 +230,8 @@ class LLMClient:
                     self._last_rate_limit_recovery = time.monotonic()
                     logger.info("Rate-limit recovery cooldown started (#583)")
                 return result
+            except _HardTimeoutError:
+                raise  # Hard timeout / cancel — not transient (#674)
             except Exception as e:
                 if attempt == retries:
                     # Rate-limit exhausted all retries → RateLimitError (#360).
@@ -332,8 +339,8 @@ class LLMClient:
                 if time.monotonic() >= deadline:
                     break
                 if cancel_event and cancel_event.is_set():
-                    logger.info("LLM call cancelled via cancel_event")
-                    raise asyncio.CancelledError("LLM call cancelled by node timeout")
+                    logger.info("LLM call cancelled via cancel_event (#674)")
+                    raise _HardTimeoutError("LLM call cancelled by node timeout")
                 if progress_tracker:
                     progress_tracker.report(ProgressReport("llm_call_waiting"))
             if thread.is_alive():
@@ -344,7 +351,7 @@ class LLMClient:
                     self._hard_timeout, self.config.timeout,
                     self.config.provider, self.config.model,
                 )
-                raise TimeoutError(
+                raise _HardTimeoutError(
                     f"LLM call exceeded hard timeout of {self._hard_timeout}s "
                     f"(SDK timeout: {self.config.timeout}s). "
                     f"Provider: {self.config.provider}, Model: {self.config.model}"
