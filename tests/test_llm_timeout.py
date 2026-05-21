@@ -102,7 +102,7 @@ class TestHardTimeout:
             assert result["content"] == "hello"
 
     def test_hard_timeout_is_config_timeout_plus_buffer(self):
-        """Hard timeout = config.timeout * 2 + 30s buffer."""
+        """Hard timeout = config.timeout + 30s buffer (#669)."""
         config = _make_config(timeout=2)
 
         with patch("core.llm_client.OpenAI") as mock_openai:
@@ -114,7 +114,7 @@ class TestHardTimeout:
         # _call_once now uses a segmented join loop with 5s intervals,
         # so we verify the computed hard_timeout value directly instead of
         # trying to capture the thread.join() timeout argument.
-        assert client._hard_timeout == 34  # 2s config * 2 + 30s buffer
+        assert client._hard_timeout == 32  # 2s config + 30s buffer (#669)
 
     def test_semaphore_released_on_hard_timeout(self):
         """Semaphore permit must be released even when hard timeout fires (#367 review)."""
