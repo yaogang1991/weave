@@ -591,6 +591,10 @@ class NodeExecutor:
                     cancel_event.set()
                     if not task.done():
                         task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
                     raise NodeTimeoutError(
                         node_id=node.id,
                         agent_type=node.agent_type,
@@ -599,11 +603,17 @@ class NodeExecutor:
                 should_kill, reason = tracker.should_kill()
                 if should_kill:
                     cancel_event.set()
+                    if not task.done():
+                        task.cancel()
                     logger.warning(
                         "Node %s (%s) killed: %s (elapsed %.0fs)",
                         node.id, node.agent_type, reason,
                         tracker.elapsed,
                     )
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
                     raise NodeTimeoutError(
                         node_id=node.id,
                         agent_type=node.agent_type,
