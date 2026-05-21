@@ -392,6 +392,7 @@ def _build_runtime(
         node_timeout_config=config.node_timeout,
         backend_registry=backend_registry,
         budget_manager=budget_manager,
+        node_timeout_config=config.node_timeout,
     )
 
     return {
