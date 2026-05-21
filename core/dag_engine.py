@@ -781,6 +781,13 @@ class DAGExecutionEngine:
         warned = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.WARNED)
         failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
         skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
+        # #676: Evaluator failures are non-critical (informational only).
+        # Exclude them from all_succeeded so implementation success
+        # is not masked by evaluation timeouts.
+        non_eval_failed = sum(
+            1 for n in dag.nodes.values()
+            if n.status == NodeStatus.FAILED and n.agent_type != "evaluator"
+        )
 
         summary = {
             "total_nodes": total,
@@ -789,7 +796,11 @@ class DAGExecutionEngine:
             "warned": warned,
             "failed": failed,
             "skipped": skipped,
-            "all_succeeded": failed == 0 and skipped == 0 and partial_pass == 0,
+            "all_succeeded": (
+                non_eval_failed == 0
+                and skipped == 0
+                and partial_pass == 0
+            ),
             "node_details": {
                 nid: {
                     "status": n.status.value,

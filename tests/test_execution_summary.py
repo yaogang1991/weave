@@ -65,3 +65,52 @@ class TestExecutionSummary:
 
         details = summary["node_details"]["eval_1"]
         assert "eval_feedback" not in details
+
+    def test_evaluator_failure_does_not_affect_all_succeeded(self):
+        """Evaluator failure is non-critical — all_succeeded still True (#676)."""
+        dag = DAG(reasoning="test")
+        dag.add_node(DAGNode(
+            id="gen_1", agent_type="generator", task_description="implement",
+        ))
+        dag.add_node(DAGNode(
+            id="eval_1", agent_type="evaluator", task_description="evaluate",
+        ))
+        dag.update_node("gen_1", status=NodeStatus.SUCCESS)
+        dag.update_node("eval_1", status=NodeStatus.FAILED)
+
+        engine = _make_engine()
+        summary = engine.get_execution_summary(dag)
+
+        assert summary["failed"] == 1
+        assert summary["success"] == 1
+        assert summary["all_succeeded"] is True
+
+    def test_generator_failure_affects_all_succeeded(self):
+        """Non-evaluator failures still affect all_succeeded."""
+        dag = DAG(reasoning="test")
+        dag.add_node(DAGNode(
+            id="gen_1", agent_type="generator", task_description="implement",
+        ))
+        dag.update_node("gen_1", status=NodeStatus.FAILED)
+
+        engine = _make_engine()
+        summary = engine.get_execution_summary(dag)
+
+        assert summary["all_succeeded"] is False
+
+    def test_all_success_all_succeeded(self):
+        """All nodes succeeding → all_succeeded True."""
+        dag = DAG(reasoning="test")
+        dag.add_node(DAGNode(
+            id="gen_1", agent_type="generator", task_description="implement",
+        ))
+        dag.add_node(DAGNode(
+            id="eval_1", agent_type="evaluator", task_description="evaluate",
+        ))
+        dag.update_node("gen_1", status=NodeStatus.SUCCESS)
+        dag.update_node("eval_1", status=NodeStatus.SUCCESS)
+
+        engine = _make_engine()
+        summary = engine.get_execution_summary(dag)
+
+        assert summary["all_succeeded"] is True
