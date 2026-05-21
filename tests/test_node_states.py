@@ -313,14 +313,16 @@ class TestExecutionSummary:
         assert summary["skipped"] == 1
 
     def test_all_succeeded_with_partial_pass(self):
-        """PARTIAL_PASS + SUCCESS with no failures = all_succeeded."""
+        """PARTIAL_PASS should NOT count as all_succeeded (#673)."""
         dag = _make_dag({
             "n1": _make_node("n1", status=NodeStatus.SUCCESS),
             "n2": _make_node("n2", status=NodeStatus.PARTIAL_PASS),
         })
         engine = _make_engine()
         summary = engine.get_execution_summary(dag)
-        assert summary["all_succeeded"]
+        assert not summary["all_succeeded"]
+        assert summary["partial_pass"] == 1
+        assert summary["success"] == 1
 
 
 # =====================================================================

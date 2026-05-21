@@ -789,7 +789,7 @@ class DAGExecutionEngine:
             "warned": warned,
             "failed": failed,
             "skipped": skipped,
-            "all_succeeded": failed == 0 and skipped == 0,
+            "all_succeeded": failed == 0 and skipped == 0 and partial_pass == 0,
             "node_details": {
                 nid: {
                     "status": n.status.value,
