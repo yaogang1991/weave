@@ -194,7 +194,11 @@ class NodeExecutor:
                     )
                     return
 
-                # Evaluation failure -> return, dag_engine handles retry
+                # Evaluation failure → return to dag_engine for retry.
+                # Unlike execution errors (which retry in this while loop),
+                # evaluation failures are handled by dag_engine's
+                # retry_failure_handler, which may choose to re-plan,
+                # re-execute a different node, or retry this one.
                 return
 
         except asyncio.CancelledError:
@@ -630,13 +634,28 @@ class NodeExecutor:
     def _get_stall_timeout(
         self, agent_type: str, node: DAGNode | None = None,
     ) -> int:
-        """Return dynamic stall timeout (M4.5)."""
+        """Return dynamic stall timeout (M4.5).
+
+        Derives file_count/test_count/dep_count from node metadata
+        (same approach as EvaluationPipeline._get_stall_timeout).
+        """
         if self._node_timeout_config is not None:
+            file_count = 0
+            test_count = 0
             dep_count = 0
-            if node and hasattr(node, 'dependencies') and node.dependencies:
-                dep_count = len(node.dependencies)
+            if node:
+                artifacts = node.output_artifacts or []
+                test_count = sum(
+                    1 for a in artifacts if 'test' in a.lower()
+                )
+                file_count = len(artifacts) - test_count
+                if hasattr(node, 'dependencies') and node.dependencies:
+                    dep_count = len(node.dependencies)
             return self._node_timeout_config.stall_timeout_for(
-                agent_type, dep_count=dep_count,
+                agent_type,
+                file_count=file_count,
+                test_count=test_count,
+                dep_count=dep_count,
             )
         return self._get_node_timeout(agent_type)
 

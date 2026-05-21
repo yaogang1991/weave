@@ -521,10 +521,9 @@ class EvaluationPipeline:
 
     @staticmethod
     def _collect_upstream_artifacts(dag: DAG, node_id: str) -> list[str]:
-        dep_ids = set()
-        for edge in dag.edges:
-            if edge.to_node == node_id:
-                dep_ids.add(edge.from_node)
+        hard_deps = dag.get_hard_dependencies(node_id)
+        soft_deps = dag.get_soft_dependencies(node_id)
+        dep_ids = set(hard_deps + soft_deps)
 
         seen: set[str] = set()
         artifacts: list[str] = []
