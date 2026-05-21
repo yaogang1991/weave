@@ -54,7 +54,7 @@ class TokenEstimator:
     def __init__(
         self,
         config: TokenEstimationConfig,
-        client: anthropic.Anthropic | None = None,
+        client: anthropic.Anthropic | anthropic.AsyncAnthropic | None = None,
         model: str = "claude-sonnet-4-6",
     ):
         self._config = config
@@ -157,10 +157,7 @@ class TokenEstimator:
         if context.tools:
             kwargs["tools"] = context.tools
 
-        loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None, lambda: self._client.messages.count_tokens(**kwargs),
-        )
+        result = await self._client.messages.count_tokens(**kwargs)
         return result.input_tokens
 
     def _heuristic_estimate(self, context: NodeTokenContext) -> int:
