@@ -526,12 +526,41 @@ class DAGExecutionEngine:
 
                             # Check if retry resolved this failure
                             if not QualityGate.is_terminal_success(dag.nodes[failed_id].status):
-                                # This failure was not resolved — but don't skip
-                                # all remaining levels (#259). Instead, let
-                                # downstream nodes decide via dependency check
-                                # in _execute_single_node. Only abort (full
-                                # skip) happens on explicit "abort" decision.
-                                pass
+                                # Retry failed — ask failure_handler for a
+                                # fallback decision (skip / replan / abort)
+                                # instead of leaving the node FAILED and
+                                # silently skipping all downstream (#670).
+                                fallback = await self.failure_handler(
+                                    dag, failed_id,
+                                    dag.nodes[failed_id].error,
+                                )
+                                await self._emit(ExecutionEvent(
+                                    node_id=failed_id,
+                                    event_type="failure_decision",
+                                    details={
+                                        "action": fallback.action,
+                                        "reasoning": fallback.reasoning,
+                                        "trigger": "retry_exhausted_fallback",
+                                    },
+                                ))
+                                if fallback.action == "abort":
+                                    self._skip_remaining(dag, levels, level_idx + 1)
+                                    return dag
+                                elif fallback.action == "skip":
+                                    dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+                                elif fallback.action == "replan":
+                                    if replan_count >= self.max_replans:
+                                        self._skip_remaining(dag, levels, level_idx + 1)
+                                        return dag
+                                    if self.replan_handler is not None:
+                                        new_dag = await self.replan_handler(dag, failed_id)
+                                        dag = self._merge_dag_results(dag, new_dag)
+                                        replan_count += 1
+                                        levels = dag.topological_levels()
+                                        level_idx = 0
+                                        break
+                                    else:
+                                        dag.update_node(failed_id, status=NodeStatus.SKIPPED)
 
                         elif decision.action == "skip":
                             dag.update_node(failed_id, status=NodeStatus.SKIPPED)
