@@ -310,3 +310,19 @@ class TestUpstreamRetryGuard:
 
         assert "gen" not in executed_nodes
         assert "eval" in executed_nodes
+
+
+class TestDegenerationRecoveredEvent:
+    """#663: degeneration_recovered should be a valid ExecutionEvent type."""
+
+    def test_degeneration_recovered_is_valid_event_type(self):
+        """ExecutionEvent accepts degeneration_recovered as event_type (#663)."""
+        from core.dag_models import ExecutionEvent
+
+        event = ExecutionEvent(
+            node_id="test_node",
+            event_type="degeneration_recovered",
+            details={"reason": "inherited_upstream_artifacts"},
+        )
+        assert event.event_type == "degeneration_recovered"
+        assert event.details["reason"] == "inherited_upstream_artifacts"
