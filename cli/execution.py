@@ -364,9 +364,7 @@ def _build_runtime(
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
-        replan_handler=lambda dag_ref, failed_id: orchestrator.replan(
-            dag_ref, failed_id,
-        ),
+        replan_handler=orchestrator.replan,
         max_parallel=args.max_parallel,
         evaluator=evaluator,
         artifact_path=config.artifact_path,
