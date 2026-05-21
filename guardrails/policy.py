@@ -179,6 +179,16 @@ class Guardrails:
                     )
 
         # 2. Mode-based routing
+        if self.interactive and self.policy.mode not in (
+            PermissionMode.ACCEPT_EDITS,
+        ):
+            logger.warning(
+                "interactive=True has no effect in %s mode — "
+                "HIGH/CRITICAL tools will still return pending_approval",
+                self.policy.mode.value,
+            )
+            self.interactive = False
+
         if self.policy.mode == PermissionMode.DONT_ASK:
             return self._evaluate_dont_ask_mode(tool_name, risk)
 

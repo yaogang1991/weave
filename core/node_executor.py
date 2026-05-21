@@ -214,6 +214,11 @@ class NodeExecutor:
                 completed_at=datetime.now(timezone.utc),
             )
             logger.info("Node %s paused for approval", node_id)
+            await self._emit(ExecutionEvent(
+                node_id=node_id,
+                event_type="approval_required",
+                details={"ticket": "pending"},
+            ))
             raise
 
         except (RateLimitError, NodeTimeoutError) as e:
