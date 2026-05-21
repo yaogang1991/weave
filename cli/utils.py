@@ -280,6 +280,9 @@ def _serialize_dag(dag: DAG) -> dict:
                     sc.model_dump(mode="json") if isinstance(sc, SuccessCriterion) else sc
                     for sc in n.success_criteria
                 ],
+                "estimated_tokens": n.estimated_tokens,
+                "token_budget": n.token_budget,
+                "actual_tokens": n.actual_tokens,
             }
             for n in dag.nodes.values()
         ],

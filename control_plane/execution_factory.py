@@ -87,16 +87,25 @@ class ExecutionFactory:
         # M4.6: Inject TokenEstimator for token-aware DAG splitting (#671)
         _cfg = WeaveConfig.from_env()
         if _cfg.token_estimation.enabled:
+            import anthropic
             from core.token_estimator import TokenEstimator
+            client = None
+            if self._llm_config.provider == "anthropic" and self._llm_config.api_key:
+                client = anthropic.AsyncAnthropic(
+                    api_key=self._llm_config.api_key,
+                    base_url=self._llm_config.base_url or None,
+                )
             estimator = TokenEstimator(
                 config=_cfg.token_estimation,
+                client=client,
                 model=self._llm_config.model,
             )
             orchestrator._token_estimator = estimator
             logger.info(
-                "TokenEstimator injected (model=%s, budget=%d) (#671)",
+                "TokenEstimator injected (model=%s, budget=%d, api=%s) (#671)",
                 self._llm_config.model,
                 _cfg.token_estimation.target_budget,
+                "enabled" if client else "heuristic-only",
             )
 
         return orchestrator
