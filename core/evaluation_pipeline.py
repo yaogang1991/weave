@@ -178,21 +178,24 @@ class EvaluationPipeline:
         result: dict[str, Any],
     ) -> None:
         token_usage = result.get("token_usage", {})
-        if not token_usage or not self._budget_manager:
+        if not token_usage:
             return
-        self._budget_manager.record_usage(
-            input_tokens=token_usage.get("input_tokens", 0),
-            output_tokens=token_usage.get("output_tokens", 0),
-        )
         total = (
             token_usage.get("input_tokens", 0)
             + token_usage.get("output_tokens", 0)
         )
+        if total == 0:
+            return
         dag.update_node(node_id, token_usage={
             "input_tokens": token_usage.get("input_tokens", 0),
             "output_tokens": token_usage.get("output_tokens", 0),
             "total_tokens": total,
         }, actual_tokens=total)
+        if self._budget_manager:
+            self._budget_manager.record_usage(
+                input_tokens=token_usage.get("input_tokens", 0),
+                output_tokens=token_usage.get("output_tokens", 0),
+            )
 
     # ------------------------------------------------------------------
     # Step 2: Artifact collection
