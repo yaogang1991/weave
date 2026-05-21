@@ -615,6 +615,80 @@ class IntelligentOrchestrator:
             )
             dag.add_edge(edge_def["from"], edge_def["to"], dependency_type=dep_type)
 
+        # #689: Fallback edge inference when LLM produces empty edges.
+        # Without this, all nodes execute in parallel with no dependency
+        # ordering — eval runs before code exists, tests run before source.
+        if not plan.edges:
+            dag = self._infer_fallback_edges(dag)
+
+        return dag
+
+    @staticmethod
+    def _infer_fallback_edges(dag: DAG) -> DAG:
+        """Infer dependency edges when LLM produces an empty edge list (#689).
+
+        Rules (applied in order):
+        1. All non-planner nodes depend on planner nodes (plan → impl_*).
+        2. All non-generator, non-planner nodes depend on all generators
+           (impl_source → impl_tests, impl_source → eval).
+        3. Evaluators depend on all generators (impl_* → eval).
+
+        Returns a new DAG with inferred edges added.
+        """
+        planner_ids = [
+            nid for nid, n in dag.nodes.items()
+            if n.agent_type == "planner"
+        ]
+        generator_ids = [
+            nid for nid, n in dag.nodes.items()
+            if n.agent_type == "generator"
+        ]
+        evaluator_ids = [
+            nid for nid, n in dag.nodes.items()
+            if n.agent_type == "evaluator"
+        ]
+
+        existing_edges = {
+            (e.from_node, e.to_node) for e in dag.edges
+        }
+
+        # Rule 1: non-planner depends on planner
+        for planner_id in planner_ids:
+            for nid, node in dag.nodes.items():
+                if nid == planner_id:
+                    continue
+                if node.agent_type == "planner":
+                    continue
+                if (planner_id, nid) not in existing_edges:
+                    dag.add_edge(planner_id, nid)
+                    existing_edges.add((planner_id, nid))
+
+        # Rule 2: non-generator, non-planner depends on generators
+        non_gen_non_plan = [
+            nid for nid, n in dag.nodes.items()
+            if n.agent_type not in ("generator", "planner")
+        ]
+        for gen_id in generator_ids:
+            for target_id in non_gen_non_plan:
+                if (gen_id, target_id) not in existing_edges:
+                    dag.add_edge(gen_id, target_id)
+                    existing_edges.add((gen_id, target_id))
+
+        # Rule 3: evaluator depends on all generators
+        for gen_id in generator_ids:
+            for eval_id in evaluator_ids:
+                if (gen_id, eval_id) not in existing_edges:
+                    dag.add_edge(gen_id, eval_id)
+                    existing_edges.add((gen_id, eval_id))
+
+        if existing_edges:
+            logger.warning(
+                "LLM produced empty edges — inferred %d fallback edges "
+                "from agent types (#689): %s",
+                len(existing_edges),
+                ", ".join(f"{f}→{t}" for f, t in existing_edges),
+            )
+
         return dag
 
     @staticmethod
