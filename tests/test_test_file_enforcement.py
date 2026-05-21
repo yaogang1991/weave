@@ -10,12 +10,13 @@ import pytest
 from core.models import (
     DAG, DAGNode, NodeStatus, CriterionType, SuccessCriterion,
 )
+from core.quality_gate import QualityGate
 from core.dag_engine import DAGExecutionEngine
 
 
 class TestIsTestFileExistsCriterion:
     def test_structured_test_file_exists(self):
-        assert DAGExecutionEngine._is_test_file_exists_criterion(
+        assert QualityGate.is_test_file_exists_criterion(
             SuccessCriterion(
                 type=CriterionType.TEST_FILE_EXISTS,
                 description="test files must exist"
@@ -23,25 +24,25 @@ class TestIsTestFileExistsCriterion:
         )
 
     def test_string_test_file_exists(self):
-        assert DAGExecutionEngine._is_test_file_exists_criterion("test_file_exists")
+        assert QualityGate.is_test_file_exists_criterion("test_file_exists")
 
     def test_string_not_test_file_exists(self):
-        assert not DAGExecutionEngine._is_test_file_exists_criterion("lint clean")
+        assert not QualityGate.is_test_file_exists_criterion("lint clean")
 
     def test_structured_lint(self):
-        assert not DAGExecutionEngine._is_test_file_exists_criterion(
+        assert not QualityGate.is_test_file_exists_criterion(
             SuccessCriterion(type=CriterionType.LINT, description="lint"),
         )
 
     def test_tests_pass_is_not_test_file_exists(self):
         """TESTS_PASS should NOT trigger test file enforcement."""
-        assert not DAGExecutionEngine._is_test_file_exists_criterion(
+        assert not QualityGate.is_test_file_exists_criterion(
             SuccessCriterion(type=CriterionType.TESTS_PASS, description="tests pass"),
         )
 
     def test_string_tests_pass_is_not_test_file_exists(self):
         """String 'tests pass' should NOT trigger test file enforcement."""
-        assert not DAGExecutionEngine._is_test_file_exists_criterion("tests pass")
+        assert not QualityGate.is_test_file_exists_criterion("tests pass")
 
 
 class TestTestFileEnforcement:

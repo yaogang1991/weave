@@ -64,7 +64,7 @@ class TestPartialProgress:
         dag = _make_dag()
 
         # First attempt
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
         assert dag.nodes["gen_1"].status == NodeStatus.FAILED
         assert engine._best_attempts["gen_1"]["score"] == 7.5
 
@@ -73,7 +73,7 @@ class TestPartialProgress:
         dag.nodes["gen_1"].error = ""
         dag.nodes["gen_1"].retry_count = 0
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
         # Should still be FAILED but NOT due to regression
         assert dag.nodes["gen_1"].status == NodeStatus.FAILED
         # Best should be updated (not regression)
@@ -103,13 +103,13 @@ class TestPartialProgress:
         engine = _make_engine(tmp_path, [eval1, eval2])
         dag = _make_dag()
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         dag.nodes["gen_1"].status = NodeStatus.RETRYING
         dag.nodes["gen_1"].error = ""
         dag.nodes["gen_1"].retry_count = 0
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
         # Not regression — best should be updated
         best = engine._best_attempts["gen_1"]
         assert len(best["lint_issues"]) == 1  # Fixed one issue
@@ -134,13 +134,13 @@ class TestPartialProgress:
         engine = _make_engine(tmp_path, [eval1, eval2])
         dag = _make_dag()
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         dag.nodes["gen_1"].status = NodeStatus.RETRYING
         dag.nodes["gen_1"].error = ""
         dag.nodes["gen_1"].retry_count = 0
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
         # Should be FAILED — best NOT updated (regression)
         best = engine._best_attempts["gen_1"]
         assert best["score"] == 7.5  # Original best kept
@@ -168,13 +168,13 @@ class TestPartialProgress:
         engine = _make_engine(tmp_path, [eval1, eval2])
         dag = _make_dag()
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
 
         dag.nodes["gen_1"].status = NodeStatus.RETRYING
         dag.nodes["gen_1"].error = ""
         dag.nodes["gen_1"].retry_count = 0
 
-        await engine._execute_single_node(dag, "gen_1")
+        await engine._node_executor.execute_node(dag, "gen_1")
         # Best should be updated (whitespace-only = lint-only)
         best = engine._best_attempts["gen_1"]
         assert "W291 whitespace line 5" in best["lint_issues"]

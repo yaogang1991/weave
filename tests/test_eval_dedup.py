@@ -73,7 +73,7 @@ class TestAutoEvalHandoff:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         # Should have 2 artifacts: generator output + auto-eval result
         assert len(artifacts) == 2
@@ -118,7 +118,7 @@ class TestAutoEvalHandoff:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "gen2")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "gen2")
 
         # Should only have generator output, NOT auto-eval result
         auto_eval_artifacts = [a for a in artifacts if a.from_agent == "auto_evaluator"]
@@ -157,7 +157,7 @@ class TestAutoEvalHandoff:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         auto_eval_artifacts = [a for a in artifacts if a.from_agent == "auto_evaluator"]
         assert len(auto_eval_artifacts) == 0
@@ -219,7 +219,7 @@ class TestAutoEvalResultAlignment:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         auto_eval_artifacts = [
             a for a in artifacts if a.from_agent == "auto_evaluator"
@@ -273,7 +273,7 @@ class TestAutoEvalResultAlignment:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         eval_handoff = [a for a in artifacts if a.from_agent == "auto_evaluator"]
         assert len(eval_handoff) == 1
@@ -322,7 +322,7 @@ class TestAutoEvalResultAlignment:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         eval_handoff = [a for a in artifacts if a.from_agent == "auto_evaluator"]
         assert len(eval_handoff) == 1
@@ -378,7 +378,7 @@ class TestAutoEvalResultAlignment:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         eval_handoff = [a for a in artifacts if a.from_agent == "auto_evaluator"]
         assert len(eval_handoff) == 1
@@ -426,7 +426,7 @@ class TestAutoEvalResultAlignment:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(noop_executor, noop_failure_handler)
-        artifacts = engine._collect_input_artifacts(dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(dag, "eval")
 
         # Failed dep node -> no artifacts at all (not even regular ones)
         assert len(artifacts) == 0, (
@@ -443,7 +443,7 @@ class TestRegressionRestoreEvalResult:
     """
 
     def test_best_attempt_eval_preserved_after_regression(self):
-        """Simulates the full regression restore flow within _execute_single_node.
+        """Simulates the full regression restore flow within execute_node.
 
         Scenario:
         1. First attempt: score 6.0, passed=False -> tracked as best
@@ -614,7 +614,7 @@ class TestRegressionRestoreEvalResult:
         assert gen_result.auto_eval_result["score"] == 8.0
 
         # Now verify downstream evaluator receives correct artifacts
-        artifacts = engine._collect_input_artifacts(result_dag, "eval")
+        artifacts = engine._node_executor._collect_input_artifacts(result_dag, "eval")
         eval_handoff = [
             a for a in artifacts if a.from_agent == "auto_evaluator"
         ]

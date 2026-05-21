@@ -84,7 +84,10 @@ class AnomalyDetector:
         return True
 
     def should_kill(self) -> tuple[bool, str]:
-        return False, ""  # Let stall handle it naturally
+        with self._lock:
+            if self._anomalous:
+                return True, "anomaly detected"
+        return False, ""
 
     @property
     def is_anomalous(self) -> bool:

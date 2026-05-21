@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import CriterionType, DAGNode, SuccessCriterion  # noqa: E402
-from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from core.retry_policy import RetryPolicyEngine  # noqa: E402
 
 
 class TestRequiresOutputArtifacts:
@@ -33,7 +33,7 @@ class TestRequiresOutputArtifacts:
                 ),
             ],
         )
-        assert DAGExecutionEngine._requires_output_artifacts(node) is True
+        assert RetryPolicyEngine.requires_output_artifacts(node) is True
 
     def test_file_changed_only_does_not_require_output(self):
         """FILE_CHANGED-only criteria → does NOT require output (#377)."""
@@ -49,7 +49,7 @@ class TestRequiresOutputArtifacts:
                 ),
             ],
         )
-        assert DAGExecutionEngine._requires_output_artifacts(node) is False
+        assert RetryPolicyEngine.requires_output_artifacts(node) is False
 
     def test_file_changed_plus_file_exists_requires_output(self):
         """Mixed FILE_CHANGED + FILE_EXISTS → requires output."""
@@ -70,7 +70,7 @@ class TestRequiresOutputArtifacts:
                 ),
             ],
         )
-        assert DAGExecutionEngine._requires_output_artifacts(node) is True
+        assert RetryPolicyEngine.requires_output_artifacts(node) is True
 
     def test_no_criteria_does_not_require_output(self):
         """No file criteria → does not require output."""
@@ -85,7 +85,7 @@ class TestRequiresOutputArtifacts:
                 ),
             ],
         )
-        assert DAGExecutionEngine._requires_output_artifacts(node) is False
+        assert RetryPolicyEngine.requires_output_artifacts(node) is False
 
     def test_tests_pass_requires_output(self):
         """TESTS_PASS criteria → requires output."""
@@ -100,7 +100,7 @@ class TestRequiresOutputArtifacts:
                 ),
             ],
         )
-        assert DAGExecutionEngine._requires_output_artifacts(node) is True
+        assert RetryPolicyEngine.requires_output_artifacts(node) is True
 
     def test_planner_with_file_exists_requires_output(self):
         """Planner with FILE_EXISTS criteria → still requires output."""
@@ -117,7 +117,7 @@ class TestRequiresOutputArtifacts:
             ],
         )
         # Original behavior: FILE_EXISTS always requires output
-        assert DAGExecutionEngine._requires_output_artifacts(node) is True
+        assert RetryPolicyEngine.requires_output_artifacts(node) is True
 
     def test_planner_with_no_criteria_does_not_require(self):
         """Planner with no file criteria → does not require output."""
@@ -127,12 +127,12 @@ class TestRequiresOutputArtifacts:
             task_description="plan DAG",
             success_criteria=[],
         )
-        assert DAGExecutionEngine._requires_output_artifacts(node) is False
+        assert RetryPolicyEngine.requires_output_artifacts(node) is False
 
 
 # -- #626: Test node deep degeneration recovery --
 
-from core.node_executor import NodeExecutor  # noqa: E402
+from core.evaluation_pipeline import EvaluationPipeline  # noqa: E402
 from core.models import DAG, NodeStatus  # noqa: E402
 from core.dag_models import DAGEdge  # noqa: E402
 
@@ -147,39 +147,39 @@ class TestIsTestNode:
 
     def test_explicit_test_task(self):
         node = self._make_node("Write unit tests for the API module")
-        assert NodeExecutor._is_test_node(node) is True
+        assert EvaluationPipeline._is_test_node(node) is True
 
     def test_tests_keyword(self):
         node = self._make_node("Create tests for authentication")
-        assert NodeExecutor._is_test_node(node) is True
+        assert EvaluationPipeline._is_test_node(node) is True
 
     def test_spec_keyword(self):
         node = self._make_node("Write spec verification for user model")
-        assert NodeExecutor._is_test_node(node) is True
+        assert EvaluationPipeline._is_test_node(node) is True
 
     def test_implementation_task(self):
         node = self._make_node("Implement REST API endpoints for users")
-        assert NodeExecutor._is_test_node(node) is False
+        assert EvaluationPipeline._is_test_node(node) is False
 
     def test_case_insensitive(self):
         node = self._make_node("Add TEST coverage for the parser")
-        assert NodeExecutor._is_test_node(node) is True
+        assert EvaluationPipeline._is_test_node(node) is True
 
     def test_contest_no_false_positive(self):
         node = self._make_node("Contest registration system")
-        assert NodeExecutor._is_test_node(node) is False
+        assert EvaluationPipeline._is_test_node(node) is False
 
     def test_investigate_no_false_positive(self):
         node = self._make_node("Investigate memory leaks in production")
-        assert NodeExecutor._is_test_node(node) is False
+        assert EvaluationPipeline._is_test_node(node) is False
 
     def test_verify_no_false_positive(self):
         node = self._make_node("Verify the output format is correct")
-        assert NodeExecutor._is_test_node(node) is False
+        assert EvaluationPipeline._is_test_node(node) is False
 
     def test_coverage_no_false_positive(self):
         node = self._make_node("Build coverage report dashboard for metrics")
-        assert NodeExecutor._is_test_node(node) is False
+        assert EvaluationPipeline._is_test_node(node) is False
 
 
 class TestCollectUpstreamArtifacts:
@@ -201,7 +201,7 @@ class TestCollectUpstreamArtifacts:
             nodes={"impl": impl_node, "test": test_node},
             edges=[DAGEdge(from_node="impl", to_node="test")],
         )
-        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        result = EvaluationPipeline._collect_upstream_artifacts(dag, "test")
         assert result == ["src/api.py", "src/models.py"]
 
     def test_skips_failed_deps(self):
@@ -220,7 +220,7 @@ class TestCollectUpstreamArtifacts:
             nodes={"impl": impl_node, "test": test_node},
             edges=[DAGEdge(from_node="impl", to_node="test")],
         )
-        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        result = EvaluationPipeline._collect_upstream_artifacts(dag, "test")
         assert result == []
 
     def test_no_deps_returns_empty(self):
@@ -229,7 +229,7 @@ class TestCollectUpstreamArtifacts:
             task_description="Plan the project",
         )
         dag = DAG(nodes={"plan": node}, edges=[])
-        result = NodeExecutor._collect_upstream_artifacts(dag, "plan")
+        result = EvaluationPipeline._collect_upstream_artifacts(dag, "plan")
         assert result == []
 
     def test_collects_from_partial_pass_deps(self):
@@ -248,7 +248,7 @@ class TestCollectUpstreamArtifacts:
             nodes={"impl": impl_node, "test": test_node},
             edges=[DAGEdge(from_node="impl", to_node="test")],
         )
-        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        result = EvaluationPipeline._collect_upstream_artifacts(dag, "test")
         assert result == ["src/api.py"]
 
     def test_collects_from_warned_deps(self):
@@ -267,7 +267,7 @@ class TestCollectUpstreamArtifacts:
             nodes={"impl": impl_node, "test": test_node},
             edges=[DAGEdge(from_node="impl", to_node="test")],
         )
-        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        result = EvaluationPipeline._collect_upstream_artifacts(dag, "test")
         assert result == ["src/api.py"]
 
     def test_deduplicates_overlapping_artifacts(self):
@@ -295,6 +295,6 @@ class TestCollectUpstreamArtifacts:
                 DAGEdge(from_node="impl_b", to_node="test"),
             ],
         )
-        result = NodeExecutor._collect_upstream_artifacts(dag, "test")
+        result = EvaluationPipeline._collect_upstream_artifacts(dag, "test")
         assert sorted(result) == ["src/api.py", "src/helpers.py", "src/utils.py"]
         assert len(result) == 3  # no duplicates
