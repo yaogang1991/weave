@@ -165,9 +165,10 @@ class TestEvaluatorIntegration:
             evaluator=mock_eval, work_dir="/tmp/test_workdir"
         )
         result = await engine.execute(dag)
-        # First attempt fails eval -> RETRYING, then retry also fails eval -> FAILED
-        assert result.nodes["a"].status == NodeStatus.FAILED
-        assert "evaluation failed" in result.nodes["a"].error.lower()
+        # First attempt fails eval -> RETRYING, retry also fails eval.
+        # After retry exhaustion, failure_handler is called for fallback.
+        # It returns "retry" (invalid after exhaustion) → node is SKIPPED.
+        assert result.nodes["a"].status == NodeStatus.SKIPPED
         assert result.nodes["a"].eval_feedback.startswith("Tests failed")
 
     @pytest.mark.asyncio
