@@ -13,10 +13,12 @@ Unified tri-state result:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import select
 import sys
+import threading
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +35,8 @@ from tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from control_plane.approval import ApprovalRepository
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -128,6 +132,7 @@ class Guardrails:
             Path(project_dir).resolve() if project_dir else None
         )
         self.interactive = interactive
+        self._stdin_lock = threading.Lock()
         self._pending_approvals: dict[str, str] = {}
         # Instance-level copy to prevent cross-instance leakage (#413 review).
         self.RISK_MAP = dict(self.RISK_MAP)
@@ -272,29 +277,32 @@ class Guardrails:
     def _interactive_approval_prompt(
         self, tool_name: str, risk: RiskLevel,
     ) -> GuardrailResult:
-        """Prompt user for approval via stdin (interactive mode)."""
-        import sys
+        """Prompt user for approval via stdin (interactive mode).
 
+        Thread-safe: serialises stdin access via _stdin_lock to prevent
+        garbled prompts when multiple nodes run concurrently.
+        """
         risk_label = risk.name
-        print(
-            f"\n⚠  {risk_label} risk tool: {tool_name}",
-            flush=True,
-        )
-        try:
-            answer = input("  Allow? [y/N] ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print("  → Denied", flush=True)
-            return GuardrailResult(
-                decision="blocked",
-                reason=f"{risk_label} risk '{tool_name}' denied by user",
+        with self._stdin_lock:
+            print(
+                f"\n  {risk_label} risk tool: {tool_name}",
+                flush=True,
             )
+            try:
+                answer = input("  Allow? [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                logger.info("%s risk '%s' denied (EOF/interrupt)", risk_label, tool_name)
+                return GuardrailResult(
+                    decision="blocked",
+                    reason=f"{risk_label} risk '{tool_name}' denied by user",
+                )
         if answer in ("y", "yes"):
-            print("  → Approved", flush=True)
+            logger.info("%s risk '%s' approved by user", risk_label, tool_name)
             return GuardrailResult(
                 decision="allowed",
                 reason=f"{risk_label} risk '{tool_name}' approved by user",
             )
-        print("  → Denied", flush=True)
+        logger.info("%s risk '%s' denied by user", risk_label, tool_name)
         return GuardrailResult(
             decision="blocked",
             reason=f"{risk_label} risk '{tool_name}' denied by user",

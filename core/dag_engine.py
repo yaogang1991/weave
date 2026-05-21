@@ -370,24 +370,11 @@ class DAGExecutionEngine:
                         )
                         raise r
 
-                # PendingApprovalError: node already marked PENDING_APPROVAL by
-                # node_executor.  Don't re-raise — let other nodes continue (#666).
-                # Downstream nodes will be skipped via dependency check in prepare.
-                approval_nodes = [
-                    nid for nid, r in zip(pending, results)
-                    if isinstance(r, PendingApprovalError)
-                ]
-                if approval_nodes:
-                    for nid in approval_nodes:
-                        logger.info(
-                            "Node %s awaiting approval — continuing "
-                            "other nodes", nid,
-                        )
-                    await self._emit(ExecutionEvent(
-                        node_id=approval_nodes[0],
-                        event_type="approval_required",
-                        details={"pending_nodes": approval_nodes},
-                    ))
+                # PendingApprovalError — re-raise so callers (worker_executor,
+                # service) can poll for approval and resume (#666).
+                for r in results:
+                    if isinstance(r, PendingApprovalError):
+                        raise r
 
                 # M4.2: Check budget exhaustion after level execution
                 budget_exhausted = any(

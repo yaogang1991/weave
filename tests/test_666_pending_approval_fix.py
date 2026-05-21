@@ -3,7 +3,7 @@
 Verifies that:
 1. Interactive mode prompts user for approval (no PendingApprovalError raised)
 2. Non-interactive mode still returns pending_approval
-3. Node executor sets PENDING_APPROVAL without re-raising
+3. Node executor sets PENDING_APPROVAL then re-raises for caller handling
 4. Downstream nodes are skipped when a dependency is PENDING_APPROVAL
 """
 import pytest
@@ -100,11 +100,11 @@ class TestNonInteractiveStillPending:
 
 
 class TestNodeExecutorPendingApproval:
-    """node_executor sets PENDING_APPROVAL and returns (no re-raise)."""
+    """node_executor sets PENDING_APPROVAL and re-raises for caller handling."""
 
     @pytest.mark.asyncio
-    async def test_sets_pending_approval_and_returns(self):
-        """When agent raises PendingApprovalError, node becomes PENDING_APPROVAL."""
+    async def test_sets_pending_approval_and_raises(self):
+        """When agent raises PendingApprovalError, node becomes PENDING_APPROVAL then re-raises."""
         dag = DAG(reasoning="test")
         dag.add_node(DAGNode(
             id="node_a",
@@ -121,7 +121,8 @@ class TestNodeExecutorPendingApproval:
             watchdog=_make_watchdog_mock(),
         )
 
-        await node_executor.execute_node(dag, "node_a")
+        with pytest.raises(PendingApprovalError):
+            await node_executor.execute_node(dag, "node_a")
         assert dag.nodes["node_a"].status == NodeStatus.PENDING_APPROVAL
 
     @pytest.mark.asyncio
