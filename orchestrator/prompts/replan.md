@@ -29,6 +29,9 @@ A previous execution plan has partially failed. You need to create a new plan fo
    - impl_patch_advanced (reverse + merge)
    - impl_foundation_patch (shared models)
 4. **Reuse successful outputs**: Dependent nodes can reference artifacts from already-completed successful nodes.
+   Check each node's `output_artifacts` for files that already exist. New nodes MUST NOT
+   recreate these files — they should build upon them or create NEW files only.
+   Include the existing file paths in task descriptions so the agent knows what's available.
 5. **Valid agent types ONLY**: Use ONLY the agent types listed above.
 6. **Keep it minimal**: Only include nodes that still need to be executed.
 

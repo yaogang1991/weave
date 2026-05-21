@@ -806,7 +806,7 @@ class IntelligentOrchestrator:
         executed_summary: list[dict[str, Any]] = []
         for nid, node in dag.nodes.items():
             if node.status.value in ("success", "failed"):
-                executed_summary.append({
+                entry = {
                     "id": nid,
                     "agent_type": node.agent_type,
                     "status": node.status.value,
@@ -815,7 +815,14 @@ class IntelligentOrchestrator:
                         node.result.get("summary", "")[:200]
                         if node.result else ""
                     ),
-                })
+                }
+                # Include output artifacts so replanned nodes know which
+                # files already exist (#743). Without this, replanned nodes
+                # have zero context about the project state and fail with
+                # zero_output_artifacts.
+                if node.output_artifacts:
+                    entry["output_artifacts"] = node.output_artifacts[:30]
+                executed_summary.append(entry)
 
         failed_error = dag.nodes[failed_node_id].error[:500] if failed_node_id in dag.nodes else ""
         system_prompt = self._prompt_registry.load("replan").format(
