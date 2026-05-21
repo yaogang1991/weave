@@ -124,6 +124,7 @@ def test_plan_receives_existing_files_in_prompt(tmp_path):
     orchestrator.llm_config = MagicMock()
     orchestrator.llm_config.model = "claude-sonnet-4-6"
     orchestrator.skill_registry = None
+    orchestrator._token_estimator = None
     orchestrator._prompt_registry = MagicMock()
     orchestrator._prompt_registry.load.return_value = (
         "Template with {agent_descriptions}"
@@ -180,6 +181,7 @@ def test_plan_no_existing_files_section_when_empty():
     orchestrator.llm_config = MagicMock()
     orchestrator.llm_config.model = "claude-sonnet-4-6"
     orchestrator.skill_registry = None
+    orchestrator._token_estimator = None
     orchestrator._prompt_registry = MagicMock()
     orchestrator._prompt_registry.load.return_value = "Template {agent_descriptions}"
 

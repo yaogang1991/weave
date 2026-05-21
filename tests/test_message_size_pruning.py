@@ -213,4 +213,5 @@ class TestTokenPruning:
         config = LLMConfig(api_key="test", model="kimi-for-coding")
         orch = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
         orch.llm_config = config
+        orch._token_estimator = None
         assert orch._get_context_window() == 262_144

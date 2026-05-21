@@ -106,6 +106,7 @@ class TestOrchestratorErrorVisibility:
         from orchestrator.prompts import PromptRegistry
         orchestrator = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
         orchestrator._prompt_registry = PromptRegistry()
+        orchestrator._token_estimator = None
         orchestrator.llm = MagicMock()
         orchestrator.llm.call = MagicMock(return_value={
             "content": '{"action": "retry", "reasoning": "fix lint"}',
