@@ -660,13 +660,23 @@ class NodeExecutor:
     ) -> int:
         """Return dynamic stall timeout (M4.5)."""
         if self._node_timeout_config is not None:
-            from core.node_utils import extract_node_complexity
-            file_count, test_count, dep_count = extract_node_complexity(node) if node else (0, 0, 0)
+            from core.node_utils import (
+                estimate_feature_count,
+                extract_node_complexity,
+            )
+            file_count, test_count, dep_count = (
+                extract_node_complexity(node) if node else (0, 0, 0)
+            )
+            feature_count = (
+                estimate_feature_count(node.task_description)
+                if node else 0
+            )
             return self._node_timeout_config.stall_timeout_for(
                 agent_type,
                 file_count=file_count,
                 test_count=test_count,
                 dep_count=dep_count,
+                feature_count=feature_count,
             )
         return self._get_node_timeout(agent_type)
 

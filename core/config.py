@@ -399,7 +399,7 @@ class EvaluatorStallScaleConfig(BaseModel):
 
 
 class GeneratorStallScaleConfig(BaseModel):
-    """Dynamic generator stall timeout scaling based on dependency count."""
+    """Dynamic generator stall timeout scaling based on complexity."""
 
     base: int = Field(
         default=int(os.getenv("WEAVE_GEN_STALL_BASE", "120")),
@@ -409,8 +409,16 @@ class GeneratorStallScaleConfig(BaseModel):
         default=int(os.getenv("WEAVE_GEN_STALL_PER_DEP", "30")),
         ge=0,
     )
+    per_feature: int = Field(
+        default=int(os.getenv("WEAVE_GEN_STALL_PER_FEATURE", "40")),
+        ge=0,
+        description=(
+            "Extra seconds per estimated feature in task description "
+            "(#722). Nodes with many features need more time."
+        ),
+    )
     cap: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "300")),
+        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "600")),
         ge=1,
     )
 
@@ -488,11 +496,12 @@ class NodeTimeoutConfig(BaseModel):
         file_count: int = 0,
         test_count: int = 0,
         dep_count: int = 0,
+        feature_count: int = 0,
     ) -> int:
         """Return dynamic stall timeout: max(configured, complexity-based).
 
-        Caller provides file/test/dependency counts; no I/O performed here.
-        Configured value is always a floor.
+        Caller provides file/test/dependency/feature counts; no I/O
+        performed here.  Configured value is always a floor.
         """
         configured = self.stall_overrides.get(agent_type, self.stall_timeout)
 
@@ -504,10 +513,11 @@ class NodeTimeoutConfig(BaseModel):
                 + test_count * self.eval_stall_scale.per_test,
                 self.eval_stall_scale.cap,
             )
-        elif agent_type == "generator" and dep_count:
+        elif agent_type == "generator" and (dep_count or feature_count):
             dynamic = min(
                 self.gen_stall_scale.base
-                + dep_count * self.gen_stall_scale.per_dep,
+                + dep_count * self.gen_stall_scale.per_dep
+                + feature_count * self.gen_stall_scale.per_feature,
                 self.gen_stall_scale.cap,
             )
 
