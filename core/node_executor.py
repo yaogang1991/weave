@@ -164,10 +164,9 @@ class NodeExecutor:
                     NodeTimeoutError,
                     BudgetExhaustedError,
                 ):
+                    # _HardTimeoutError (TimeoutError subclass) is NOT caught
+                    # here — it propagates as a hard node failure.
                     raise  # System errors -> outer catch
-                    # Note: _HardTimeoutError from llm_client is a TimeoutError
-                    # subclass and is NOT caught here — it propagates as a hard
-                    # node failure (by design, not a graceful cancellation).
                 except Exception as exc:
                     should_retry = await self._handle_exec_error(
                         dag, node_id, node_workspace, exc,

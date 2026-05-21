@@ -62,7 +62,7 @@ class TestHardTimeout:
     """Verify hard timeout kills hanging calls."""
 
     def test_hanging_call_raises_timeout_error(self):
-        """If API hangs beyond hard timeout, TimeoutError is raised."""
+        """If API hangs beyond hard timeout, _HardTimeoutError is raised."""
         config = _make_config(timeout=1)
 
         with patch("core.llm_client.OpenAI") as mock_openai:
