@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -183,10 +184,11 @@ class TokenEstimator:
 
     @staticmethod
     def _cache_key(context: NodeTokenContext) -> str:
+        tool_content = json.dumps(context.tools, sort_keys=True)
         content = (
             f"{context.system_prompt}|{context.task_description}"
             f"|{'|'.join(context.dependency_artifacts)}"
-            f"|{len(context.tools)}"
+            f"|{tool_content}"
         )
         return hashlib.md5(content.encode()).hexdigest()
 
