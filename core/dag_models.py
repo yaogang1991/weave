@@ -414,6 +414,7 @@ class ExecutionEvent(BaseModel):
         "started", "completed", "failed", "retrying", "skipped",
         "heartbeat", "heartbeat_missed", "unhealthy_killed", "health_recovered",
         "health_alert", "failure_decision", "upstream_retry",
+        "approval_required",
     ]
     details: dict[str, Any] = Field(default_factory=dict)
 

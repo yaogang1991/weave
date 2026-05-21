@@ -213,7 +213,13 @@ class NodeExecutor:
                 status=NodeStatus.PENDING_APPROVAL,
                 completed_at=datetime.now(timezone.utc),
             )
-            raise
+            await self._emit(ExecutionEvent(
+                node_id=node_id,
+                event_type="approval_required",
+                details={"node_id": node_id},
+            ))
+            logger.info("Node %s paused for approval", node_id)
+            return
 
         except (RateLimitError, NodeTimeoutError) as e:
             reason = (
@@ -282,7 +288,10 @@ class NodeExecutor:
         hard_deps = dag.get_hard_dependencies(node_id)
         failed_hard = [
             d for d in hard_deps
-            if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
+            if dag.nodes[d].status in (
+                NodeStatus.FAILED, NodeStatus.SKIPPED,
+                NodeStatus.PENDING_APPROVAL,
+            )
         ]
         if failed_hard:
             dag.update_node(
@@ -302,7 +311,10 @@ class NodeExecutor:
         soft_deps = dag.get_soft_dependencies(node_id)
         failed_soft = [
             d for d in soft_deps
-            if dag.nodes[d].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
+            if dag.nodes[d].status in (
+                NodeStatus.FAILED, NodeStatus.SKIPPED,
+                NodeStatus.PENDING_APPROVAL,
+            )
         ]
         if failed_soft:
             logger.info(
