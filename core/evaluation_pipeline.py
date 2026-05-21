@@ -485,18 +485,8 @@ class EvaluationPipeline:
         self, agent_type: str, node: Any = None,
     ) -> int:
         if self._node_timeout_config is not None:
-            file_count = 0
-            test_count = 0
-            dep_count = 0
-            if node:
-                artifacts = node.output_artifacts or []
-                test_count = sum(
-                    1 for a in artifacts
-                    if 'test' in a.lower()
-                )
-                file_count = len(artifacts) - test_count
-                if hasattr(node, 'dependencies') and node.dependencies:
-                    dep_count = len(node.dependencies)
+            from core.node_utils import extract_node_complexity
+            file_count, test_count, dep_count = extract_node_complexity(node) if node else (0, 0, 0)
             return self._node_timeout_config.stall_timeout_for(
                 agent_type,
                 file_count=file_count,
