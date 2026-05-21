@@ -90,6 +90,7 @@ async def cmd_plan(args):
             learning_optimizer=learning_optimizer,
             skill_registry=skill_registry,
         )
+        _inject_token_estimator(orchestrator, config.llm)
 
         print(f"Planning: {args.requirement}")
         print(f"Available agents: {[a.id for a in registry.list_agents()]}")
@@ -326,6 +327,7 @@ def _build_runtime(
         learning_optimizer=learning_optimizer,
         skill_registry=skill_registry,
     )
+    _inject_token_estimator(orchestrator, config.llm)
 
     # Evaluator
     from evaluator.engine import EvaluatorEngine
@@ -603,3 +605,24 @@ async def cmd_serve(args):
         file=sys.stderr,
     )
     await server.run()
+
+
+def _inject_token_estimator(orchestrator: IntelligentOrchestrator, llm_config) -> None:
+    """Inject TokenEstimator into orchestrator for M4.6 token-aware planning (#671)."""
+    try:
+        from core.token_estimator import TokenEstimator
+        from core.config import TokenEstimationConfig
+        import anthropic as _anthropic
+
+        cfg = TokenEstimationConfig()
+        client = None
+        if llm_config.api_key:
+            try:
+                client = _anthropic.Anthropic(api_key=llm_config.api_key)
+            except Exception:
+                pass
+        orchestrator._token_estimator = TokenEstimator(
+            config=cfg, client=client, model=llm_config.model,
+        )
+    except Exception:
+        pass

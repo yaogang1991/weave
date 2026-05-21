@@ -83,6 +83,31 @@ class ExecutionFactory:
             llm_router=getattr(self, "_llm_router", None),
             learning_optimizer=learning_optimizer,
         )
+        # M4.6: Inject TokenEstimator so token-aware DAG splitting works (#671)
+        self._inject_token_estimator(orchestrator)
+        return orchestrator
+
+    def _inject_token_estimator(self, orchestrator: IntelligentOrchestrator) -> None:
+        """Inject TokenEstimator into orchestrator for M4.6 token-aware planning."""
+        try:
+            from core.token_estimator import TokenEstimator
+            from core.config import TokenEstimationConfig
+            import anthropic
+
+            config = TokenEstimationConfig()
+            client = None
+            if self._llm_config.api_key:
+                try:
+                    client = anthropic.Anthropic(api_key=self._llm_config.api_key)
+                except Exception:
+                    pass
+            orchestrator._token_estimator = TokenEstimator(
+                config=config,
+                client=client,
+                model=self._llm_config.model,
+            )
+        except Exception as exc:
+            logger.debug("TokenEstimator injection skipped: %s", exc)
 
         # M4.6: Inject TokenEstimator for token-aware DAG splitting (#671)
         _cfg = WeaveConfig.from_env()
