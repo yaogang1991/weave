@@ -208,6 +208,9 @@ def _load_dag_from_file(plan_file: str) -> DAG:
             agent_type=node_def["agent_type"],
             task_description=node_def["task"],
             success_criteria=node_def.get("success_criteria", []),
+            estimated_tokens=node_def.get("estimated_tokens", 0),
+            token_budget=node_def.get("token_budget", 8192),
+            actual_tokens=node_def.get("actual_tokens", 0),
         ))
     for edge_def in plan_data.get("edges", []):
         dag.add_edge(edge_def["from"], edge_def["to"])
