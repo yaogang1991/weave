@@ -798,6 +798,10 @@ class DAGExecutionEngine:
                         (n.completed_at - n.started_at).total_seconds() * 1000
                         if n.completed_at and n.started_at else None
                     ),
+                    **(
+                        {"eval_feedback": n.eval_feedback}
+                        if n.eval_feedback else {}
+                    ),
                 }
                 for nid, n in dag.nodes.items()
             },
