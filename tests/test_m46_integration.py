@@ -19,7 +19,6 @@ class TestTokenEstimationPipeline:
     def test_estimate_all_agent_types(self):
         cfg = TokenEstimationConfig()
         est = TokenEstimator(cfg, client=None)
-        loop = asyncio.get_event_loop()
         for agent_type in ["generator", "evaluator", "planner"]:
             node = DAGNode(
                 id=f"test_{agent_type}",
@@ -27,7 +26,7 @@ class TestTokenEstimationPipeline:
                 task_description="Implement user authentication module",
             )
             ctx = build_node_context(node, SYSTEM_PROMPTS)
-            result = loop.run_until_complete(
+            result = asyncio.run(
                 est.estimate_node_tokens(node.id, ctx),
             )
             assert result.estimated_tokens > 0
@@ -46,7 +45,7 @@ class TestTokenEstimationPipeline:
             (nid, build_node_context(node, SYSTEM_PROMPTS))
             for nid, node in dag.nodes.items()
         ]
-        results = asyncio.get_event_loop().run_until_complete(
+        results = asyncio.run(
             est.estimate_nodes_batch(nodes),
         )
         assert len(results) == 5
@@ -66,7 +65,7 @@ class TestTokenEstimationPipeline:
             task_description="Build auth",
             agent_type="generator",
         )
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("gen_1", ctx),
         )
         assert result.estimation_method == "api"
@@ -144,7 +143,7 @@ class TestCrossComponentIntegration:
             (nid, build_node_context(node, SYSTEM_PROMPTS))
             for nid, node in dag.nodes.items()
         ]
-        results = asyncio.get_event_loop().run_until_complete(
+        results = asyncio.run(
             est.estimate_nodes_batch(nodes),
         )
         for r in results:

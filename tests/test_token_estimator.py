@@ -33,7 +33,7 @@ class TestHeuristicEstimation:
     def test_basic(self):
         est = _estimator()
         ctx = _ctx(task="a" * 100)
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert result.estimation_method == "heuristic"
@@ -43,7 +43,7 @@ class TestHeuristicEstimation:
     def test_breakdown(self):
         est = _estimator()
         ctx = _ctx(task="hello world")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert "system" in result.breakdown
@@ -52,7 +52,7 @@ class TestHeuristicEstimation:
     def test_empty_context(self):
         est = _estimator()
         ctx = NodeTokenContext()
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert result.estimated_tokens == 0
@@ -62,7 +62,7 @@ class TestNoClientHeuristicOnly:
     def test_client_none_uses_heuristic(self):
         est = _estimator(client=None)
         ctx = _ctx(task="test")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert result.estimation_method == "heuristic"
@@ -79,7 +79,7 @@ class TestAPIEstimation:
         client = self._mock_client(input_tokens=500)
         est = _estimator(client=client)
         ctx = _ctx(task="read main.py")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert result.estimation_method == "api"
@@ -90,7 +90,7 @@ class TestAPIEstimation:
         client.messages.count_tokens = AsyncMock(side_effect=Exception("rate limit"))
         est = _estimator(client=client)
         ctx = _ctx(task="test")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert result.estimation_method == "heuristic"
@@ -101,7 +101,7 @@ class TestAPIEstimation:
         est = _estimator(client=client, fallback_to_heuristic=False)
         ctx = _ctx(task="test")
         with pytest.raises(Exception, match="fail"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 est.estimate_node_tokens("n1", ctx),
             )
 
@@ -109,7 +109,7 @@ class TestAPIEstimation:
         client = self._mock_client()
         est = _estimator(client=client, enabled=False)
         ctx = _ctx(task="test")
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             est.estimate_node_tokens("n1", ctx),
         )
         assert result.estimation_method == "heuristic"
@@ -122,9 +122,8 @@ class TestCaching:
         client.messages.count_tokens = AsyncMock(return_value=mock_result)
         est = _estimator(client=client)
         ctx = _ctx(task="same task")
-        loop = asyncio.get_event_loop()
-        r1 = loop.run_until_complete(est.estimate_node_tokens("n1", ctx))
-        r2 = loop.run_until_complete(est.estimate_node_tokens("n1", ctx))
+        r1 = asyncio.run(est.estimate_node_tokens("n1", ctx))
+        r2 = asyncio.run(est.estimate_node_tokens("n1", ctx))
         assert not r1.cached
         assert r2.cached
         assert client.messages.count_tokens.call_count == 1
@@ -135,10 +134,9 @@ class TestCaching:
         client.messages.count_tokens = AsyncMock(return_value=mock_result)
         est = _estimator(client=client, cache_ttl_seconds=0)
         ctx = _ctx(task="same task")
-        loop = asyncio.get_event_loop()
-        loop.run_until_complete(est.estimate_node_tokens("n1", ctx))
+        asyncio.run(est.estimate_node_tokens("n1", ctx))
         time.sleep(0.1)
-        r2 = loop.run_until_complete(est.estimate_node_tokens("n1", ctx))
+        r2 = asyncio.run(est.estimate_node_tokens("n1", ctx))
         assert not r2.cached
         assert client.messages.count_tokens.call_count == 2
 
@@ -150,7 +148,7 @@ class TestBatchEstimation:
         client.messages.count_tokens = AsyncMock(return_value=mock_result)
         est = _estimator(client=client)
         nodes = [(f"n{i}", _ctx(task=f"task {i}")) for i in range(5)]
-        results = asyncio.get_event_loop().run_until_complete(
+        results = asyncio.run(
             est.estimate_nodes_batch(nodes),
         )
         assert len(results) == 5
@@ -170,7 +168,7 @@ class TestBatchEstimation:
         client.messages.count_tokens = AsyncMock(side_effect=side_effect)
         est = _estimator(client=client)
         nodes = [(f"n{i}", _ctx(task=f"task {i}")) for i in range(3)]
-        results = asyncio.get_event_loop().run_until_complete(
+        results = asyncio.run(
             est.estimate_nodes_batch(nodes),
         )
         assert len(results) == 3
