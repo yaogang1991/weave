@@ -610,21 +610,13 @@ async def cmd_serve(args):
 
 
 def _inject_token_estimator(orchestrator: IntelligentOrchestrator, llm_config) -> None:
-    """Inject TokenEstimator into orchestrator for M4.6 token-aware planning (#671)."""
-    try:
-        from core.token_estimator import TokenEstimator
-        from core.config import TokenEstimationConfig
-        import anthropic as _anthropic
+    """Inject TokenEstimator into orchestrator for M4.6 token-aware planning (#696)."""
+    from core.token_estimator import inject_token_estimator
 
-        cfg = TokenEstimationConfig()
-        client = None
-        if llm_config.api_key:
-            try:
-                client = _anthropic.AsyncAnthropic(api_key=llm_config.api_key)
-            except Exception:
-                pass
-        orchestrator._token_estimator = TokenEstimator(
-            config=cfg, client=client, model=llm_config.model,
-        )
-    except Exception:
-        pass
+    inject_token_estimator(
+        orchestrator=orchestrator,
+        api_key=llm_config.api_key,
+        model=llm_config.model,
+        provider=getattr(llm_config, "provider", "anthropic"),
+        base_url=getattr(llm_config, "base_url", None),
+    )

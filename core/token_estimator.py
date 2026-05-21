@@ -196,6 +196,51 @@ class TokenEstimator:
         self._cache.clear()
 
 
+def inject_token_estimator(
+    orchestrator: Any,
+    api_key: str | None,
+    model: str,
+    provider: str = "anthropic",
+    base_url: str | None = None,
+) -> None:
+    """Inject TokenEstimator into orchestrator for token-aware planning (#696).
+
+    Shared helper used by both CLI and control_plane paths.
+    Reads WeaveConfig for token_estimation settings when available.
+    Logs on failure instead of silently swallowing exceptions.
+    """
+    try:
+        from core.config import WeaveConfig
+
+        _cfg = WeaveConfig.from_env()
+        config = _cfg.token_estimation
+        client = None
+
+        if provider == "anthropic" and api_key:
+            try:
+                client = anthropic.AsyncAnthropic(
+                    api_key=api_key,
+                    base_url=base_url or None,
+                )
+            except Exception:
+                pass
+
+        estimator = TokenEstimator(
+            config=config,
+            client=client,
+            model=model,
+        )
+        orchestrator._token_estimator = estimator
+        logger.info(
+            "TokenEstimator injected (model=%s, budget=%d, api=%s)",
+            model,
+            config.target_budget,
+            "enabled" if client else "heuristic-only",
+        )
+    except Exception as exc:
+        logger.debug("TokenEstimator injection skipped: %s", exc)
+
+
 def build_node_context(
     node: DAGNode,
     agent_prompts: dict[str, str],
