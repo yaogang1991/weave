@@ -41,11 +41,11 @@ def run_with_progress(
     env: dict[str, str] | None = None,
     shell: bool = False,
     poll_interval: float = 5.0,
-    # subprocess.run drop-in compatibility (accepted, no-op)
+    # subprocess.run drop-in compatibility
     capture_output: bool = True,
     text: bool = True,
-    encoding: str | None = None,
-    errors: str | None = None,
+    encoding: str = "utf-8",
+    errors: str = "replace",
 ) -> SubprocessResult:
     """Run a subprocess with progress reporting and cancel support.
 
@@ -90,8 +90,8 @@ def run_with_progress(
         while True:
             try:
                 stdout_bytes, stderr_bytes = proc.communicate(timeout=poll_interval)
-                stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else ""
-                stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else ""
+                stdout = stdout_bytes.decode(encoding, errors=errors) if stdout_bytes else ""
+                stderr = stderr_bytes.decode(encoding, errors=errors) if stderr_bytes else ""
                 return SubprocessResult(
                     returncode=proc.returncode,
                     stdout=stdout,
