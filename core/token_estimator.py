@@ -54,7 +54,7 @@ class TokenEstimator:
     def __init__(
         self,
         config: TokenEstimationConfig,
-        client: anthropic.Anthropic | anthropic.AsyncAnthropic | None = None,
+        client: anthropic.AsyncAnthropic | None = None,
         model: str = "claude-sonnet-4-6",
     ):
         self._config = config

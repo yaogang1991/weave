@@ -618,7 +618,7 @@ def _inject_token_estimator(orchestrator: IntelligentOrchestrator, llm_config) -
         client = None
         if llm_config.api_key:
             try:
-                client = _anthropic.Anthropic(api_key=llm_config.api_key)
+                client = _anthropic.AsyncAnthropic(api_key=llm_config.api_key)
             except Exception:
                 pass
         orchestrator._token_estimator = TokenEstimator(
