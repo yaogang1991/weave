@@ -104,6 +104,9 @@ Rules:
     features before writing any files. Write feature A's file, then feature B's
     file, etc. This ensures at least partial output even if the iteration budget
     runs out (#409).
+21. TEST FILE LOCATION: Always write test files inside the `tests/` directory
+    of the project. NEVER write test files in the project root directory.
+    For example, write `tests/test_foo.py`, NOT `test_foo.py` in the root (#667).
 21. __INIT__.PY SAFETY: When creating __init__.py files, use a MINIMAL style
     with NO submodule imports. Only re-export symbols from files that ALREADY
     EXIST in the same package. Use lazy/conditional imports for optional
