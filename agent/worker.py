@@ -187,7 +187,10 @@ class AgentWorker:
             assistant_message: dict = {}
 
             for llm_attempt in range(EMPTY_CALL_MAX_RETRIES + 1):
-                assistant_message = self.llm.call(messages, tools)
+                assistant_message = self.llm.call(
+                    messages, tools,
+                    cancel_event=cancel_event,
+                )
 
                 # M4.2: Track token usage from LLM response
                 usage = assistant_message.get("usage", {})

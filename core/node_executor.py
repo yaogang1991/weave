@@ -164,6 +164,8 @@ class NodeExecutor:
                     NodeTimeoutError,
                     BudgetExhaustedError,
                 ):
+                    # _HardTimeoutError (TimeoutError subclass) is NOT caught
+                    # here — it propagates as a hard node failure.
                     raise  # System errors -> outer catch
                 except Exception as exc:
                     should_retry = await self._handle_exec_error(

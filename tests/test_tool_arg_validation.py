@@ -78,7 +78,7 @@ class TestEmptyToolCallValidation:
         tool_executor = MagicMock()
         captured_messages = []
 
-        def mock_llm_call(messages, tools):
+        def mock_llm_call(messages, tools, **kwargs):
             captured_messages.append(list(messages))
             if len(captured_messages) == 1:
                 return {"tool_calls": [{"id": "tc1", "name": "write", "arguments": {}}]}
@@ -106,7 +106,7 @@ class TestEmptyToolCallValidation:
         tool_executor = MagicMock()
         captured_messages = []
 
-        def mock_llm_call(messages, tools):
+        def mock_llm_call(messages, tools, **kwargs):
             captured_messages.append(list(messages))
             if len(captured_messages) == 1:
                 return {"tool_calls": [{
@@ -128,7 +128,7 @@ class TestEmptyToolCallValidation:
         tool_executor = MagicMock()
         captured_messages = []
 
-        def mock_llm_call(messages, tools):
+        def mock_llm_call(messages, tools, **kwargs):
             captured_messages.append(list(messages))
             if len(captured_messages) == 1:
                 return {"tool_calls": [{
@@ -261,7 +261,7 @@ class TestEmptyStringVsNone:
         tool_executor = MagicMock()
         captured_messages = []
 
-        def mock_llm_call(messages, tools):
+        def mock_llm_call(messages, tools, **kwargs):
             captured_messages.append(list(messages))
             if len(captured_messages) == 1:
                 return {"tool_calls": [{
@@ -283,7 +283,7 @@ class TestEmptyStringVsNone:
         tool_executor = MagicMock()
         captured_messages = []
 
-        def mock_llm_call(messages, tools):
+        def mock_llm_call(messages, tools, **kwargs):
             captured_messages.append(list(messages))
             if len(captured_messages) == 1:
                 return {"tool_calls": [{
