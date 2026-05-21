@@ -311,7 +311,8 @@ class LLMClient:
             progress_tracker: Optional progress reporter with a ``report(key)``
                 method, used to signal liveness while waiting for the LLM.
             cancel_event: Optional threading.Event; when set, the waiting loop
-                aborts immediately with asyncio.CancelledError.
+                aborts immediately with _HardTimeoutError (non-transient,
+                bypasses retry).
         """
         if progress_tracker:
             progress_tracker.report(ProgressReport("llm_call_start"))
