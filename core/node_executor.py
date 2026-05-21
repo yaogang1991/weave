@@ -658,23 +658,10 @@ class NodeExecutor:
     def _get_stall_timeout(
         self, agent_type: str, node: DAGNode | None = None,
     ) -> int:
-        """Return dynamic stall timeout (M4.5).
-
-        Derives file_count/test_count/dep_count from node metadata
-        (same approach as EvaluationPipeline._get_stall_timeout).
-        """
+        """Return dynamic stall timeout (M4.5)."""
         if self._node_timeout_config is not None:
-            file_count = 0
-            test_count = 0
-            dep_count = 0
-            if node:
-                artifacts = node.output_artifacts or []
-                test_count = sum(
-                    1 for a in artifacts if 'test' in a.lower()
-                )
-                file_count = len(artifacts) - test_count
-                if hasattr(node, 'dependencies') and node.dependencies:
-                    dep_count = len(node.dependencies)
+            from core.node_utils import extract_node_complexity
+            file_count, test_count, dep_count = extract_node_complexity(node) if node else (0, 0, 0)
             return self._node_timeout_config.stall_timeout_for(
                 agent_type,
                 file_count=file_count,
