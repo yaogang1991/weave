@@ -81,6 +81,9 @@ class EventType(str, Enum):
     BUDGET_EXHAUSTED = "budget.exhausted"
     AGENT_STUCK = "agent.stuck"
 
+    # Degeneration events
+    DEGENERATION_RECOVERED = "degeneration_recovered"
+
 
 class Event(BaseModel):
     """Immutable event in the session log."""
