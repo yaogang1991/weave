@@ -532,7 +532,7 @@ class DAGExecutionEngine:
                                 # silently skipping all downstream (#670).
                                 fallback = await self.failure_handler(
                                     dag, failed_id,
-                                    dag.nodes[failed_id].error,
+                                    dag.nodes[failed_id].error or "",
                                 )
                                 await self._emit(ExecutionEvent(
                                     node_id=failed_id,
@@ -552,15 +552,21 @@ class DAGExecutionEngine:
                                     if replan_count >= self.max_replans:
                                         self._skip_remaining(dag, levels, level_idx + 1)
                                         return dag
-                                    if self.replan_handler is not None:
-                                        new_dag = await self.replan_handler(dag, failed_id)
-                                        dag = self._merge_dag_results(dag, new_dag)
-                                        replan_count += 1
-                                        levels = dag.topological_levels()
-                                        level_idx = 0
+                                    dag, levels, level_idx, replan_count, replanned = (
+                                        await self._try_execute_replan(
+                                            dag, failed_id, levels, level_idx, replan_count,
+                                        )
+                                    )
+                                    if replanned:
                                         break
-                                    else:
-                                        dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+                                    dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+                                else:
+                                    logger.warning(
+                                        "failure_handler returned '%s' after retry "
+                                        "exhaustion; skipping node %s",
+                                        fallback.action, failed_id,
+                                    )
+                                    dag.update_node(failed_id, status=NodeStatus.SKIPPED)
 
                         elif decision.action == "skip":
                             dag.update_node(failed_id, status=NodeStatus.SKIPPED)
@@ -576,19 +582,16 @@ class DAGExecutionEngine:
                                 self._skip_remaining(dag, levels, level_idx + 1)
                                 return dag
 
-                            if self.replan_handler is not None:
-                                new_dag = await self.replan_handler(dag, failed_id)
-                                dag = self._merge_dag_results(dag, new_dag)
-                                replan_count += 1
-                                # Recompute topological levels and restart from beginning
-                                # so that newly added nodes are accounted for
-                                levels = dag.topological_levels()
-                                level_idx = 0
+                            dag, levels, level_idx, replan_count, replanned = (
+                                await self._try_execute_replan(
+                                    dag, failed_id, levels, level_idx, replan_count,
+                                )
+                            )
+                            if replanned:
                                 break  # Break out of failed_in_level loop
-                            else:
-                                # No replan handler available — treat as abort
-                                self._skip_remaining(dag, levels, level_idx + 1)
-                                return dag
+                            # No replan handler available — treat as abort
+                            self._skip_remaining(dag, levels, level_idx + 1)
+                            return dag
                     else:
                         # All failed nodes in this level were handled without replan
                         # Continue to next level
@@ -624,6 +627,27 @@ class DAGExecutionEngine:
             self._running_tasks = {}
             # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
             self._executor.shutdown(wait=False)
+
+    async def _try_execute_replan(
+        self, dag: DAG, failed_id: str,
+        levels: list, level_idx: int, replan_count: int,
+    ) -> tuple[DAG, list, int, int, bool]:
+        """Attempt replan via ``replan_handler``.
+
+        Returns ``(dag, levels, level_idx, replan_count, initiated)``.
+        *initiated* is True when a replan was started — caller should
+        ``break`` out of the ``failed_in_level`` loop so the outer
+        ``while`` re-enters from level 0.
+        """
+        if self.replan_handler is None:
+            return dag, levels, level_idx, replan_count, False
+
+        new_dag = await self.replan_handler(dag, failed_id)
+        dag = self._merge_dag_results(dag, new_dag)
+        replan_count += 1
+        levels = dag.topological_levels()
+        level_idx = 0
+        return dag, levels, level_idx, replan_count, True
 
     # -- #455: DAG execution state persistence ----------------------------
 

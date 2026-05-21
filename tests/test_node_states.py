@@ -324,6 +324,84 @@ class TestExecutionSummary:
 
 
 # =====================================================================
+# Retry-exhaustion fallback (#670)
+# =====================================================================
+
+class TestRetryExhaustionFallback:
+    """After retry exhaustion, failure_handler is called for a fallback."""
+
+    @pytest.mark.asyncio
+    async def test_fallback_skip_after_retry_exhausts(self):
+        """failure_handler returns 'skip' → node transitions to SKIPPED."""
+        from core.models import FailureDecision
+
+        # failure_handler: first call returns "retry", second (fallback) returns "skip"
+        handler = AsyncMock(side_effect=[
+            FailureDecision(action="retry", reasoning="try again"),
+            FailureDecision(action="skip", reasoning="give up"),
+        ])
+
+        n1 = _make_node("n1")
+        n2 = _make_node("n2")
+        dag = _make_dag(
+            {"n1": n1, "n2": n2},
+            [DAGEdge(from_node="n1", to_node="n2")],
+        )
+
+        engine = _make_engine(failure_handler=handler)
+        original_execute = engine._node_executor.execute_node
+
+        async def _always_fail(dag_obj, nid):
+            await original_execute(dag_obj, nid)
+            if nid == "n1":
+                dag_obj.update_node(nid, status=NodeStatus.FAILED, error="bang")
+
+        engine._node_executor.execute_node = _always_fail
+        result = await engine.execute(dag)
+        assert result.nodes["n1"].status == NodeStatus.SKIPPED
+
+    @pytest.mark.asyncio
+    async def test_fallback_replan_after_retry_exhausts(self):
+        """failure_handler returns 'replan' → replan_handler is invoked."""
+        from core.models import FailureDecision
+
+        handler = AsyncMock(side_effect=[
+            FailureDecision(action="retry", reasoning="try again"),
+            FailureDecision(action="replan", reasoning="replan it"),
+        ])
+        replan_handler = AsyncMock(return_value=_make_dag(
+            {"n1": _make_node("n1"), "n2": _make_node("n2")},
+            [DAGEdge(from_node="n1", to_node="n2")],
+        ))
+
+        n1 = _make_node("n1")
+        n2 = _make_node("n2")
+        dag = _make_dag(
+            {"n1": n1, "n2": n2},
+            [DAGEdge(from_node="n1", to_node="n2")],
+        )
+
+        engine = _make_engine(
+            failure_handler=handler,
+            replan_handler=replan_handler,
+        )
+        original_execute = engine._node_executor.execute_node
+        n1_exec_count = 0
+
+        async def _fail_then_succeed(dag_obj, nid):
+            nonlocal n1_exec_count
+            await original_execute(dag_obj, nid)
+            if nid == "n1":
+                n1_exec_count += 1
+                if n1_exec_count <= 2:  # fail initial + retry
+                    dag_obj.update_node(nid, status=NodeStatus.FAILED, error="bang")
+
+        engine._node_executor.execute_node = _fail_then_succeed
+        await engine.execute(dag)
+        replan_handler.assert_called_once()
+
+
+# =====================================================================
 # Evaluator → NodeStatus mapping in execution
 # =====================================================================
 
