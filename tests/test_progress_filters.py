@@ -85,6 +85,18 @@ class TestAnomalyDetector:
         det = AnomalyDetector()
         assert not det.should_kill()[0]
 
+    def test_should_kill_returns_true_after_anomaly(self):
+        """#659: should_kill() returns (True, 'anomaly detected') after
+        anomaly is flagged by should_extend()."""
+        det = AnomalyDetector(max_repetitions=3)
+        report = ProgressReport("stuck", "same message", 0.5)
+        det.should_extend(report)
+        det.should_extend(report)
+        det.should_extend(report)  # Triggers repetition anomaly
+        kill, reason = det.should_kill()
+        assert kill
+        assert reason == "anomaly detected"
+
 
 class TestAuditLogger:
     def test_records_history(self):
