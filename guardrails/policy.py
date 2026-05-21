@@ -13,10 +13,12 @@ Unified tri-state result:
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import select
 import sys
+import threading
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +35,8 @@ from tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
     from control_plane.approval import ApprovalRepository
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -120,12 +124,15 @@ class Guardrails:
         policy: GuardrailPolicy,
         tool_registry: ToolRegistry,
         project_dir: str | Path | None = None,
+        interactive: bool = False,
     ) -> None:
         self.policy = policy
         self.tool_registry = tool_registry
         self._project_dir = (
             Path(project_dir).resolve() if project_dir else None
         )
+        self.interactive = interactive
+        self._stdin_lock = threading.Lock()
         self._pending_approvals: dict[str, str] = {}
         # Instance-level copy to prevent cross-instance leakage (#413 review).
         self.RISK_MAP = dict(self.RISK_MAP)
@@ -172,6 +179,16 @@ class Guardrails:
                     )
 
         # 2. Mode-based routing
+        if self.interactive and self.policy.mode not in (
+            PermissionMode.ACCEPT_EDITS,
+        ):
+            logger.warning(
+                "interactive=True has no effect in %s mode — "
+                "HIGH/CRITICAL tools will still return pending_approval",
+                self.policy.mode.value,
+            )
+            self.interactive = False
+
         if self.policy.mode == PermissionMode.DONT_ASK:
             return self._evaluate_dont_ask_mode(tool_name, risk)
 
@@ -245,11 +262,18 @@ class Guardrails:
     def _evaluate_accept_edits_mode(
         self, tool_name: str, risk: RiskLevel
     ) -> GuardrailResult:
-        """ACCEPT_EDITS: auto-approve up to MEDIUM; HIGH/CRITICAL pending."""
+        """ACCEPT_EDITS: auto-approve up to MEDIUM; HIGH/CRITICAL pending.
+
+        In interactive mode, prompts the user via stdin for HIGH/CRITICAL
+        tools instead of returning pending_approval — preventing
+        PendingApprovalError from crashing the DAG (#666).
+        """
         if risk.value <= RiskLevel.MEDIUM.value:
             return GuardrailResult(
                 decision="allowed", reason="Auto-approved (accept_edits mode)"
             )
+        if self.interactive:
+            return self._interactive_approval_prompt(tool_name, risk)
         if risk == RiskLevel.HIGH:
             return GuardrailResult(
                 decision="pending_approval",
@@ -258,6 +282,40 @@ class Guardrails:
         return GuardrailResult(
             decision="pending_approval",
             reason=f"CRITICAL action '{tool_name}' (accept_edits mode)",
+        )
+
+    def _interactive_approval_prompt(
+        self, tool_name: str, risk: RiskLevel,
+    ) -> GuardrailResult:
+        """Prompt user for approval via stdin (interactive mode).
+
+        Thread-safe: serialises stdin access via _stdin_lock to prevent
+        garbled prompts when multiple nodes run concurrently.
+        """
+        risk_label = risk.name
+        with self._stdin_lock:
+            print(
+                f"\n  {risk_label} risk tool: {tool_name}",
+                flush=True,
+            )
+            try:
+                answer = input("  Allow? [y/N] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                logger.info("%s risk '%s' denied (EOF/interrupt)", risk_label, tool_name)
+                return GuardrailResult(
+                    decision="blocked",
+                    reason=f"{risk_label} risk '{tool_name}' denied by user",
+                )
+        if answer in ("y", "yes"):
+            logger.info("%s risk '%s' approved by user", risk_label, tool_name)
+            return GuardrailResult(
+                decision="allowed",
+                reason=f"{risk_label} risk '{tool_name}' approved by user",
+            )
+        logger.info("%s risk '%s' denied by user", risk_label, tool_name)
+        return GuardrailResult(
+            decision="blocked",
+            reason=f"{risk_label} risk '{tool_name}' denied by user",
         )
 
     def _evaluate_default_mode(

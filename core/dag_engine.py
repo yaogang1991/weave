@@ -370,7 +370,8 @@ class DAGExecutionEngine:
                         )
                         raise r
 
-                # Check for PendingApprovalError — must re-raise immediately.
+                # PendingApprovalError — re-raise so callers (worker_executor,
+                # service) can poll for approval and resume (#666).
                 for r in results:
                     if isinstance(r, PendingApprovalError):
                         raise r
