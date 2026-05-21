@@ -221,6 +221,7 @@ class AgentWorker:
                 tool_results, any_tool_executed = self._execute_tool_calls(
                     assistant_message, session_id, tool_executor,
                     progress_callback=progress_callback,
+                    progress_tracker=progress_tracker,
                 )
 
                 if any_tool_executed:
@@ -348,6 +349,7 @@ class AgentWorker:
         session_id: str,
         tool_executor,
         progress_callback: Any | None = None,
+        progress_tracker: Any | None = None,
     ) -> tuple[list[dict], bool]:
         """Validate and execute tool calls from an LLM response.
 
@@ -415,6 +417,15 @@ class AgentWorker:
             # Report progress: tool executed (#360 PR3)
             if progress_callback:
                 progress_callback()
+
+            # Report tool execution to progress tracker (#739).
+            # Bash test/debug commands count as progress — the LLM is
+            # actively verifying its work, not stalled.
+            if progress_tracker:
+                progress_tracker.report(ProgressReport(
+                    phase="tool_exec",
+                    message=f"{tool_name}: {'ok' if result.success else 'error'}",
+                ))
 
             # Output monitoring: scan tool results for injection (#511 output layer)
             result_content = (
