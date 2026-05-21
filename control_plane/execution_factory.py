@@ -98,7 +98,7 @@ class ExecutionFactory:
             client = None
             if self._llm_config.api_key:
                 try:
-                    client = anthropic.Anthropic(api_key=self._llm_config.api_key)
+                    client = anthropic.AsyncAnthropic(api_key=self._llm_config.api_key)
                 except Exception:
                     pass
             orchestrator._token_estimator = TokenEstimator(
