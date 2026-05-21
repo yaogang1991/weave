@@ -171,6 +171,7 @@ class TestRetryContextInPrompt:
         orchestrator.llm_config = MagicMock()
         orchestrator.llm_config.model = "claude-sonnet-4-6"
         orchestrator.skill_registry = None
+        orchestrator._token_estimator = None
         orchestrator._prompt_registry = MagicMock()
         orchestrator._prompt_registry.load.return_value = "System prompt: {agent_descriptions}"
 
@@ -217,6 +218,7 @@ class TestRetryContextInPrompt:
         orchestrator.llm_config = MagicMock()
         orchestrator.llm_config.model = "claude-sonnet-4-6"
         orchestrator.skill_registry = None
+        orchestrator._token_estimator = None
         orchestrator._prompt_registry = MagicMock()
         orchestrator._prompt_registry.load.return_value = "System prompt: {agent_descriptions}"
 

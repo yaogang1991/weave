@@ -67,6 +67,8 @@ class ExecutionFactory:
 
     def create_orchestrator(self, store: SessionStore) -> IntelligentOrchestrator:
         """Build an IntelligentOrchestrator with default registries."""
+        from core.config import WeaveConfig
+
         registry = AgentRegistry()
         # Get learning optimizer from LearningHook (if registered)
         learning_optimizer = None
@@ -74,13 +76,30 @@ class ExecutionFactory:
             if hasattr(hook, "optimizer"):
                 learning_optimizer = hook.optimizer
                 break
-        return IntelligentOrchestrator(
+        orchestrator = IntelligentOrchestrator(
             llm_config=self._llm_config,
             session_store=store,
             agent_registry=registry,
             llm_router=getattr(self, "_llm_router", None),
             learning_optimizer=learning_optimizer,
         )
+
+        # M4.6: Inject TokenEstimator for token-aware DAG splitting (#671)
+        _cfg = WeaveConfig.from_env()
+        if _cfg.token_estimation.enabled:
+            from core.token_estimator import TokenEstimator
+            estimator = TokenEstimator(
+                config=_cfg.token_estimation,
+                model=self._llm_config.model,
+            )
+            orchestrator._token_estimator = estimator
+            logger.info(
+                "TokenEstimator injected (model=%s, budget=%d) (#671)",
+                self._llm_config.model,
+                _cfg.token_estimation.target_budget,
+            )
+
+        return orchestrator
 
     def create_execution_engine(
         self,

@@ -122,5 +122,6 @@ class TestOrchestratorPromptIntegration:
         custom = PromptRegistry()
         orchestrator = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
         orchestrator._prompt_registry = custom
+        orchestrator._token_estimator = None
         prompt = orchestrator._prompt_registry.load("planning")
         assert "agent_descriptions" in prompt

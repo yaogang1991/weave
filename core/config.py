@@ -761,6 +761,9 @@ class WeaveConfig(BaseModel):
     # M4.2: Token Budget
     budget: BudgetConfig = Field(default_factory=BudgetConfig)
 
+    # M4.6: Token Estimation
+    token_estimation: TokenEstimationConfig = Field(default_factory=TokenEstimationConfig)
+
     # M4.4: Codex Backend
     codex: CodexBackendConfig = Field(default_factory=CodexBackendConfig)
 
