@@ -88,52 +88,16 @@ class ExecutionFactory:
         return orchestrator
 
     def _inject_token_estimator(self, orchestrator: IntelligentOrchestrator) -> None:
-        """Inject TokenEstimator into orchestrator for M4.6 token-aware planning."""
-        try:
-            from core.token_estimator import TokenEstimator
-            from core.config import TokenEstimationConfig
-            import anthropic
+        """Inject TokenEstimator into orchestrator for M4.6 token-aware planning (#696)."""
+        from core.token_estimator import inject_token_estimator
 
-            config = TokenEstimationConfig()
-            client = None
-            if self._llm_config.api_key:
-                try:
-                    client = anthropic.AsyncAnthropic(api_key=self._llm_config.api_key)
-                except Exception:
-                    pass
-            orchestrator._token_estimator = TokenEstimator(
-                config=config,
-                client=client,
-                model=self._llm_config.model,
-            )
-        except Exception as exc:
-            logger.debug("TokenEstimator injection skipped: %s", exc)
-
-        # M4.6: Inject TokenEstimator for token-aware DAG splitting (#671)
-        _cfg = WeaveConfig.from_env()
-        if _cfg.token_estimation.enabled:
-            import anthropic
-            from core.token_estimator import TokenEstimator
-            client = None
-            if self._llm_config.provider == "anthropic" and self._llm_config.api_key:
-                client = anthropic.AsyncAnthropic(
-                    api_key=self._llm_config.api_key,
-                    base_url=self._llm_config.base_url or None,
-                )
-            estimator = TokenEstimator(
-                config=_cfg.token_estimation,
-                client=client,
-                model=self._llm_config.model,
-            )
-            orchestrator._token_estimator = estimator
-            logger.info(
-                "TokenEstimator injected (model=%s, budget=%d, api=%s) (#671)",
-                self._llm_config.model,
-                _cfg.token_estimation.target_budget,
-                "enabled" if client else "heuristic-only",
-            )
-
-        return orchestrator
+        inject_token_estimator(
+            orchestrator=orchestrator,
+            api_key=self._llm_config.api_key,
+            model=self._llm_config.model,
+            provider=getattr(self._llm_config, "provider", "anthropic"),
+            base_url=getattr(self._llm_config, "base_url", None),
+        )
 
     def create_execution_engine(
         self,
