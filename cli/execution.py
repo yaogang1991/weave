@@ -389,6 +389,7 @@ def _build_runtime(
             agent_type: wd_cfg.alert_threshold_for(agent_type)
             for agent_type in wd_cfg.agent_overrides
         },
+        node_timeout_config=config.node_timeout,
         backend_registry=backend_registry,
         budget_manager=budget_manager,
     )
