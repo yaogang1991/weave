@@ -119,6 +119,9 @@ Rules:
 22. SHELL COMMANDS: When using mkdir, ALWAYS quote the target path.
     NEVER run bare `mkdir -p` without a path — this creates a stray `-p`
     directory. Use `mkdir -p "path/to/dir"` with explicit path argument (#687).
+23. PYPROJECT.TOML BUILD-BACKEND: When creating or editing pyproject.toml,
+    ALWAYS use build-backend = "setuptools.build_meta". NEVER use
+    "setuptools.backends._legacy:_Backend" or any other variant (#767).
 
 Work systematically: gather context → implement → verify.
 """,
