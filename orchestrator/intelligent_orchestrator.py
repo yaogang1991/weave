@@ -860,6 +860,13 @@ class IntelligentOrchestrator:
                 # have zero context about the project state and fail with
                 # zero_output_artifacts.
                 if node.output_artifacts:
+                    if len(node.output_artifacts) > 30:
+                        logger.warning(
+                            "Node %s has %d output_artifacts, truncating to "
+                            "30 for replan context (%d files hidden) (#756).",
+                            node.id, len(node.output_artifacts),
+                            len(node.output_artifacts) - 30,
+                        )
                     entry["output_artifacts"] = node.output_artifacts[:30]
                 executed_summary.append(entry)
 
