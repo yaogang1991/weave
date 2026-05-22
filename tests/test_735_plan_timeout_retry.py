@@ -9,6 +9,8 @@ Verifies that:
 import pytest
 from unittest.mock import MagicMock, patch
 
+pytestmark = pytest.mark.asyncio(loop_scope="function")
+
 from core.llm_client import _HardTimeoutError
 
 
@@ -43,7 +45,7 @@ def _valid_plan_json():
     )
 
 
-def test_plan_retries_on_hard_timeout_and_succeeds():
+async def test_plan_retries_on_hard_timeout_and_succeeds():
     """plan() retries on _HardTimeoutError and succeeds on second attempt."""
     orch = _make_orchestrator()
 
@@ -72,16 +74,13 @@ def test_plan_retries_on_hard_timeout_and_succeeds():
         mock_validator.warnings = []
         MockValidator.return_value = mock_validator
 
-        import asyncio
-        dag = asyncio.get_event_loop().run_until_complete(
-            orch.plan("Build a REST API")
-        )
+        dag = await orch.plan("Build a REST API")
 
     assert dag is not None
     assert call_count == 2  # Failed once, succeeded on retry
 
 
-def test_plan_raises_after_exhausting_retries():
+async def test_plan_raises_after_exhausting_retries():
     """plan() raises TimeoutError after all retries exhausted."""
     orch = _make_orchestrator()
 
@@ -90,14 +89,11 @@ def test_plan_raises_after_exhausting_retries():
 
     orch.llm.call = mock_call
 
-    import asyncio
     with pytest.raises(TimeoutError, match="hard timeout"):
-        asyncio.get_event_loop().run_until_complete(
-            orch.plan("Build a REST API")
-        )
+        await orch.plan("Build a REST API")
 
 
-def test_plan_does_not_retry_non_timeout_errors():
+async def test_plan_does_not_retry_non_timeout_errors():
     """plan() does NOT retry on non-TimeoutError exceptions.
 
     _plan_structured_output catches all exceptions and returns None,
@@ -115,17 +111,14 @@ def test_plan_does_not_retry_non_timeout_errors():
 
     orch.llm.call = mock_call
 
-    import asyncio
     with pytest.raises(ValueError, match="non-timeout"):
-        asyncio.get_event_loop().run_until_complete(
-            orch.plan("Build a REST API")
-        )
+        await orch.plan("Build a REST API")
     # 2 calls: _plan_structured_output (swallowed) + _plan_free_text (raised)
     # No timeout retry loop — both are within the same attempt
     assert call_count == 2
 
 
-def test_plan_succeeds_first_attempt_no_retry():
+async def test_plan_succeeds_first_attempt_no_retry():
     """plan() returns successfully on first attempt without retry."""
     orch = _make_orchestrator()
 
@@ -151,10 +144,7 @@ def test_plan_succeeds_first_attempt_no_retry():
         mock_validator.warnings = []
         MockValidator.return_value = mock_validator
 
-        import asyncio
-        dag = asyncio.get_event_loop().run_until_complete(
-            orch.plan("Build a REST API")
-        )
+        dag = await orch.plan("Build a REST API")
 
     assert dag is not None
     # _plan_structured_output calls once (returns None for no tool_calls),
