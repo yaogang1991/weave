@@ -469,7 +469,7 @@ class HandoffArtifact(BaseModel):
     content: str = ""                    # Human-readable summary
     file_paths: list[str] = Field(default_factory=list)  # Generated files
     metadata: dict[str, Any] = Field(default_factory=dict)  # Structured data
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # -- Structured output models for DAG generation (#505) ----------------------
