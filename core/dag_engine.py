@@ -299,6 +299,56 @@ class DAGExecutionEngine:
 
         return merged
 
+    def _rewire_replacement_edges(
+        self, merged: DAG, old_dag: DAG, new_dag: DAG, failed_id: str,
+    ) -> None:
+        """Rewire downstream edges from failed node to its replacement (#775).
+
+        When replan generates a replacement node (e.g., plan_v2 replacing
+        failed plan), downstream dependencies still point to the original.
+        This detects the replacement by matching agent_type and rewires edges.
+        """
+        if failed_id not in old_dag.nodes:
+            return
+
+        failed_node = old_dag.nodes[failed_id]
+        old_node_ids = set(old_dag.nodes.keys())
+
+        # Replacement candidates: new nodes with same agent_type as failed node
+        candidates = [
+            nid for nid, node in new_dag.nodes.items()
+            if nid not in old_node_ids and node.agent_type == failed_node.agent_type
+        ]
+        if not candidates:
+            return
+
+        replacement_id = candidates[0]
+
+        # Rewire: failed_id → X  becomes  replacement_id → X
+        existing = {(e.from_node, e.to_node) for e in merged.edges}
+        edges_to_remove = []
+        edges_to_add = []
+
+        for i, edge in enumerate(merged.edges):
+            if edge.from_node == failed_id and edge.to_node in merged.nodes:
+                new_key = (replacement_id, edge.to_node)
+                if new_key not in existing:
+                    edges_to_add.append(
+                        edge.model_copy(update={"from_node": replacement_id})
+                    )
+                    existing.add(new_key)
+                edges_to_remove.append(i)
+
+        for i in reversed(edges_to_remove):
+            merged.edges.pop(i)
+        merged.edges.extend(edges_to_add)
+
+        if edges_to_add:
+            logger.info(
+                "Rewired %d downstream edges from %s to replacement %s (#775)",
+                len(edges_to_add), failed_id, replacement_id,
+            )
+
     # ------------------------------------------------------------------
     # M2.0: Watchdog
     # ------------------------------------------------------------------
@@ -781,7 +831,10 @@ class DAGExecutionEngine:
             "Replan produced %d nodes (was %d) (#718)",
             len(new_dag.nodes), len(dag.nodes),
         )
+        old_dag = dag
         dag = self._merge_dag_results(dag, new_dag)
+        # #775: Rewire downstream edges from failed node to its replacement.
+        self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
         replan_count += 1
         levels = dag.topological_levels()
         level_idx = 0
