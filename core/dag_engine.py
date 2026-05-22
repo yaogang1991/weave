@@ -451,20 +451,37 @@ class DAGExecutionEngine:
                             return dag
 
                         elif decision.action == "retry":
-                            # #717: Enforce max_retries to prevent infinite
-                            # retry loops when stall timeout keeps firing.
+                            # #717 + #752: Enforce max_retries to prevent
+                            # infinite retry loops. Remap exhausted "retry"
+                            # to "replan" or "skip" instead of plain skip.
                             retry_node = dag.nodes[failed_id]
                             if retry_node.retry_count >= retry_node.max_retries:
-                                logger.warning(
-                                    "Node %s exceeded max_retries (%d >= %d); "
-                                    "skipping (#717)",
-                                    failed_id, retry_node.retry_count,
-                                    retry_node.max_retries,
+                                decision = self._remap_exhausted_retry(
+                                    decision, failed_id, replan_count,
                                 )
+                                if decision.action == "skip":
+                                    dag.update_node(
+                                        failed_id, status=NodeStatus.SKIPPED,
+                                    )
+                                    continue
+                                # decision remapped to "replan"
+                                if replan_count >= self.max_replans:
+                                    self._skip_remaining(
+                                        dag, levels, level_idx + 1,
+                                    )
+                                    return dag
+                                dag, levels, level_idx, replan_count, replanned = (
+                                    await self._try_execute_replan(
+                                        dag, failed_id, levels,
+                                        level_idx, replan_count,
+                                    )
+                                )
+                                if replanned:
+                                    break
                                 dag.update_node(
                                     failed_id, status=NodeStatus.SKIPPED,
                                 )
-                                continue
+                                return dag
 
                             # Exponential backoff before retry
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
@@ -591,30 +608,11 @@ class DAGExecutionEngine:
                                         "trigger": "retry_exhausted_fallback",
                                     },
                                 ))
-                                # #747: If LLM returns 'retry' after exhaustion,
-                                # remap to 'replan' (first choice) or 'skip'.
+                                # #747/#752: Remap exhausted retry via helper.
                                 if fallback.action == "retry":
-                                    if (
-                                        replan_count < self.max_replans
-                                        and self.replan_handler
-                                    ):
-                                        fallback = FailureDecision(
-                                            action="replan",
-                                            reasoning=(
-                                                "LLM recommended retry after "
-                                                "exhaustion — auto-upgraded to "
-                                                "replan (#747)"
-                                            ),
-                                        )
-                                    else:
-                                        fallback = FailureDecision(
-                                            action="skip",
-                                            reasoning=(
-                                                "LLM recommended retry after "
-                                                "exhaustion — auto-downgraded "
-                                                "to skip (#747)"
-                                            ),
-                                        )
+                                    fallback = self._remap_exhausted_retry(
+                                        fallback, failed_id, replan_count,
+                                    )
                                 if fallback.action == "abort":
                                     self._skip_remaining(dag, levels, level_idx + 1)
                                     return dag
@@ -808,6 +806,44 @@ class DAGExecutionEngine:
         """Compute exponential backoff delay in seconds."""
         return self._retry_policy.compute_backoff(
             retry_count, base=self.backoff_base, cap=self.backoff_cap,
+        )
+
+    def _remap_exhausted_retry(
+        self,
+        decision: FailureDecision,
+        node_id: str,
+        replan_count: int,
+    ) -> FailureDecision:
+        """Remap 'retry' decision when retries are exhausted (#747/#752).
+
+        Upgrades to 'replan' if replan budget remains, otherwise downgrades
+        to 'skip'.  Used at both the initial failure_handler path and the
+        inner retry-exhausted fallback path.
+        """
+        if decision.action != "retry":
+            return decision
+
+        if replan_count < self.max_replans and self.replan_handler:
+            logger.warning(
+                "Node %s: exhausted retry remapped to replan (#752)",
+                node_id,
+            )
+            return FailureDecision(
+                action="replan",
+                reasoning=(
+                    "LLM recommended retry after exhaustion — "
+                    "auto-upgraded to replan (#747/#752)"
+                ),
+            )
+        logger.warning(
+            "Node %s: exhausted retry remapped to skip (#752)", node_id,
+        )
+        return FailureDecision(
+            action="skip",
+            reasoning=(
+                "LLM recommended retry after exhaustion — "
+                "auto-downgraded to skip (#747/#752)"
+            ),
         )
 
     def _auto_serialize_parallel_generators(
