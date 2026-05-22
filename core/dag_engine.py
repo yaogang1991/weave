@@ -171,6 +171,10 @@ class DAGExecutionEngine:
         self._checkpoint = CheckpointManager(checkpoint_dir, session_id)
         # M4.2: Budget manager for token tracking
         self._budget_manager = budget_manager
+        # #750: Planner timeout circuit breaker — tracks consecutive
+        # replans triggered by planner node timeouts.
+        self._planner_timeout_streak = 0
+        self._PLANNER_CIRCUIT_BREAKER_THRESHOLD = 3
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -624,6 +628,9 @@ class DAGExecutionEngine:
                                     if replan_count >= self.max_replans:
                                         self._skip_remaining(dag, levels, level_idx + 1)
                                         return dag
+                                    if self._check_planner_circuit_break(dag, failed_id):
+                                        dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+                                        continue
                                     dag, levels, level_idx, replan_count, replanned = (
                                         await self._try_execute_replan(
                                             dag, failed_id, levels, level_idx, replan_count,
@@ -653,6 +660,10 @@ class DAGExecutionEngine:
                                 )
                                 self._skip_remaining(dag, levels, level_idx + 1)
                                 return dag
+
+                            if self._check_planner_circuit_break(dag, failed_id):
+                                dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+                                continue
 
                             dag, levels, level_idx, replan_count, replanned = (
                                 await self._try_execute_replan(
@@ -809,6 +820,34 @@ class DAGExecutionEngine:
         return self._retry_policy.compute_backoff(
             retry_count, base=self.backoff_base, cap=self.backoff_cap,
         )
+
+    def _check_planner_circuit_break(
+        self, dag: DAG, failed_id: str,
+    ) -> bool:
+        """Check planner timeout circuit breaker (#750).
+
+        Returns True if replan should be blocked due to too many
+        consecutive planner node timeouts.
+        """
+        node = dag.nodes[failed_id]
+        is_planner_timeout = (
+            node.agent_type == "planner"
+            and (node.error or "").lower().find("timeout") != -1
+        )
+        if is_planner_timeout:
+            self._planner_timeout_streak += 1
+        else:
+            self._planner_timeout_streak = 0
+
+        if self._planner_timeout_streak >= self._PLANNER_CIRCUIT_BREAKER_THRESHOLD:
+            logger.warning(
+                "Planner timeout circuit breaker tripped "
+                "(%d consecutive, threshold %d) — blocking replan (#750)",
+                self._planner_timeout_streak,
+                self._PLANNER_CIRCUIT_BREAKER_THRESHOLD,
+            )
+            return True
+        return False
 
     def _auto_serialize_parallel_generators(
         self,
