@@ -378,7 +378,11 @@ class EvalTimeoutScaleConfig(BaseModel):
 
 
 class EvaluatorStallScaleConfig(BaseModel):
-    """Dynamic evaluator stall timeout scaling based on workspace size."""
+    """Dynamic evaluator stall timeout scaling based on workspace size.
+
+    Note: os.getenv() in Field(default=...) is evaluated once at import
+    time. Runtime changes to these env vars require a process restart.
+    """
 
     base: int = Field(
         default=int(os.getenv("WEAVE_EVAL_STALL_BASE", "120")),
@@ -399,7 +403,11 @@ class EvaluatorStallScaleConfig(BaseModel):
 
 
 class GeneratorStallScaleConfig(BaseModel):
-    """Dynamic generator stall timeout scaling based on complexity."""
+    """Dynamic generator stall timeout scaling based on dependency/feature count.
+
+    Note: os.getenv() in Field(default=...) is evaluated once at import
+    time. Runtime changes to these env vars require a process restart.
+    """
 
     base: int = Field(
         default=int(os.getenv("WEAVE_GEN_STALL_BASE", "120")),
