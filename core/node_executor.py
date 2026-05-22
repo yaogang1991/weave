@@ -672,7 +672,9 @@ class NodeExecutor:
                 extract_node_complexity(node) if node else (0, 0, 0)
             )
             feature_count = (
-                estimate_feature_count(node.task_description)
+                estimate_feature_count(
+                    getattr(node, "task_description", ""),
+                )
                 if node else 0
             )
             return self._node_timeout_config.stall_timeout_for(
