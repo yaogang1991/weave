@@ -171,6 +171,9 @@ class DAGExecutionEngine:
         self._checkpoint = CheckpointManager(checkpoint_dir, session_id)
         # M4.2: Budget manager for token tracking
         self._budget_manager = budget_manager
+        # #750: Circuit breaker for consecutive planner timeouts
+        self._consecutive_planner_timeouts = 0
+        self._PLANNER_TIMEOUT_THRESHOLD = 3
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -719,6 +722,26 @@ class DAGExecutionEngine:
         """
         if self.replan_handler is None:
             return dag, levels, level_idx, replan_count, False
+
+        # #750: Circuit breaker — if N consecutive planner-type nodes
+        # timed out, stop replanning to avoid infinite loops.
+        failed_node = dag.nodes.get(failed_id)
+        is_planner = (
+            failed_node is not None
+            and failed_node.agent_type == "planner"
+        )
+        if is_planner:
+            self._consecutive_planner_timeouts += 1
+            if self._consecutive_planner_timeouts >= self._PLANNER_TIMEOUT_THRESHOLD:
+                logger.warning(
+                    "Planner timeout circuit breaker triggered (%d consecutive). "
+                    "Skipping replan for node %s (#750).",
+                    self._consecutive_planner_timeouts, failed_id,
+                )
+                return dag, levels, level_idx, replan_count, False
+        else:
+            # Non-planner failure resets the counter
+            self._consecutive_planner_timeouts = 0
 
         logger.info(
             "Replan #%d triggered for failed node %s (#718)",
