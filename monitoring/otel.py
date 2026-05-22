@@ -113,3 +113,39 @@ def start_span(name: str, attributes: dict | None = None):
         for key, value in attributes.items():
             span.set_attribute(key, value)
     return span
+
+
+# -- M5.1: Typed span helpers for 4-layer tracing --
+
+
+def start_run_span(run_id: str, requirement: str) -> NoOpSpan:
+    """Create a Run-level OTel span (M5.1)."""
+    return start_span("weave.run", {
+        "weave.run.id": run_id,
+        "weave.run.requirement": requirement[:200],
+    })
+
+
+def start_node_span(run_id: str, node_id: str, agent_type: str) -> NoOpSpan:
+    """Create a Node-level OTel span (M5.1)."""
+    return start_span("weave.node", {
+        "weave.run.id": run_id,
+        "weave.node.id": node_id,
+        "weave.node.agent_type": agent_type,
+    })
+
+
+def start_llm_turn_span(node_id: str, model: str) -> NoOpSpan:
+    """Create an LLM Turn-level OTel span (M5.1)."""
+    return start_span("weave.llm_turn", {
+        "weave.node.id": node_id,
+        "gen_ai.request.model": model,
+    })
+
+
+def start_tool_call_span(node_id: str, tool_name: str) -> NoOpSpan:
+    """Create a Tool Call-level OTel span (M5.1)."""
+    return start_span("weave.tool_call", {
+        "weave.node.id": node_id,
+        "weave.tool.name": tool_name,
+    })

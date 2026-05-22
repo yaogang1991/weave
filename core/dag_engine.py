@@ -410,6 +410,20 @@ class DAGExecutionEngine:
         replan_count = 0
         level_idx = 0
 
+        # M5.1: Trace run start
+        run_start_time = time.monotonic()
+        run_id = self._run_id or self._session_id or ""
+        run_span = start_run_span(run_id, dag.reasoning if hasattr(dag, 'reasoning') else "")
+        await self._emit(ExecutionEvent(
+            node_id="",
+            event_type="trace",
+            details={
+                "trace_type": "run_start",
+                "run_id": run_id,
+                "node_count": len(dag.nodes),
+            },
+        ))
+
         try:
             while level_idx < len(levels):
                 level = levels[level_idx]
@@ -438,7 +452,39 @@ class DAGExecutionEngine:
                     node_id: str, sem: asyncio.Semaphore, dag_ref: DAG,
                 ) -> None:
                     async with sem:
-                        await self._node_executor.execute_node(dag_ref, node_id)
+                        # M5.1: Trace node start
+                        node = dag_ref.nodes[node_id]
+                        node_span = start_node_span(run_id, node_id, node.agent_type)
+                        node_start = time.monotonic()
+                        await self._emit(ExecutionEvent(
+                            node_id=node_id,
+                            event_type="trace",
+                            details={
+                                "trace_type": "node_start",
+                                "run_id": run_id,
+                                "agent_type": node.agent_type,
+                            },
+                        ))
+                        try:
+                            await self._node_executor.execute_node(dag_ref, node_id)
+                        finally:
+                            # M5.1: Trace node end
+                            duration_ms = int((time.monotonic() - node_start) * 1000)
+                            completed_node = dag_ref.nodes[node_id]
+                            tu = completed_node.token_usage if hasattr(completed_node, 'token_usage') else {}
+                            await self._emit(ExecutionEvent(
+                                node_id=node_id,
+                                event_type="trace",
+                                details={
+                                    "trace_type": "node_end",
+                                    "run_id": run_id,
+                                    "status": completed_node.status.value,
+                                    "duration_ms": duration_ms,
+                                    "input_tokens": tu.get("input_tokens", 0),
+                                    "output_tokens": tu.get("output_tokens", 0),
+                                },
+                            ))
+                            node_span.__exit__(None, None, None)
 
                 tasks = [run_with_limit(nid, semaphore, dag) for nid in pending]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -776,6 +822,28 @@ class DAGExecutionEngine:
 
             # #455: All levels completed — clean up checkpoint
             self._cleanup_checkpoint()
+
+            # M5.1: Trace run end
+            run_duration_ms = int((time.monotonic() - run_start_time) * 1000)
+            total_input = 0
+            total_output = 0
+            for n in dag.nodes.values():
+                tu = n.token_usage if hasattr(n, 'token_usage') else {}
+                total_input += tu.get("input_tokens", 0)
+                total_output += tu.get("output_tokens", 0)
+            await self._emit(ExecutionEvent(
+                node_id="",
+                event_type="trace",
+                details={
+                    "trace_type": "run_end",
+                    "run_id": run_id,
+                    "duration_ms": run_duration_ms,
+                    "total_input_tokens": total_input,
+                    "total_output_tokens": total_output,
+                    "total_nodes": len(dag.nodes),
+                },
+            ))
+            run_span.__exit__(None, None, None)
 
             return dag
         except asyncio.CancelledError:

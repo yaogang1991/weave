@@ -244,6 +244,23 @@ class ExecutionFactory:
                 "retrying": EventType.WORKFLOW_STAGE_START,
                 "failure_decision": EventType.WORKFLOW_STAGE_ERROR,
             }
+            trace_type_map = {
+                "run_start": EventType.TRACE_RUN_START,
+                "run_end": EventType.TRACE_RUN_END,
+                "node_start": EventType.TRACE_NODE_START,
+                "node_end": EventType.TRACE_NODE_END,
+                "llm_turn": EventType.TRACE_LLM_TURN,
+                "tool_call": EventType.TRACE_TOOL_CALL,
+            }
+            if event.event_type == "trace":
+                trace_type = event.details.get("trace_type", "")
+                mapped_type = trace_type_map.get(trace_type)
+                if mapped_type:
+                    store.emit_event(
+                        session_id, mapped_type,
+                        {"node_id": event.node_id, **event.details},
+                    )
+                return
             mapped_type = event_type_map.get(event.event_type)
             if mapped_type:
                 store.emit_event(

@@ -161,6 +161,12 @@ async def api_get_session(session_id: str):
     return _get_session_data(session_id)
 
 
+@app.get("/api/runs/{session_id}/tokens")
+async def api_run_tokens(session_id: str):
+    """M5.1: Token summary via /api/runs/ alias."""
+    return await api_session_tokens(session_id)
+
+
 @app.get("/api/plans")
 async def api_list_plans():
     return {"plans": _list_plans()}

@@ -244,6 +244,7 @@ class ClaudeCodeBackend(AgentBackend):
 
         token_usage = self._extract_token_usage(usage)
         artifacts = self._discover_artifacts(context)
+        tool_calls = self._extract_tool_calls(data)
 
         if is_error:
             errors = data.get("errors", [])
@@ -270,6 +271,7 @@ class ClaudeCodeBackend(AgentBackend):
                 "session_id": data.get("session_id", ""),
                 "cost_usd": data.get("total_cost_usd", 0.0),
                 "backend": self.BACKEND_NAME,
+                "tool_calls": tool_calls,
             },
         )
 
@@ -368,6 +370,7 @@ class ClaudeCodeBackend(AgentBackend):
 
         token_usage = self._extract_token_usage(usage)
         artifacts = self._discover_artifacts(context)
+        tool_calls = self._extract_tool_calls(data)
 
         if is_error:
             error_msg = (
@@ -396,6 +399,7 @@ class ClaudeCodeBackend(AgentBackend):
                 "session_id": data.get("session_id", ""),
                 "cost_usd": data.get("total_cost_usd", 0.0),
                 "backend": self.BACKEND_NAME,
+                "tool_calls": tool_calls,
             },
         )
 
@@ -494,6 +498,22 @@ class ClaudeCodeBackend(AgentBackend):
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
         }
+
+    @staticmethod
+    def _extract_tool_calls(data: dict[str, Any]) -> list[dict[str, Any]]:
+        """Extract tool call info from SDK/CLI result data (M5.1)."""
+        tool_uses = data.get("tool_uses", [])
+        if tool_uses:
+            return [{"name": tu.get("name", "unknown"), "input_preview": str(tu.get("input", ""))[:200]} for tu in tool_uses]
+        messages = data.get("messages", [])
+        calls = []
+        for msg in messages:
+            content_blocks = msg.get("content", [])
+            if isinstance(content_blocks, list):
+                for block in content_blocks:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        calls.append({"name": block.get("name", "unknown"), "input_preview": str(block.get("input", ""))[:200]})
+        return calls if calls else []
 
     # -- Error classification ------------------------------------------------
 
