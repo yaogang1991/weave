@@ -165,12 +165,25 @@ class NodeExecutor:
                             event_type="trace",
                             details={
                                 "trace_type": "llm_turn",
+                                "node_id": node_id,
                                 "input_tokens": token_usage.get("input_tokens", 0),
                                 "output_tokens": token_usage.get("output_tokens", 0),
                                 "model": result.get("model", "unknown"),
                                 "backend": result.get("backend", "unknown"),
                             },
                         ))
+                        # M5.1: Trace tool calls from backend result
+                        tool_calls = result.get("tool_calls", [])
+                        for tc in tool_calls:
+                            await self._emit(ExecutionEvent(
+                                node_id=node_id,
+                                event_type="trace",
+                                details={
+                                    "trace_type": "tool_call",
+                                    "node_id": node_id,
+                                    "tool_name": tc.get("name", "unknown"),
+                                },
+                            ))
                 except (
                     asyncio.CancelledError,
                     PendingApprovalError,

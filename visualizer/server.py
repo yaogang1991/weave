@@ -163,8 +163,18 @@ async def api_get_session(session_id: str):
 
 @app.get("/api/runs/{session_id}/tokens")
 async def api_run_tokens(session_id: str):
-    """M5.1: Token summary via /api/runs/ alias."""
-    return await api_session_tokens(session_id)
+    """M5.1: Token summary for a session/run."""
+    from monitoring.token_reporter import TokenReporter
+
+    config = WeaveConfig.from_env()
+    store = SessionStore(config.event_store_path)
+    events = store.get_events(session_id)
+    if not events:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    reporter = TokenReporter()
+    summary = reporter.summarize_run(events)
+    return summary.model_dump()
 
 
 @app.get("/api/plans")

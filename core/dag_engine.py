@@ -415,6 +415,7 @@ class DAGExecutionEngine:
         run_start_time = time.monotonic()
         run_id = self._run_id or self._session_id or ""
         run_span = start_run_span(run_id, dag.reasoning if hasattr(dag, 'reasoning') else "")
+        run_span.__enter__()
         await self._emit(ExecutionEvent(
             node_id="",
             event_type="trace",
@@ -456,6 +457,7 @@ class DAGExecutionEngine:
                         # M5.1: Trace node start
                         node = dag_ref.nodes[node_id]
                         node_span = start_node_span(run_id, node_id, node.agent_type)
+                        node_span.__enter__()
                         node_start = time.monotonic()
                         await self._emit(ExecutionEvent(
                             node_id=node_id,
@@ -479,10 +481,10 @@ class DAGExecutionEngine:
                                 details={
                                     "trace_type": "node_end",
                                     "run_id": run_id,
+                                    "node_id": node_id,
+                                    "agent_type": node.agent_type,
                                     "status": completed_node.status.value,
                                     "duration_ms": duration_ms,
-                                    "input_tokens": tu.get("input_tokens", 0),
-                                    "output_tokens": tu.get("output_tokens", 0),
                                 },
                             ))
                             node_span.__exit__(None, None, None)
@@ -844,7 +846,6 @@ class DAGExecutionEngine:
                     "total_nodes": len(dag.nodes),
                 },
             ))
-            run_span.__exit__(None, None, None)
 
             return dag
         except asyncio.CancelledError:
@@ -861,6 +862,8 @@ class DAGExecutionEngine:
             )
             raise
         finally:
+            # M5.1: Always close run span
+            run_span.__exit__(None, None, None)
             # M2.0: Stop watchdog
             self._stop_watchdog()
             self._watchdog.clear()
