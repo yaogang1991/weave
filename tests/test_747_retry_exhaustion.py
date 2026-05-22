@@ -5,9 +5,12 @@ Verifies that:
 2. dag_engine remaps 'retry' to 'replan' when replan available
 3. dag_engine remaps 'retry' to 'skip' when replan unavailable
 """
-import asyncio
 import json
 from unittest.mock import MagicMock
+
+import pytest
+
+pytestmark = pytest.mark.asyncio(loop_scope="function")
 
 from core.models import DAG, DAGNode, NodeStatus
 
@@ -28,7 +31,7 @@ def _make_dag_with_failed_node(max_retries=2, retry_count=2):
     return dag
 
 
-def test_adapt_to_failure_includes_exhaustion_warning():
+async def test_adapt_to_failure_includes_exhaustion_warning():
     """When retries exhausted, prompt includes explicit warning (#747)."""
     from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
     from core.config import LLMConfig
@@ -66,16 +69,14 @@ def test_adapt_to_failure_includes_exhaustion_warning():
     orch.llm.call = capture_call
     dag = _make_dag_with_failed_node(max_retries=2, retry_count=2)
 
-    asyncio.get_event_loop().run_until_complete(
-        orch.adapt_to_failure(dag, "impl_1")
-    )
+    await orch.adapt_to_failure(dag, "impl_1")
 
     # Check that exhaustion warning was added
     user_msgs = [m for m in captured_messages if m["role"] == "user"]
     assert any("exhausted ALL retries" in m["content"] for m in user_msgs)
 
 
-def test_adapt_to_failure_no_warning_when_retries_available():
+async def test_adapt_to_failure_no_warning_when_retries_available():
     """When retries remain, no exhaustion warning is added (#747)."""
     from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
     from core.config import LLMConfig
@@ -113,9 +114,7 @@ def test_adapt_to_failure_no_warning_when_retries_available():
     orch.llm.call = capture_call
     dag = _make_dag_with_failed_node(max_retries=3, retry_count=1)
 
-    asyncio.get_event_loop().run_until_complete(
-        orch.adapt_to_failure(dag, "impl_1")
-    )
+    await orch.adapt_to_failure(dag, "impl_1")
 
     # No exhaustion warning when retries remain
     user_msgs = [m for m in captured_messages if m["role"] == "user"]

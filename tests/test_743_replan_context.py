@@ -5,9 +5,12 @@ Verifies that:
 2. Nodes without output_artifacts still work
 3. Failed nodes with artifacts include them too
 """
-import asyncio
 import json
 from unittest.mock import MagicMock
+
+import pytest
+
+pytestmark = pytest.mark.asyncio(loop_scope="function")
 
 from core.models import DAG, DAGNode, NodeStatus
 
@@ -69,7 +72,7 @@ def _make_dag_with_artifacts():
     return dag
 
 
-def test_replan_includes_output_artifacts():
+async def test_replan_includes_output_artifacts():
     """executed_summary includes output_artifacts for successful nodes (#743)."""
     orch = _make_orchestrator()
     dag = _make_dag_with_artifacts()
@@ -97,9 +100,7 @@ def test_replan_includes_output_artifacts():
 
     orch.llm.call = capture_call
 
-    asyncio.get_event_loop().run_until_complete(
-        orch.replan(dag, "impl_auth", "Build auth system")
-    )
+    await orch.replan(dag, "impl_auth", "Build auth system")
 
     # Verify the system prompt includes output_artifacts
     system_msg = next(
@@ -110,7 +111,7 @@ def test_replan_includes_output_artifacts():
     assert "output_artifacts" in system_msg["content"]
 
 
-def test_replan_works_without_artifacts():
+async def test_replan_works_without_artifacts():
     """Nodes without output_artifacts still work (#743)."""
     orch = _make_orchestrator()
     dag = DAG(reasoning="test")
@@ -147,9 +148,7 @@ def test_replan_works_without_artifacts():
         return_value={"content": json.dumps(replan_response), "tool_calls": []}
     )
 
-    new_dag = asyncio.get_event_loop().run_until_complete(
-        orch.replan(dag, "impl_1", "Build feature")
-    )
+    new_dag = await orch.replan(dag, "impl_1", "Build feature")
 
     assert new_dag is not None
     assert "impl_1_retry" in new_dag.nodes
