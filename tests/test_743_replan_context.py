@@ -97,9 +97,7 @@ def test_replan_includes_output_artifacts():
 
     orch.llm.call = capture_call
 
-    asyncio.get_event_loop().run_until_complete(
-        orch.replan(dag, "impl_auth", "Build auth system")
-    )
+    asyncio.run(orch.replan(dag, "impl_auth", "Build auth system"))
 
     # Verify the system prompt includes output_artifacts
     system_msg = next(
@@ -147,9 +145,7 @@ def test_replan_works_without_artifacts():
         return_value={"content": json.dumps(replan_response), "tool_calls": []}
     )
 
-    new_dag = asyncio.get_event_loop().run_until_complete(
-        orch.replan(dag, "impl_1", "Build feature")
-    )
+    new_dag = asyncio.run(orch.replan(dag, "impl_1", "Build feature"))
 
     assert new_dag is not None
     assert "impl_1_retry" in new_dag.nodes
