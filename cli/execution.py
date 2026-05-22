@@ -562,6 +562,7 @@ async def cmd_run(args):
     exec_args = argparse.Namespace(
         plan_file="",
         project=args.project,
+        requirement=args.requirement,
         max_parallel=args.max_parallel,
         max_iterations=args.max_iterations,
         pass_threshold=getattr(args, "pass_threshold", None),
