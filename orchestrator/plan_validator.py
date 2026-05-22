@@ -591,6 +591,35 @@ class PlanValidator:
 
         if new_edges:
             edges = list(edges) + new_edges
+            # #754: Re-run cycle detection after adding foundation edges
+            adj: dict[str, list[str]] = {}
+            for edge in edges:
+                adj.setdefault(edge.get("from", ""), []).append(
+                    edge.get("to", "")
+                )
+            visited: set[str] = set()
+            in_stack: set[str] = set()
+            all_node_ids = {n.get("id") for n in nodes if n.get("id")}
+
+            def _has_cycle(nid: str) -> bool:
+                visited.add(nid)
+                in_stack.add(nid)
+                for neighbor in adj.get(nid, []):
+                    if neighbor in in_stack:
+                        return True
+                    if neighbor not in visited and _has_cycle(neighbor):
+                        return True
+                in_stack.remove(nid)
+                return False
+
+            for nid in all_node_ids:
+                if nid not in visited:
+                    if _has_cycle(nid):
+                        raise PlanValidationError(
+                            "Auto-added foundation dependency created a cycle "
+                            "— foundation node may already depend on a "
+                            "downstream generator (#754)."
+                        )
 
         return edges
 
