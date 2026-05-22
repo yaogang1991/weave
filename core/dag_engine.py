@@ -582,17 +582,8 @@ class DAGExecutionEngine:
                                     dag, failed_id,
                                     dag.nodes[failed_id].error or "",
                                 )
-                                await self._emit(ExecutionEvent(
-                                    node_id=failed_id,
-                                    event_type="failure_decision",
-                                    details={
-                                        "action": fallback.action,
-                                        "reasoning": fallback.reasoning,
-                                        "trigger": "retry_exhausted_fallback",
-                                    },
-                                ))
-                                # #747: If LLM returns 'retry' after exhaustion,
-                                # remap to 'replan' (first choice) or 'skip'.
+                                # #747/#751: Remap BEFORE emitting audit event
+                                # so the recorded action matches what's executed.
                                 if fallback.action == "retry":
                                     if (
                                         replan_count < self.max_replans
@@ -615,6 +606,15 @@ class DAGExecutionEngine:
                                                 "to skip (#747)"
                                             ),
                                         )
+                                await self._emit(ExecutionEvent(
+                                    node_id=failed_id,
+                                    event_type="failure_decision",
+                                    details={
+                                        "action": fallback.action,
+                                        "reasoning": fallback.reasoning,
+                                        "trigger": "retry_exhausted_fallback",
+                                    },
+                                ))
                                 if fallback.action == "abort":
                                     self._skip_remaining(dag, levels, level_idx + 1)
                                     return dag
