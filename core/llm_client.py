@@ -87,11 +87,11 @@ class LLMClient:
         self.config = config
         self.max_retries = max_retries
         self._client = self._create_client()
-        # Hard per-call wall-clock timeout (#401).  If the SDK's own httpx
-        # read timeout fails to fire (silently dropped TCP connection), this
-        # acts as a safety net so the call always returns within a bounded
-        # time.  Set to 2× the configured timeout + 30s buffer.
-        self._hard_timeout = config.timeout * 2 + 30
+        # Hard per-call wall-clock timeout (#401, #669).  If the SDK's own
+        # httpx read timeout fails to fire (silently dropped TCP connection),
+        # this acts as a safety net so the call always returns within a bounded
+        # time.  Set to timeout + 30s buffer (previously 2×, tightened per #669).
+        self._hard_timeout = config.timeout + 30
         # Track last rate-limit recovery for cooldown between calls (#583).
         self._last_rate_limit_recovery: float = 0.0
         self._rate_limit_cooldown_sec: float = 5.0
@@ -347,14 +347,15 @@ class LLMClient:
             if thread.is_alive():
                 logger.error(
                     "LLM call exceeded hard timeout (%ds). "
-                    "SDK timeout (%ds) did not fire — possible hung connection (#401). "
-                    "provider=%s model=%s",
+                    "SDK timeout (%ds) did not fire — possible hung connection "
+                    "(#401, #669). provider=%s model=%s",
                     self._hard_timeout, self.config.timeout,
                     self.config.provider, self.config.model,
                 )
                 raise _HardTimeoutError(
                     f"LLM call exceeded hard timeout of {self._hard_timeout}s "
                     f"(SDK timeout: {self.config.timeout}s). "
+                    f"This usually indicates a proxy/network issue. "
                     f"Provider: {self.config.provider}, Model: {self.config.model}"
                 )
         finally:

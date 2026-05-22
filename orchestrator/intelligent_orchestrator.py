@@ -146,8 +146,17 @@ class IntelligentOrchestrator:
         else:
             self.llm = LLMClient(llm_config)
 
+    # Max retries for plan() when LLM hard timeout occurs (#735).
+    _PLAN_TIMEOUT_RETRIES = 2
+
     async def plan(self, requirement: str, project_context: dict | None = None) -> DAG:
-        """Generate an execution DAG from user requirements."""
+        """Generate an execution DAG from user requirements.
+
+        Retries up to _PLAN_TIMEOUT_RETRIES times on LLM hard timeout (#735).
+        Unlike DAG node execution (which has adapt_to_failure), the planning
+        phase previously had no recovery for LLM timeouts — the process
+        would crash with exit code 1.
+        """
         agent_descriptions = self.agent_registry.to_prompt_description()
 
         planning_template = self._prompt_registry.load("planning")
@@ -214,15 +223,32 @@ class IntelligentOrchestrator:
             {"role": "user", "content": user_prompt},
         ]
 
-        # -- Structured output via tool_use (#505) --
-        # Use Anthropic's tool_use mode to force structured DAG output.
-        # If the LLM doesn't support it or returns malformed data,
-        # fall back to the original free-text JSON parsing.
-        plan_data = self._plan_structured_output(messages)
-
-        if plan_data is None:
-            # Fallback: free-text JSON parsing with retry
-            plan_data = self._plan_free_text(messages)
+        # -- LLM call with timeout retry (#735) --
+        # _HardTimeoutError (TimeoutError subclass) crashes the process when
+        # the LLM proxy hangs during planning. Retry up to
+        # _PLAN_TIMEOUT_RETRIES times before giving up.
+        plan_data = None
+        last_timeout_exc = None
+        for plan_attempt in range(self._PLAN_TIMEOUT_RETRIES + 1):
+            try:
+                # Structured output via tool_use (#505)
+                plan_data = self._plan_structured_output(messages)
+                if plan_data is None:
+                    # Fallback: free-text JSON parsing with retry
+                    plan_data = self._plan_free_text(messages)
+                break
+            except TimeoutError as exc:
+                last_timeout_exc = exc
+                if plan_attempt < self._PLAN_TIMEOUT_RETRIES:
+                    logger.warning(
+                        "Plan LLM timeout (attempt %d/%d), retrying (#735): %s",
+                        plan_attempt + 1, self._PLAN_TIMEOUT_RETRIES + 1,
+                        str(exc)[:200],
+                    )
+                    continue
+                raise
+        if plan_data is None and last_timeout_exc is not None:
+            raise last_timeout_exc
 
         plan = OrchestratorPlan(**plan_data)
 
@@ -564,6 +590,19 @@ class IntelligentOrchestrator:
             {"role": "user", "content": f"Handle failure of node {failed_node_id}"},
         ]
 
+        # #747: When retries are exhausted, explicitly tell the LLM
+        # not to recommend 'retry'. Without this, the LLM sometimes
+        # returns 'retry' even after all attempts are used up.
+        if failed_node.retry_count >= failed_node.max_retries:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "CRITICAL: This node has exhausted ALL retries "
+                    f"({failed_node.retry_count}/{failed_node.max_retries}). "
+                    "Do NOT recommend 'retry'. Choose from: replan, skip, abort."
+                ),
+            })
+
         response = self.llm.call(
             messages, tools=[],
             max_tokens_override=self._PLANNER_MAX_TOKENS,
@@ -806,7 +845,7 @@ class IntelligentOrchestrator:
         executed_summary: list[dict[str, Any]] = []
         for nid, node in dag.nodes.items():
             if node.status.value in ("success", "failed"):
-                executed_summary.append({
+                entry = {
                     "id": nid,
                     "agent_type": node.agent_type,
                     "status": node.status.value,
@@ -815,7 +854,14 @@ class IntelligentOrchestrator:
                         node.result.get("summary", "")[:200]
                         if node.result else ""
                     ),
-                })
+                }
+                # Include output artifacts so replanned nodes know which
+                # files already exist (#743). Without this, replanned nodes
+                # have zero context about the project state and fail with
+                # zero_output_artifacts.
+                if node.output_artifacts:
+                    entry["output_artifacts"] = node.output_artifacts[:30]
+                executed_summary.append(entry)
 
         failed_error = dag.nodes[failed_node_id].error[:500] if failed_node_id in dag.nodes else ""
         system_prompt = self._prompt_registry.load("replan").format(

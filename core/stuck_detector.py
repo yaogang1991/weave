@@ -104,18 +104,19 @@ class StuckDetector:
         )
         if all_empty_dict:
             self._consecutive_degenerate += 1
-            # P1 (#607): On first degenerate detection, signal for prompt hint
-            # injection instead of immediately counting toward the limit.
-            # This gives the model a chance to self-correct.
-            if self._consecutive_degenerate == 1 and not self._hint_injected:
-                self._hint_injected = True
+            # P1 (#607): On first degenerate detection, signal for prompt
+            # hint injection.  #733: Also signal on second detection so
+            # the worker can inject a stronger, simplified-task recovery.
+            # Both injections happen before counting toward the stuck limit.
+            if self._consecutive_degenerate <= 2:
                 return StuckResult(
                     is_stuck=False,
                     pattern=StuckPattern.DEGENERATE_ARGS,
                     consecutive_count=self._consecutive_degenerate,
                     threshold=self._degenerate_call_limit,
                     message=(
-                        "First degenerate empty-args detected — "
+                        "Degenerate empty-args detected (attempt "
+                        f"{self._consecutive_degenerate}) — "
                         "requesting prompt hint injection for recovery."
                     ),
                     needs_hint=True,
