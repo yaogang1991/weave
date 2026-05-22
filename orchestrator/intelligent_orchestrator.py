@@ -860,7 +860,18 @@ class IntelligentOrchestrator:
                 # have zero context about the project state and fail with
                 # zero_output_artifacts.
                 if node.output_artifacts:
-                    entry["output_artifacts"] = node.output_artifacts[:30]
+                    if len(node.output_artifacts) > 30:
+                        logger.warning(
+                            "Node %s has %d output_artifacts, "
+                            "truncating to 30 for replan context (#756)",
+                            node_id, len(node.output_artifacts),
+                        )
+                        entry["output_artifacts"] = (
+                            node.output_artifacts[:30]
+                            + [f"...and {len(node.output_artifacts) - 30} more"]
+                        )
+                    else:
+                        entry["output_artifacts"] = node.output_artifacts
                 executed_summary.append(entry)
 
         failed_error = dag.nodes[failed_node_id].error[:500] if failed_node_id in dag.nodes else ""
