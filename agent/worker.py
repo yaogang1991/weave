@@ -276,8 +276,9 @@ class AgentWorker:
             # P1 (#607): Inject recovery hint on first degenerate detection
             if stuck_result.needs_hint:
                 logger.warning(
-                    "Degenerate empty-args detected — injecting recovery hint (#607)",
-
+                    "Degenerate empty-args detected — injecting recovery hint "
+                    "(attempt %d) (#607)",
+                    stuck_result.consecutive_count,
                 )
                 self.session_store.emit_event(
                     session_id,
@@ -301,6 +302,24 @@ class AgentWorker:
                     "and 'content'. When calling 'edit', include 'file_path', "
                     "'old_string', and 'new_string'. Do NOT repeat the empty call."
                 )
+                # #733: On repeated degenerate detection, inject a stronger
+                # recovery that simplifies the task. Complex task descriptions
+                # can overwhelm the LLM, causing it to produce empty args
+                # repeatedly. Simplify to just the first subtask.
+                if stuck_result.consecutive_count >= 2:
+                    recovery_hint += (
+                        "\n\nIMPORTANT: Your task may be too complex for a "
+                        "single response. Focus on ONLY the FIRST item in "
+                        "your task description. Complete that one item now. "
+                        "Ignore the rest — they will be handled separately. "
+                        "Start with a SINGLE write or edit call for just "
+                        "that one item."
+                    )
+                    logger.warning(
+                        "Injecting simplified task recovery hint (#733), "
+                        "consecutive_count=%d",
+                        stuck_result.consecutive_count,
+                    )
                 if self.artifacts:
                     file_list = "\n".join(
                         f"  - {f}" for f in self.artifacts[:50]
