@@ -161,7 +161,13 @@ class TokenEstimator:
         result = self._client.messages.count_tokens(**kwargs)
         if hasattr(result, "__await__"):
             result = await result
-        return result.input_tokens
+        tokens = result.input_tokens
+        if tokens is None:
+            raise ValueError(
+                "count_tokens returned None — proxy/model may not support "
+                "this endpoint (#737)"
+            )
+        return tokens
 
     def _heuristic_estimate(self, context: NodeTokenContext) -> int:
         total = heuristic_estimate(context.system_prompt)
