@@ -233,6 +233,9 @@ class NodeExecutor:
                 error=str(e),
                 completed_at=datetime.now(timezone.utc),
                 auto_eval_result=None,
+                # Increment retry_count so dag_engine can enforce max_retries
+                # and prevent infinite retry loops (#717).
+                retry_count=dag.nodes[node_id].retry_count + 1,
             )
             await self._emit(ExecutionEvent(
                 node_id=node_id,
@@ -241,6 +244,7 @@ class NodeExecutor:
                     "error": str(e),
                     "reason": reason,
                     "retry_budget_preserved": True,
+                    "retry_count": dag.nodes[node_id].retry_count,
                 },
             ))
 

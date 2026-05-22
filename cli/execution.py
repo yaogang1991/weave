@@ -392,7 +392,6 @@ def _build_runtime(
         node_timeout_config=config.node_timeout,
         backend_registry=backend_registry,
         budget_manager=budget_manager,
-        node_timeout_config=config.node_timeout,
     )
 
     return {
@@ -494,6 +493,8 @@ async def _finalize_execution(engine, result_dag, store, session_id, viz, mcp_cl
     print("\nExecution complete:")
     print(f"  Total: {summary['total_nodes']}")
     print(f"  Success: {summary['success']}")
+    print(f"  Implementation: {summary['implementation_success']}"
+          f"/{summary['implementation_total']}")
     print(f"  Failed: {summary['failed']}")
     print(f"  Skipped: {summary['skipped']}")
     print(f"  Session ID: {session_id}")

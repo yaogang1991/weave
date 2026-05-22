@@ -158,7 +158,9 @@ class TokenEstimator:
         if context.tools:
             kwargs["tools"] = context.tools
 
-        result = await self._client.messages.count_tokens(**kwargs)
+        result = self._client.messages.count_tokens(**kwargs)
+        if hasattr(result, "__await__"):
+            result = await result
         tokens = result.input_tokens
         if tokens is None:
             raise ValueError(

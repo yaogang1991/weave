@@ -248,18 +248,51 @@ class DAGExecutionEngine:
         For each node that succeeded in old_dag and also exists in new_dag,
         copy over its status, result, output_artifacts, and timestamps so
         the re-executed plan does not re-run already-completed work.
+
+        Nodes in old_dag that don't exist in new_dag are also preserved
+        so the execution summary counts ALL nodes, not just the replan
+        subset (#720).  Their edges are also preserved so
+        topological_levels() orders them correctly (#728).
         """
         merged = new_dag
         for node_id, node in old_dag.nodes.items():
-            if QualityGate.is_terminal_success(node.status) and node_id in merged.nodes:
-                merged.update_node(
-                    node_id,
-                    status=node.status,
-                    result=node.result,
-                    output_artifacts=node.output_artifacts,
-                    started_at=node.started_at,
-                    completed_at=node.completed_at,
-                )
+            if node_id in merged.nodes:
+                # Node exists in both — preserve success state
+                if QualityGate.is_terminal_success(node.status):
+                    merged.update_node(
+                        node_id,
+                        status=node.status,
+                        result=node.result,
+                        output_artifacts=node.output_artifacts,
+                        started_at=node.started_at,
+                        completed_at=node.completed_at,
+                    )
+            else:
+                # Node only in old DAG — preserve it so summary is
+                # accurate (#720).  Pending nodes become SKIPPED since
+                # the replan replaced them.
+                if node.status == NodeStatus.PENDING:
+                    merged.add_node(node.model_copy(update={
+                        "status": NodeStatus.SKIPPED,
+                    }))
+                else:
+                    merged.add_node(node.model_copy())
+
+        # #728: Preserve old edges for nodes that were carried over.
+        # Without edges, topological_levels() can't order preserved
+        # nodes correctly, causing _skip_remaining to miss them.
+        merged_edge_set = {
+            (e.from_node, e.to_node) for e in merged.edges
+        }
+        for edge in old_dag.edges:
+            if (
+                edge.from_node in merged.nodes
+                and edge.to_node in merged.nodes
+                and (edge.from_node, edge.to_node) not in merged_edge_set
+            ):
+                merged.edges.append(edge.model_copy())
+                merged_edge_set.add((edge.from_node, edge.to_node))
+
         return merged
 
     # ------------------------------------------------------------------
@@ -418,6 +451,21 @@ class DAGExecutionEngine:
                             return dag
 
                         elif decision.action == "retry":
+                            # #717: Enforce max_retries to prevent infinite
+                            # retry loops when stall timeout keeps firing.
+                            retry_node = dag.nodes[failed_id]
+                            if retry_node.retry_count >= retry_node.max_retries:
+                                logger.warning(
+                                    "Node %s exceeded max_retries (%d >= %d); "
+                                    "skipping (#717)",
+                                    failed_id, retry_node.retry_count,
+                                    retry_node.max_retries,
+                                )
+                                dag.update_node(
+                                    failed_id, status=NodeStatus.SKIPPED,
+                                )
+                                continue
+
                             # Exponential backoff before retry
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
                             if backoff > 0:
@@ -477,8 +525,8 @@ class DAGExecutionEngine:
                                             },
                                         ))
                                         # Retry generator with feedback.
-                                        # Cap retry_count so _execute_single_node's
-                                        # internal retry loop gives exactly one attempt.
+                                        # Cap retry_count so NodeExecutor's
+                                        # retry loop gives exactly one attempt.
                                         dag.update_node(
                                             target_id,
                                             retry_count=gen_node.max_retries - 1,
@@ -543,6 +591,30 @@ class DAGExecutionEngine:
                                         "trigger": "retry_exhausted_fallback",
                                     },
                                 ))
+                                # #747: If LLM returns 'retry' after exhaustion,
+                                # remap to 'replan' (first choice) or 'skip'.
+                                if fallback.action == "retry":
+                                    if (
+                                        replan_count < self.max_replans
+                                        and self.replan_handler
+                                    ):
+                                        fallback = FailureDecision(
+                                            action="replan",
+                                            reasoning=(
+                                                "LLM recommended retry after "
+                                                "exhaustion — auto-upgraded to "
+                                                "replan (#747)"
+                                            ),
+                                        )
+                                    else:
+                                        fallback = FailureDecision(
+                                            action="skip",
+                                            reasoning=(
+                                                "LLM recommended retry after "
+                                                "exhaustion — auto-downgraded "
+                                                "to skip (#747)"
+                                            ),
+                                        )
                                 if fallback.action == "abort":
                                     self._skip_remaining(dag, levels, level_idx + 1)
                                     return dag
@@ -589,8 +661,14 @@ class DAGExecutionEngine:
                             )
                             if replanned:
                                 break  # Break out of failed_in_level loop
-                            # No replan handler available — treat as abort
-                            self._skip_remaining(dag, levels, level_idx + 1)
+                            # Replan handler unavailable or failed — skip
+                            # the failed node and continue (#718).
+                            logger.warning(
+                                "Replan not available for %s; "
+                                "skipping and continuing (#718)",
+                                failed_id,
+                            )
+                            dag.update_node(failed_id, status=NodeStatus.SKIPPED)
                             return dag
                     else:
                         # All failed nodes in this level were handled without replan
@@ -642,11 +720,32 @@ class DAGExecutionEngine:
         if self.replan_handler is None:
             return dag, levels, level_idx, replan_count, False
 
-        new_dag = await self.replan_handler(dag, failed_id)
+        logger.info(
+            "Replan #%d triggered for failed node %s (#718)",
+            replan_count + 1, failed_id,
+        )
+        try:
+            new_dag = await self.replan_handler(dag, failed_id)
+        except Exception as e:
+            logger.error(
+                "Replan handler failed for node %s: %s. "
+                "Falling back to skip (#718).",
+                failed_id, e,
+            )
+            return dag, levels, level_idx, replan_count, False
+
+        logger.info(
+            "Replan produced %d nodes (was %d) (#718)",
+            len(new_dag.nodes), len(dag.nodes),
+        )
         dag = self._merge_dag_results(dag, new_dag)
         replan_count += 1
         levels = dag.topological_levels()
         level_idx = 0
+        logger.info(
+            "Replan merged: %d total nodes, %d levels (#718)",
+            len(dag.nodes), len(levels),
+        )
         return dag, levels, level_idx, replan_count, True
 
     # -- #455: DAG execution state persistence ----------------------------
@@ -801,7 +900,25 @@ class DAGExecutionEngine:
                 and skipped == 0
                 and partial_pass == 0
             ),
-            "node_details": {
+        }
+
+        # #724: Break down success by agent role so the summary
+        # distinguishes planning (plan output) from implementation
+        # (file artifacts).  A planner with output_count=0 is fine,
+        # but a generator with output_count=0 should not inflate the
+        # success count.
+        impl_types = {"generator", "worker"}
+        summary["implementation_success"] = sum(
+            1 for n in dag.nodes.values()
+            if n.status == NodeStatus.SUCCESS
+            and n.agent_type in impl_types
+        )
+        summary["implementation_total"] = sum(
+            1 for n in dag.nodes.values()
+            if n.agent_type in impl_types
+        )
+
+        summary["node_details"] = {
                 nid: {
                     "status": n.status.value,
                     "agent": n.agent_type,
@@ -815,8 +932,7 @@ class DAGExecutionEngine:
                     ),
                 }
                 for nid, n in dag.nodes.items()
-            },
-        }
+            }
 
         # M4.2: Token usage aggregation
         total_input = 0
