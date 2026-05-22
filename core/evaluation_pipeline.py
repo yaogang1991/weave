@@ -111,8 +111,6 @@ class EvaluationPipeline:
         """
         node = dag.nodes[node_id]
 
-        result = result or {}
-
         # Use provided emit_func or fall back to constructor one
         emit = emit_func or self._emit_func
 
