@@ -435,6 +435,34 @@ class DAGExecutionEngine:
                             dag, failed_id, dag.nodes[failed_id].error,
                         )
 
+                        # #747/#752: If failure_handler returns 'retry' but
+                        # retries are exhausted, remap before audit + execution
+                        # so recorded action matches actual behavior.
+                        if decision.action == "retry":
+                            retry_node = dag.nodes[failed_id]
+                            if retry_node.retry_count >= retry_node.max_retries:
+                                if (
+                                    replan_count < self.max_replans
+                                    and self.replan_handler
+                                ):
+                                    decision = FailureDecision(
+                                        action="replan",
+                                        reasoning=(
+                                            "LLM recommended retry after "
+                                            "exhaustion — auto-upgraded to "
+                                            "replan (#752)"
+                                        ),
+                                    )
+                                else:
+                                    decision = FailureDecision(
+                                        action="skip",
+                                        reasoning=(
+                                            "LLM recommended retry after "
+                                            "exhaustion — auto-downgraded "
+                                            "to skip (#752)"
+                                        ),
+                                    )
+
                         # Emit audit event for the failure decision
                         await self._emit(ExecutionEvent(
                             node_id=failed_id,
@@ -453,6 +481,8 @@ class DAGExecutionEngine:
                         elif decision.action == "retry":
                             # #717: Enforce max_retries to prevent infinite
                             # retry loops when stall timeout keeps firing.
+                            # Note: exhaustion remap above means this path
+                            # is only reached when retries remain.
                             retry_node = dag.nodes[failed_id]
                             if retry_node.retry_count >= retry_node.max_retries:
                                 logger.warning(
@@ -582,17 +612,10 @@ class DAGExecutionEngine:
                                     dag, failed_id,
                                     dag.nodes[failed_id].error or "",
                                 )
-                                await self._emit(ExecutionEvent(
-                                    node_id=failed_id,
-                                    event_type="failure_decision",
-                                    details={
-                                        "action": fallback.action,
-                                        "reasoning": fallback.reasoning,
-                                        "trigger": "retry_exhausted_fallback",
-                                    },
-                                ))
                                 # #747: If LLM returns 'retry' after exhaustion,
                                 # remap to 'replan' (first choice) or 'skip'.
+                                # #751: Remap BEFORE emitting audit event so
+                                # recorded action matches actual execution.
                                 if fallback.action == "retry":
                                     if (
                                         replan_count < self.max_replans
@@ -615,6 +638,15 @@ class DAGExecutionEngine:
                                                 "to skip (#747)"
                                             ),
                                         )
+                                await self._emit(ExecutionEvent(
+                                    node_id=failed_id,
+                                    event_type="failure_decision",
+                                    details={
+                                        "action": fallback.action,
+                                        "reasoning": fallback.reasoning,
+                                        "trigger": "retry_exhausted_fallback",
+                                    },
+                                ))
                                 if fallback.action == "abort":
                                     self._skip_remaining(dag, levels, level_idx + 1)
                                     return dag
