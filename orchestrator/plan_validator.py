@@ -180,6 +180,9 @@ class PlanValidator:
         self._check_feature_complexity(nodes)
         # Parallel write conflict detection (#272)
         self._check_parallel_write_conflicts(nodes, edges)
+        # Foundation node dependency enforcement (#740)
+        edges = self._check_foundation_dependencies(nodes, edges)
+        plan_data["edges"] = edges
         # Token budget check (M4.6)
         self._check_token_budget(nodes)
 
@@ -506,6 +509,81 @@ class PlanValidator:
             # Check if it explicitly depends on both nodes
             # (Heuristic: if it's in common descendants, it likely merges)
         return bool(common)
+
+    # Keywords that identify a foundation/base node in task descriptions (#740).
+    _FOUNDATION_KEYWORDS = (
+        "foundation", "base", "core", "shared", "common",
+        "infrastructure", "setup", "bootstrap",
+    )
+
+    def _check_foundation_dependencies(
+        self,
+        nodes: list[dict],
+        edges: list[dict],
+    ) -> list[dict]:
+        """Ensure implementation nodes depend on foundation nodes (#740).
+
+        When the planner produces a foundation/shared node (identified by
+        task keywords) but other generator nodes don't declare a dependency
+        on it, the DAG may execute impl nodes in parallel with (or before)
+        the foundation — causing missing database models, shared utilities, etc.
+
+        When auto_fix is True, missing edges are added automatically.
+        Otherwise, a warning is emitted.
+        """
+        # Identify foundation nodes: generator type + foundation keywords
+        foundation_ids: list[str] = []
+        for node in nodes:
+            if node.get("agent_type") != "generator":
+                continue
+            task = (node.get("task") or "").lower()
+            nid = node.get("id", "")
+            # Check task description or node ID for foundation keywords
+            if any(kw in task for kw in self._FOUNDATION_KEYWORDS):
+                foundation_ids.append(nid)
+            elif any(kw in nid.lower() for kw in ("foundation", "base", "core")):
+                foundation_ids.append(nid)
+
+        if not foundation_ids:
+            return edges
+
+        # Build existing edge set: from → set of to
+        edge_set: set[tuple[str, str]] = set()
+        for edge in edges:
+            edge_set.add((edge.get("from", ""), edge.get("to", "")))
+
+        # Find generator nodes that should depend on foundation but don't
+        new_edges: list[dict] = []
+        for node in nodes:
+            nid = node.get("id", "")
+            if nid in foundation_ids:
+                continue
+            if node.get("agent_type") != "generator":
+                continue
+            # Check if this node already depends on any foundation node
+            has_foundation_dep = any(
+                (fid, nid) in edge_set for fid in foundation_ids
+            )
+            if not has_foundation_dep:
+                # Auto-fix: add dependency on the first foundation node
+                fid = foundation_ids[0]
+                new_edge = {
+                    "from": fid,
+                    "to": nid,
+                    "dependency_type": "hard",
+                }
+                new_edges.append(new_edge)
+                edge_set.add((fid, nid))
+                self.warnings.append(
+                    f"Node '{nid}' (generator) has no dependency on "
+                    f"foundation node '{fid}' — auto-added hard "
+                    f"dependency (#740)."
+                )
+
+        if new_edges:
+            edges = list(edges) + new_edges
+
+        return edges
 
     def _check_token_budget(self, nodes: list[dict]) -> None:
         """Warn if estimated_tokens exceeds token_budget (M4.6)."""
