@@ -260,9 +260,10 @@ class TestDependencyAwareSkip:
 
         result = await engine.execute(dag)
 
-        assert result.nodes["A"].status == NodeStatus.FAILED
+        # A exhausted retries → failure_handler 'retry' remapped to 'skip' (#747/#752)
+        assert result.nodes["A"].status == NodeStatus.SKIPPED
         assert result.nodes["B"].status == NodeStatus.SUCCESS
-        # C depends on A (failed) → skipped
+        # C depends on A (skipped) → skipped
         assert result.nodes["C"].status == NodeStatus.SKIPPED
 
     @pytest.mark.asyncio
