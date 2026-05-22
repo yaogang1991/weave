@@ -248,18 +248,51 @@ class DAGExecutionEngine:
         For each node that succeeded in old_dag and also exists in new_dag,
         copy over its status, result, output_artifacts, and timestamps so
         the re-executed plan does not re-run already-completed work.
+
+        Nodes in old_dag that don't exist in new_dag are also preserved
+        so the execution summary counts ALL nodes, not just the replan
+        subset (#720).  Their edges are also preserved so
+        topological_levels() orders them correctly (#728).
         """
         merged = new_dag
         for node_id, node in old_dag.nodes.items():
-            if QualityGate.is_terminal_success(node.status) and node_id in merged.nodes:
-                merged.update_node(
-                    node_id,
-                    status=node.status,
-                    result=node.result,
-                    output_artifacts=node.output_artifacts,
-                    started_at=node.started_at,
-                    completed_at=node.completed_at,
-                )
+            if node_id in merged.nodes:
+                # Node exists in both — preserve success state
+                if QualityGate.is_terminal_success(node.status):
+                    merged.update_node(
+                        node_id,
+                        status=node.status,
+                        result=node.result,
+                        output_artifacts=node.output_artifacts,
+                        started_at=node.started_at,
+                        completed_at=node.completed_at,
+                    )
+            else:
+                # Node only in old DAG — preserve it so summary is
+                # accurate (#720).  Pending nodes become SKIPPED since
+                # the replan replaced them.
+                if node.status == NodeStatus.PENDING:
+                    merged.add_node(node.model_copy(update={
+                        "status": NodeStatus.SKIPPED,
+                    }))
+                else:
+                    merged.add_node(node.model_copy())
+
+        # #728: Preserve old edges for nodes that were carried over.
+        # Without edges, topological_levels() can't order preserved
+        # nodes correctly, causing _skip_remaining to miss them.
+        merged_edge_set = {
+            (e.from_node, e.to_node) for e in merged.edges
+        }
+        for edge in old_dag.edges:
+            if (
+                edge.from_node in merged.nodes
+                and edge.to_node in merged.nodes
+                and (edge.from_node, edge.to_node) not in merged_edge_set
+            ):
+                merged.edges.append(edge.model_copy())
+                merged_edge_set.add((edge.from_node, edge.to_node))
+
         return merged
 
     # ------------------------------------------------------------------
