@@ -661,8 +661,14 @@ class DAGExecutionEngine:
                             )
                             if replanned:
                                 break  # Break out of failed_in_level loop
-                            # No replan handler available — treat as abort
-                            self._skip_remaining(dag, levels, level_idx + 1)
+                            # Replan handler unavailable or failed — skip
+                            # the failed node and continue (#718).
+                            logger.warning(
+                                "Replan not available for %s; "
+                                "skipping and continuing (#718)",
+                                failed_id,
+                            )
+                            dag.update_node(failed_id, status=NodeStatus.SKIPPED)
                             return dag
                     else:
                         # All failed nodes in this level were handled without replan
@@ -714,11 +720,32 @@ class DAGExecutionEngine:
         if self.replan_handler is None:
             return dag, levels, level_idx, replan_count, False
 
-        new_dag = await self.replan_handler(dag, failed_id)
+        logger.info(
+            "Replan #%d triggered for failed node %s (#718)",
+            replan_count + 1, failed_id,
+        )
+        try:
+            new_dag = await self.replan_handler(dag, failed_id)
+        except Exception as e:
+            logger.error(
+                "Replan handler failed for node %s: %s. "
+                "Falling back to skip (#718).",
+                failed_id, e,
+            )
+            return dag, levels, level_idx, replan_count, False
+
+        logger.info(
+            "Replan produced %d nodes (was %d) (#718)",
+            len(new_dag.nodes), len(dag.nodes),
+        )
         dag = self._merge_dag_results(dag, new_dag)
         replan_count += 1
         levels = dag.topological_levels()
         level_idx = 0
+        logger.info(
+            "Replan merged: %d total nodes, %d levels (#718)",
+            len(dag.nodes), len(levels),
+        )
         return dag, levels, level_idx, replan_count, True
 
     # -- #455: DAG execution state persistence ----------------------------
