@@ -31,7 +31,7 @@ def extract_node_complexity(node: Any) -> tuple[int, int, int]:
     return file_count, test_count, dep_count
 
 
-def estimate_feature_count(task_description: str) -> int:
+def estimate_feature_count(task_description: str | None) -> int:
     """Estimate distinct features from a task description (#722).
 
     Uses simple heuristics to count enumerated items and
