@@ -148,6 +148,35 @@ class PlanValidator:
                 )
 
         # Cycle detection via DFS
+        self._detect_cycle(node_ids, edges)
+
+        # Stdlib shadowing detection (#238)
+        self._check_stdlib_shadowing(nodes)
+
+        # Per-node file count estimation (#284)
+        self._check_node_file_count(nodes)
+        # Feature complexity estimation (#409)
+        self._check_feature_complexity(nodes)
+        # Parallel write conflict detection (#272)
+        self._check_parallel_write_conflicts(nodes, edges)
+        # Foundation node dependency enforcement (#740)
+        edges = self._check_foundation_dependencies(nodes, edges)
+        plan_data["edges"] = edges
+        # #754: Re-run cycle detection after foundation auto-fix may
+        # have added edges that create a cycle.
+        self._detect_cycle(node_ids, edges)
+        # Token budget check (M4.6)
+        self._check_token_budget(nodes)
+
+        return plan_data
+
+    # Prefixes used for stdlib conflict renaming suggestions.
+    _RENAMING_PREFIXES = ("app_", "my_", "")
+
+    def _detect_cycle(
+        self, node_ids: set[str], edges: list[dict],
+    ) -> None:
+        """Raise PlanValidationError if edges form a cycle (#754)."""
         adj: dict[str, list[str]] = {nid: [] for nid in node_ids}
         for edge in edges:
             adj[edge["from"]].append(edge["to"])
@@ -170,26 +199,6 @@ class PlanValidator:
             if nid not in visited:
                 if has_cycle(nid):
                     raise PlanValidationError("Plan contains a cycle")
-
-        # Stdlib shadowing detection (#238)
-        self._check_stdlib_shadowing(nodes)
-
-        # Per-node file count estimation (#284)
-        self._check_node_file_count(nodes)
-        # Feature complexity estimation (#409)
-        self._check_feature_complexity(nodes)
-        # Parallel write conflict detection (#272)
-        self._check_parallel_write_conflicts(nodes, edges)
-        # Foundation node dependency enforcement (#740)
-        edges = self._check_foundation_dependencies(nodes, edges)
-        plan_data["edges"] = edges
-        # Token budget check (M4.6)
-        self._check_token_budget(nodes)
-
-        return plan_data
-
-    # Prefixes used for stdlib conflict renaming suggestions.
-    _RENAMING_PREFIXES = ("app_", "my_", "")
 
     def _check_stdlib_shadowing(self, nodes: list[dict]) -> None:
         """Warn if task descriptions intend to create packages that shadow stdlib.
