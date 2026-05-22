@@ -63,7 +63,14 @@ class StallDetector:
 
 
 class AnomalyDetector:
-    """Filter: detects repetition, oscillation, and cyclic progress patterns."""
+    """Filter: detects repetition, oscillation, and cyclic progress patterns.
+
+    Note (#659): should_kill() was previously hardcoded to return (False, "").
+    PR #647 restored the intended behavior: should_kill() now correctly returns
+    (True, "anomaly detected") after _detect_anomaly() flags an anomaly via
+    should_extend(). History is capped at _MAX_HISTORY and protected by
+    threading.Lock for thread safety.
+    """
 
     _MAX_HISTORY = 100
 
