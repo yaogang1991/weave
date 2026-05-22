@@ -191,11 +191,16 @@ def run_lint(
     targets: list[str],
     work_dir: Path,
     auto_format_before_eval: bool = False,
+    scope_files: list[str] | None = None,
 ) -> tuple[bool, str, list[str], list[str], list[str], list[str]]:
     """Dry-run autofix then delta-lint resolved target files.
 
     Returns (passed, message, autofixed_files, auto_formatted_files,
              lint_new_issues, lint_all_issues).
+
+    When *scope_files* is provided, only lint issues in those files cause
+    failure. Issues in other target files are reported as warnings and
+    do not affect the pass/fail result (#790).
     """
     autofixed_files: list[str] = []
     auto_formatted_files: list[str] = []
@@ -365,6 +370,35 @@ def run_lint(
             f"Autoflake auto-fixed: {', '.join(autofixed_files)}"
             f"\n{msg}"
         )
+
+    # #790: Scope lint failures to only the node's own files.
+    if scope_files and new_issues:
+        scoped_set = {Path(s).as_posix() for s in scope_files}
+        scoped_issues = []
+        unscoped_issues = []
+        for issue in new_issues:
+            issue_posix = Path(issue.path).as_posix()
+            if any(
+                issue_posix == s
+                or issue_posix.endswith("/" + s)
+                or s.endswith("/" + issue_posix)
+                for s in scoped_set
+            ):
+                scoped_issues.append(issue)
+            else:
+                unscoped_issues.append(issue)
+        if unscoped_issues:
+            warn_lines = [
+                f"  - {i.path}:{i.line} {i.code} {i.message}"
+                for i in unscoped_issues[:10]
+            ]
+            msg += (
+                f"\nWARNINGS (not this node's files, not failing):\n"
+                + "\n".join(warn_lines)
+            )
+            if len(unscoped_issues) > 10:
+                msg += f"\n  ... and {len(unscoped_issues) - 10} more"
+        new_issues = scoped_issues
 
     return (
         len(new_issues) == 0, msg, autofixed_files,
