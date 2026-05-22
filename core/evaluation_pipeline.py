@@ -125,6 +125,9 @@ class EvaluationPipeline:
         if fail is not None:
             return fail
 
+        # Step 3.5: Post-processing: fix known invalid patterns (#767)
+        self._fix_pyproject_build_backend(dag, node_id)
+
         # Step 4: Test file requirement
         fail = await self._check_test_files(dag, node_id, emit)
         if fail is not None:
@@ -289,6 +292,72 @@ class EvaluationPipeline:
             event_type="failed",
             event_details={"reason": "zero_output_artifacts"},
         )
+
+    # ------------------------------------------------------------------
+    # Step 3.5: Post-processing: fix known invalid patterns (#767)
+    # ------------------------------------------------------------------
+
+    # Known invalid build-backend values that LLMs commonly produce.
+    _INVALID_BUILD_BACKENDS: dict[str, str] = {
+        "setuptools.backends._legacy:_Backend": "setuptools.build_meta",
+        "setuptools.backends._legacy": "setuptools.build_meta",
+    }
+
+    def _fix_pyproject_build_backend(
+        self,
+        dag: DAG,
+        node_id: str,
+    ) -> None:
+        """Fix known-invalid build-backend values in pyproject.toml (#767).
+
+        Some LLMs (particularly non-Claude models) produce invalid
+        build-backend values like ``setuptools.backends._legacy:_Backend``
+        despite prompt instructions. This post-processing step detects
+        and auto-fixes them before evaluation runs, saving ~280s of
+        wasted retry time per occurrence.
+        """
+        if not self._work_dir:
+            return
+
+        node = dag.nodes.get(node_id)
+        if not node or node.agent_type != "generator":
+            return
+
+        artifacts = node.output_artifacts or []
+        pyproject_files = [
+            a for a in artifacts
+            if a.endswith("pyproject.toml")
+        ]
+        if not pyproject_files:
+            return
+
+        import os
+        for rel_path in pyproject_files:
+            full_path = os.path.join(self._work_dir, rel_path)
+            if not os.path.isfile(full_path):
+                continue
+
+            try:
+                with open(full_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except (OSError, UnicodeDecodeError):
+                continue
+
+            original = content
+            for invalid, valid in self._INVALID_BUILD_BACKENDS.items():
+                content = content.replace(invalid, valid)
+
+            if content != original:
+                try:
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(content)
+                    logger.warning(
+                        "Fixed invalid build-backend in %s "
+                        "(auto-corrected known pattern) (#767)",
+                        rel_path,
+                    )
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------
     # Step 4: Test file requirement
