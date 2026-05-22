@@ -711,6 +711,24 @@ class ClaudeCodeConfig(BaseModel):
 
 
 
+class ObservabilityConfig(BaseModel):
+    """M5.1: Observability configuration for tracing and token reporting."""
+
+    enabled: bool = True
+    otlp_endpoint: str | None = None
+    trace_to_events: bool = True
+
+    @classmethod
+    def from_env(cls) -> ObservabilityConfig:
+        return cls(
+            enabled=os.getenv("WEAVE_OBSERVABILITY_ENABLED", "true").lower()
+                    not in ("false", "0"),
+            otlp_endpoint=os.getenv("WEAVE_OTLP_ENDPOINT") or None,
+            trace_to_events=os.getenv("WEAVE_TRACE_TO_EVENTS", "true").lower()
+                           not in ("false", "0"),
+        )
+
+
 class WeaveConfig(BaseModel):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
@@ -787,6 +805,9 @@ class WeaveConfig(BaseModel):
 
     # M4.1: Claude Code Backend
     claude_code: ClaudeCodeConfig = Field(default_factory=ClaudeCodeConfig)
+
+    # M5.1: Observability
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig.from_env)
 
 
     # M2.0: Watchdog

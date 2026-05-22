@@ -84,6 +84,14 @@ class EventType(str, Enum):
     # Degeneration events
     DEGENERATION_RECOVERED = "degeneration_recovered"
 
+    # Trace events (M5.1)
+    TRACE_RUN_START = "trace.run_start"
+    TRACE_RUN_END = "trace.run_end"
+    TRACE_NODE_START = "trace.node_start"
+    TRACE_NODE_END = "trace.node_end"
+    TRACE_LLM_TURN = "trace.llm_turn"
+    TRACE_TOOL_CALL = "trace.tool_call"
+
 
 class Event(BaseModel):
     """Immutable event in the session log."""

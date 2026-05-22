@@ -157,6 +157,20 @@ class NodeExecutor:
                         prep.input_artifacts,
                         workspace_path=prep.workspace_path,
                     )
+                    # M5.1: Trace LLM turn with token usage
+                    if result:
+                        token_usage = result.get("token_usage", {})
+                        await self._emit(ExecutionEvent(
+                            node_id=node_id,
+                            event_type="trace",
+                            details={
+                                "trace_type": "llm_turn",
+                                "input_tokens": token_usage.get("input_tokens", 0),
+                                "output_tokens": token_usage.get("output_tokens", 0),
+                                "model": result.get("model", "unknown"),
+                                "backend": result.get("backend", "unknown"),
+                            },
+                        ))
                 except (
                     asyncio.CancelledError,
                     PendingApprovalError,
