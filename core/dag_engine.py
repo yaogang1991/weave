@@ -543,6 +543,30 @@ class DAGExecutionEngine:
                                         "trigger": "retry_exhausted_fallback",
                                     },
                                 ))
+                                # #747: If LLM returns 'retry' after exhaustion,
+                                # remap to 'replan' (first choice) or 'skip'.
+                                if fallback.action == "retry":
+                                    if (
+                                        replan_count < self.max_replans
+                                        and self.replan_handler
+                                    ):
+                                        fallback = FailureDecision(
+                                            action="replan",
+                                            reasoning=(
+                                                "LLM recommended retry after "
+                                                "exhaustion — auto-upgraded to "
+                                                "replan (#747)"
+                                            ),
+                                        )
+                                    else:
+                                        fallback = FailureDecision(
+                                            action="skip",
+                                            reasoning=(
+                                                "LLM recommended retry after "
+                                                "exhaustion — auto-downgraded "
+                                                "to skip (#747)"
+                                            ),
+                                        )
                                 if fallback.action == "abort":
                                     self._skip_remaining(dag, levels, level_idx + 1)
                                     return dag

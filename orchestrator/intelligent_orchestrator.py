@@ -564,6 +564,19 @@ class IntelligentOrchestrator:
             {"role": "user", "content": f"Handle failure of node {failed_node_id}"},
         ]
 
+        # #747: When retries are exhausted, explicitly tell the LLM
+        # not to recommend 'retry'. Without this, the LLM sometimes
+        # returns 'retry' even after all attempts are used up.
+        if failed_node.retry_count >= failed_node.max_retries:
+            messages.append({
+                "role": "user",
+                "content": (
+                    "CRITICAL: This node has exhausted ALL retries "
+                    f"({failed_node.retry_count}/{failed_node.max_retries}). "
+                    "Do NOT recommend 'retry'. Choose from: replan, skip, abort."
+                ),
+            })
+
         response = self.llm.call(
             messages, tools=[],
             max_tokens_override=self._PLANNER_MAX_TOKENS,
