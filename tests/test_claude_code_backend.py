@@ -87,7 +87,7 @@ class TestClaudeCodeBackendHealthCheck:
         with patch("shutil.which", return_value="/usr/local/bin/claude"):
             backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
             import asyncio
-            assert asyncio.get_event_loop().run_until_complete(backend.health_check())
+            assert asyncio.run(backend.health_check())
 
     def test_unhealthy_when_nothing_available(self):
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
@@ -95,7 +95,7 @@ class TestClaudeCodeBackendHealthCheck:
             backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
             backend._sdk_available = False
             import asyncio
-            assert not asyncio.get_event_loop().run_until_complete(backend.health_check())
+            assert not asyncio.run(backend.health_check())
 
 
 class TestClaudeCodeBackendBuildPrompt:
@@ -158,7 +158,7 @@ class TestClaudeCodeBackendExecuteCLI:
 
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
 
@@ -179,7 +179,7 @@ class TestClaudeCodeBackendExecuteCLI:
 
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
 
@@ -198,7 +198,7 @@ class TestClaudeCodeBackendExecuteCLI:
 
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
 
@@ -217,7 +217,7 @@ class TestClaudeCodeBackendExecuteCLI:
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             with pytest.raises(NodeTimeoutError):
-                asyncio.get_event_loop().run_until_complete(
+                asyncio.run(
                     backend._execute_via_cli(ctx, "test prompt"),
                 )
 
@@ -234,7 +234,7 @@ class TestClaudeCodeBackendExecuteCLI:
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             with pytest.raises(RateLimitError):
-                asyncio.get_event_loop().run_until_complete(
+                asyncio.run(
                     backend._execute_via_cli(ctx, "test prompt"),
                 )
 
@@ -251,7 +251,7 @@ class TestClaudeCodeBackendExecuteCLI:
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
             with pytest.raises(BudgetExhaustedError):
-                asyncio.get_event_loop().run_until_complete(
+                asyncio.run(
                     backend._execute_via_cli(ctx, "test prompt"),
                 )
 
@@ -267,7 +267,7 @@ class TestClaudeCodeBackendExecuteCLI:
 
         with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
 
@@ -298,7 +298,7 @@ class TestClaudeCodeBackendExecuteDispatch:
                     side_effect=RuntimeError("SDK crashed"),
                 ):
                     import asyncio
-                    result = asyncio.get_event_loop().run_until_complete(
+                    result = asyncio.run(
                         backend.execute(ctx),
                     )
 
@@ -313,7 +313,7 @@ class TestClaudeCodeBackendExecuteDispatch:
 
         with patch("shutil.which", return_value=None):
             import asyncio
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 backend.execute(ctx),
             )
 

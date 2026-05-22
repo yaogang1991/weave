@@ -47,7 +47,7 @@ def test_count_tokens_api_raises_on_none():
     ctx = _make_context()
 
     with pytest.raises(ValueError, match="count_tokens returned None"):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             estimator._count_tokens_api(ctx)
         )
 
@@ -64,7 +64,7 @@ def test_estimate_node_tokens_falls_back_to_heuristic_on_none():
     estimator = _make_estimator(client=mock_client, fallback=True)
     ctx = _make_context()
 
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         estimator.estimate_node_tokens("test_node", ctx)
     )
 
@@ -87,6 +87,6 @@ def test_estimate_node_tokens_propagates_when_no_fallback():
     ctx = _make_context()
 
     with pytest.raises(ValueError, match="count_tokens returned None"):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             estimator.estimate_node_tokens("test_node", ctx)
         )

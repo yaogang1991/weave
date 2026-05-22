@@ -73,7 +73,7 @@ def test_plan_retries_on_hard_timeout_and_succeeds():
         MockValidator.return_value = mock_validator
 
         import asyncio
-        dag = asyncio.get_event_loop().run_until_complete(
+        dag = asyncio.run(
             orch.plan("Build a REST API")
         )
 
@@ -92,7 +92,7 @@ def test_plan_raises_after_exhausting_retries():
 
     import asyncio
     with pytest.raises(TimeoutError, match="hard timeout"):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orch.plan("Build a REST API")
         )
 
@@ -117,7 +117,7 @@ def test_plan_does_not_retry_non_timeout_errors():
 
     import asyncio
     with pytest.raises(ValueError, match="non-timeout"):
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             orch.plan("Build a REST API")
         )
     # 2 calls: _plan_structured_output (swallowed) + _plan_free_text (raised)
@@ -152,7 +152,7 @@ def test_plan_succeeds_first_attempt_no_retry():
         MockValidator.return_value = mock_validator
 
         import asyncio
-        dag = asyncio.get_event_loop().run_until_complete(
+        dag = asyncio.run(
             orch.plan("Build a REST API")
         )
 
