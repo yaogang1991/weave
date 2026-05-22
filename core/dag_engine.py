@@ -416,7 +416,9 @@ class DAGExecutionEngine:
                 # #455: Skip already-completed nodes
                 pending = [
                     nid for nid in level
-                    if dag.nodes[nid].status != NodeStatus.SUCCESS
+                    if dag.nodes[nid].status not in (
+                        NodeStatus.SUCCESS, NodeStatus.SKIPPED,
+                    )
                 ]
                 if not pending:
                     logger.info(
@@ -835,6 +837,13 @@ class DAGExecutionEngine:
         dag = self._merge_dag_results(dag, new_dag)
         # #775: Rewire downstream edges from failed node to its replacement.
         self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
+        # #789: Mark original failed node as SKIPPED so it won't trigger
+        # redundant replans when other nodes fail in subsequent levels.
+        dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+        logger.info(
+            "Node %s marked SKIPPED (superseded by replan) (#789)",
+            failed_id,
+        )
         replan_count += 1
         levels = dag.topological_levels()
         level_idx = 0
