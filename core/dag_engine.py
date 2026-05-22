@@ -525,8 +525,8 @@ class DAGExecutionEngine:
                                             },
                                         ))
                                         # Retry generator with feedback.
-                                        # Cap retry_count so _execute_single_node's
-                                        # internal retry loop gives exactly one attempt.
+                                        # Cap retry_count so NodeExecutor's
+                                        # retry loop gives exactly one attempt.
                                         dag.update_node(
                                             target_id,
                                             retry_count=gen_node.max_retries - 1,
