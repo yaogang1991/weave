@@ -393,6 +393,7 @@
             <div class="tabs">
                 <button class="tab active" data-tab="live">Live Events</button>
                 <button class="tab" data-tab="sessions">Sessions</button>
+                <button class="tab" data-tab="tokens">Tokens</button>
                 <button class="tab" data-tab="detail">Node Detail</button>
             </div>
             
@@ -417,6 +418,14 @@
                 </div>
             </div>
             
+            <div class="tab-content" id="tab-tokens">
+                <div class="node-detail" id="token-panel">
+                    <div class="empty-state">
+                        <span>Select a session to view token usage</span>
+                    </div>
+                </div>
+            </div>
+
             <div class="tab-content" id="tab-detail">
                 <div class="node-detail" id="node-detail">
                     <div class="empty-state">
@@ -824,9 +833,52 @@
             currentSessionId = data.session_id;
             document.getElementById('session-info').style.display = 'flex';
             document.getElementById('session-id').textContent = data.session_id.substring(0, 8);
+            loadTokenPanel(data.session_id);
             switchTab('live');
         }
         
+        // ── Token Panel (M5.1) ──────────────────────────────────
+        async function loadTokenPanel(sessionId) {
+            const panel = document.getElementById('token-panel');
+            try {
+                const resp = await fetch(`/api/sessions/${sessionId}/tokens`);
+                if (!resp.ok) { panel.innerHTML = '<div class="empty-state"><span>No token data</span></div>'; return; }
+                const data = await resp.json();
+
+                const fmt = (n) => n >= 1000 ? (n/1000).toFixed(1) + 'k' : n;
+                const fmtDur = (ms) => ms >= 60000 ? (ms/60000).toFixed(1) + 'min' : (ms/1000).toFixed(1) + 's';
+
+                let html = `<h3>Token Usage</h3>
+                    <div class="detail-row"><span class="detail-label">Run ID</span><span class="detail-value">${data.run_id || 'N/A'}</span></div>
+                    <div class="detail-row"><span class="detail-label">Input Tokens</span><span class="detail-value" style="color:#6366f1">${fmt(data.total_input_tokens)}</span></div>
+                    <div class="detail-row"><span class="detail-label">Output Tokens</span><span class="detail-value" style="color:#22c55e">${fmt(data.total_output_tokens)}</span></div>
+                    <div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">${fmtDur(data.total_duration_ms)}</span></div>`;
+
+                if (data.node_summaries && data.node_summaries.length > 0) {
+                    html += `<h3 style="margin-top:16px">Per-Node Breakdown</h3>`;
+                    data.node_summaries.forEach(ns => {
+                        const barW = data.total_input_tokens > 0 ? Math.round(ns.input_tokens / data.total_input_tokens * 100) : 0;
+                        html += `<div style="margin-bottom:10px;padding:8px;background:var(--bg-card);border-radius:6px">
+                            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                                <span style="color:var(--accent)">${ns.node_id}</span>
+                                <span style="color:var(--text-secondary)">${ns.agent_type}</span>
+                            </div>
+                            <div style="background:#1e293b;border-radius:3px;height:6px;overflow:hidden">
+                                <div style="background:linear-gradient(90deg,#6366f1,#22c55e);width:${barW}%;height:100%;border-radius:3px"></div>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-secondary);margin-top:4px">
+                                <span>in: ${fmt(ns.input_tokens)} / out: ${fmt(ns.output_tokens)}</span>
+                                <span>tools: ${ns.tool_call_count}</span>
+                            </div>
+                        </div>`;
+                    });
+                }
+                panel.innerHTML = html;
+            } catch (e) {
+                panel.innerHTML = '<div class="empty-state"><span>Failed to load token data</span></div>';
+            }
+        }
+
         function showSessionEnd(summary) {
             appendEvent({
                 node_id: 'SYSTEM',
