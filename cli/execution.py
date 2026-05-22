@@ -357,7 +357,6 @@ def _build_runtime(
         cc_backend = ClaudeCodeBackend(config=cc_config)
         backend_registry.register("claude_code", cc_backend)
 
-
     # M4.2: Budget manager from CLI args
     budget_manager = None
     budget_tokens = getattr(args, "budget_tokens", None)
@@ -369,7 +368,9 @@ def _build_runtime(
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
-        replan_handler=orchestrator.replan,
+        replan_handler=lambda dag_ref, failed_id: orchestrator.replan(
+            dag_ref, failed_id, args.requirement,
+        ),
         max_parallel=args.max_parallel,
         evaluator=evaluator,
         artifact_path=config.artifact_path,
