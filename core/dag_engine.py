@@ -900,7 +900,25 @@ class DAGExecutionEngine:
                 and skipped == 0
                 and partial_pass == 0
             ),
-            "node_details": {
+        }
+
+        # #724: Break down success by agent role so the summary
+        # distinguishes planning (plan output) from implementation
+        # (file artifacts).  A planner with output_count=0 is fine,
+        # but a generator with output_count=0 should not inflate the
+        # success count.
+        impl_types = {"generator", "worker"}
+        summary["implementation_success"] = sum(
+            1 for n in dag.nodes.values()
+            if n.status == NodeStatus.SUCCESS
+            and n.agent_type in impl_types
+        )
+        summary["implementation_total"] = sum(
+            1 for n in dag.nodes.values()
+            if n.agent_type in impl_types
+        )
+
+        summary["node_details"] = {
                 nid: {
                     "status": n.status.value,
                     "agent": n.agent_type,
@@ -914,8 +932,7 @@ class DAGExecutionEngine:
                     ),
                 }
                 for nid, n in dag.nodes.items()
-            },
-        }
+            }
 
         # M4.2: Token usage aggregation
         total_input = 0
