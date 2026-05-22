@@ -451,6 +451,21 @@ class DAGExecutionEngine:
                             return dag
 
                         elif decision.action == "retry":
+                            # #717: Enforce max_retries to prevent infinite
+                            # retry loops when stall timeout keeps firing.
+                            retry_node = dag.nodes[failed_id]
+                            if retry_node.retry_count >= retry_node.max_retries:
+                                logger.warning(
+                                    "Node %s exceeded max_retries (%d >= %d); "
+                                    "skipping (#717)",
+                                    failed_id, retry_node.retry_count,
+                                    retry_node.max_retries,
+                                )
+                                dag.update_node(
+                                    failed_id, status=NodeStatus.SKIPPED,
+                                )
+                                continue
+
                             # Exponential backoff before retry
                             backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
                             if backoff > 0:
