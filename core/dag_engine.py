@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
@@ -40,7 +41,7 @@ from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
 from core.dag_checkpoint import CheckpointManager
-from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
+from monitoring.otel import start_span, start_run_span, start_node_span  # noqa: E402 — optional OTel (#509)
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
