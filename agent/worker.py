@@ -255,6 +255,10 @@ class AgentWorker:
                         llm_attempt + 1, EMPTY_CALL_MAX_RETRIES,
                         json.dumps(raw_calls)[:500],
                     )
+                    # #731: Report progress to prevent stall timeout from
+                    # firing during tool call retry. Without this, multiple
+                    # retries eat into the stall budget and kill the node.
+                    _report_progress()
                     # Feed back error results so LLM can correct itself
                     messages.append(assistant_message)
                     messages.extend(tool_results)
