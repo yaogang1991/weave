@@ -126,7 +126,7 @@ class EvaluationPipeline:
             return fail
 
         # Step 3.5: Post-processing: fix known invalid patterns (#767)
-        self._fix_pyproject_build_backend(dag, node_id)
+        self._fix_pyproject_build_backend(dag, node_id, workspace_path=workspace_path)
 
         # Step 4: Test file requirement
         fail = await self._check_test_files(dag, node_id, emit)
@@ -298,15 +298,18 @@ class EvaluationPipeline:
     # ------------------------------------------------------------------
 
     # Known invalid build-backend values that LLMs commonly produce.
+    # Map to the legacy-compatible backend to preserve setup.py semantics.
     _INVALID_BUILD_BACKENDS: dict[str, str] = {
-        "setuptools.backends._legacy:_Backend": "setuptools.build_meta",
-        "setuptools.backends._legacy": "setuptools.build_meta",
+        "setuptools.backends._legacy:_Backend": "setuptools.build_meta:__legacy__",
+        "setuptools.backends._legacy": "setuptools.build_meta:__legacy__",
     }
 
     def _fix_pyproject_build_backend(
         self,
         dag: DAG,
         node_id: str,
+        *,
+        workspace_path: str | None = None,
     ) -> None:
         """Fix known-invalid build-backend values in pyproject.toml (#767).
 
@@ -315,8 +318,14 @@ class EvaluationPipeline:
         despite prompt instructions. This post-processing step detects
         and auto-fixes them before evaluation runs, saving ~280s of
         wasted retry time per occurrence.
+
+        Uses *workspace_path* when node isolation is enabled so the fix
+        targets the correct per-node copy, not the shared run directory.
         """
-        if not self._work_dir:
+        import os
+
+        base_dir = workspace_path or self._work_dir
+        if not base_dir:
             return
 
         node = dag.nodes.get(node_id)
@@ -326,14 +335,21 @@ class EvaluationPipeline:
         artifacts = node.output_artifacts or []
         pyproject_files = [
             a for a in artifacts
-            if a.endswith("pyproject.toml")
+            if os.path.basename(a) == "pyproject.toml"
         ]
         if not pyproject_files:
             return
 
-        import os
+        base_dir = os.path.realpath(base_dir)
         for rel_path in pyproject_files:
-            full_path = os.path.join(self._work_dir, rel_path)
+            # Sanitize path: resolve and verify it stays within base_dir
+            full_path = os.path.realpath(os.path.join(base_dir, rel_path))
+            if not full_path.startswith(base_dir + os.sep) and full_path != base_dir:
+                logger.warning(
+                    "Skipping pyproject.toml path traversal attempt: %s (#767)",
+                    rel_path,
+                )
+                continue
             if not os.path.isfile(full_path):
                 continue
 
@@ -343,14 +359,11 @@ class EvaluationPipeline:
             except (OSError, UnicodeDecodeError):
                 continue
 
-            original = content
-            for invalid, valid in self._INVALID_BUILD_BACKENDS.items():
-                content = content.replace(invalid, valid)
-
-            if content != original:
+            fixed = self._rewrite_build_backend(content)
+            if fixed is not None:
                 try:
                     with open(full_path, "w", encoding="utf-8") as f:
-                        f.write(content)
+                        f.write(fixed)
                     logger.warning(
                         "Fixed invalid build-backend in %s "
                         "(auto-corrected known pattern) (#767)",
@@ -358,6 +371,70 @@ class EvaluationPipeline:
                     )
                 except OSError:
                     pass
+
+    @classmethod
+    def _rewrite_build_backend(cls, content: str) -> str | None:
+        """Parse TOML and rewrite only ``[build-system].build-backend``.
+
+        Returns the rewritten content if a fix was applied, or ``None``
+        if the file was already valid or had no ``[build-system]`` table.
+
+        Falls back to regex-based replacement if TOML parsing fails
+        (e.g. the file is malformed).
+        """
+        try:
+            import tomli
+        except ImportError:
+            import tomllib as tomli  # type: ignore[no-redef]
+
+        try:
+            data = tomli.loads(content)
+        except Exception:
+            # Malformed TOML — fall back to safe regex replacement
+            return cls._regex_rewrite_build_backend(content)
+
+        build_system = data.get("build-system")
+        if not isinstance(build_system, dict):
+            return None
+
+        backend = build_system.get("build-backend")
+        if not isinstance(backend, str):
+            return None
+
+        if backend not in cls._INVALID_BUILD_BACKENDS:
+            return None
+
+        corrected = cls._INVALID_BUILD_BACKENDS[backend]
+
+        # Do a targeted replacement of just the quoted value string.
+        # This avoids re-serializing the entire TOML (which would lose
+        # comments, formatting, ordering) and only touches the
+        # build-backend line.
+        escaped = re.escape(backend)
+        new_content, count = re.subn(
+            r'(build-backend\s*=\s*["\'])' + escaped + r'(["\'])',
+            rf'\g<1>{corrected}\g<2>',
+            content,
+            count=1,
+        )
+        return new_content if count > 0 else None
+
+    @classmethod
+    def _regex_rewrite_build_backend(cls, content: str) -> str | None:
+        """Fallback: targeted regex replacement for malformed TOML."""
+        changed = False
+        for invalid, valid in cls._INVALID_BUILD_BACKENDS.items():
+            escaped = re.escape(invalid)
+            new_content, count = re.subn(
+                r'(build-backend\s*=\s*["\'])' + escaped + r'(["\'])',
+                rf'\g<1>{valid}\g<2>',
+                content,
+                count=1,
+            )
+            if count > 0:
+                content = new_content
+                changed = True
+        return content if changed else None
 
     # ------------------------------------------------------------------
     # Step 4: Test file requirement
