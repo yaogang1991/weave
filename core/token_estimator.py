@@ -19,6 +19,10 @@ from pydantic import BaseModel, Field
 from core.config import TokenEstimationConfig
 from orchestrator.llm_utils import estimate_tokens as heuristic_estimate
 
+
+class _CountTokensUnavailable(Exception):
+    """Raised when count_tokens API returns None (e.g., non-Anthropic proxy)."""
+
 if TYPE_CHECKING:
     from core.dag_models import DAGNode
 
@@ -89,6 +93,12 @@ class TokenEstimator:
                     estimated_tokens=tokens,
                     estimation_method="api",
                     breakdown=self._heuristic_breakdown(context),
+                )
+            except _CountTokensUnavailable:
+                logger.debug(
+                    "count_tokens API unavailable for node %s, "
+                    "using heuristic fallback",
+                    node_id,
                 )
             except Exception as e:
                 logger.warning(
@@ -163,7 +173,7 @@ class TokenEstimator:
             result = await result
         tokens = result.input_tokens
         if tokens is None:
-            raise ValueError(
+            raise _CountTokensUnavailable(
                 "count_tokens returned None — proxy/model may not support "
                 "this endpoint (#737)"
             )
