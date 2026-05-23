@@ -274,14 +274,11 @@ class DAGExecutionEngine:
                     )
             else:
                 # Node only in old DAG — preserve it so summary is
-                # accurate (#720).  Pending nodes become SKIPPED since
-                # the replan replaced them.
-                if node.status == NodeStatus.PENDING:
-                    merged.add_node(node.model_copy(update={
-                        "status": NodeStatus.SKIPPED,
-                    }))
-                else:
-                    merged.add_node(node.model_copy())
+                # accurate (#720).  Keep status as-is: downstream PENDING
+                # nodes may still execute after edge rewiring (#797).
+                # NodeExecutor._prepare_stage skips nodes whose hard
+                # dependencies remain failed.
+                merged.add_node(node.model_copy())
 
         # #728: Preserve old edges for nodes that were carried over.
         # Without edges, topological_levels() can't order preserved
