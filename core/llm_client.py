@@ -47,6 +47,7 @@ class _HardTimeoutError(TimeoutError):
     """Hard wall-clock timeout or cancel_event — NOT transient, do not retry (#674)."""
     pass
 
+
 # Process-global semaphore to limit concurrent API calls across all
 # parallel DAG nodes (#300).  Initialized on first use.
 _global_api_semaphore: threading.Semaphore | None = None
