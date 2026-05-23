@@ -87,7 +87,7 @@ def _scan_existing_files(
             parts = path.relative_to(root).parts
             if any(p.startswith(".") or p in _SKIP_DIRS for p in parts):
                 continue
-            rel = str(path.relative_to(root))
+            rel = path.relative_to(root).as_posix()
             if path.name in _CONFIG_NAMES:
                 ftype = "config"
             elif any(p == "tests" or p == "test" for p in parts):

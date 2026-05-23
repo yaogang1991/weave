@@ -336,5 +336,6 @@ class TestRuntimeContextInjection:
         assert len(captured_prompts) == 1
         prompt = captured_prompts[0]
         assert "## Runtime Environment" in prompt
-        assert "PROJECT_ROOT: /test/project" in prompt
+        expected_root = str(Path(tool_registry.base_cwd).resolve())
+        assert f"PROJECT_ROOT: {expected_root}" in prompt
         assert "Your task: do something" in prompt

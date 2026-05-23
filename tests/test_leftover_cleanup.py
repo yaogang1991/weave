@@ -60,7 +60,7 @@ class TestLeftoverCleanup:
             "j1", "r1", "n1",
             expected_artifacts=["src/a.py"],
         )
-        assert os.path.normpath("src/extra.py") in cleaned
+        assert "src/extra.py" in cleaned
         assert (workspace / "src" / "a.py").exists()
         assert not (workspace / "src" / "extra.py").exists()
         assert (workspace / ".leftovers" / "src" / "extra.py").exists()
