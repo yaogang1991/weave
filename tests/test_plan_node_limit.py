@@ -1,7 +1,7 @@
 """
 Tests for #292: planner node count limit.
 
-The PlanValidator rejects plans with more than MAX_NODES (10) nodes,
+The PlanValidator rejects plans with more than max_nodes (default 25) nodes,
 preventing JSON truncation when the LLM generates oversized DAGs.
 The orchestrator retries once with explicit feedback when this occurs.
 """
@@ -21,38 +21,38 @@ def _make_plan(num_nodes: int) -> dict:
 
 class TestNodeCountLimit:
     def test_plan_at_limit_passes(self):
-        """Plan with exactly MAX_NODES (10) should pass validation."""
-        plan = _make_plan(10)
+        """Plan with exactly max_nodes (25) should pass validation."""
+        plan = _make_plan(25)
         validator = PlanValidator()
         result = validator.validate(plan)
         assert result is not None
 
     def test_plan_under_limit_passes(self):
-        """Plan with fewer than MAX_NODES should pass validation."""
+        """Plan with fewer than max_nodes should pass validation."""
         plan = _make_plan(5)
         validator = PlanValidator()
         result = validator.validate(plan)
         assert result is not None
 
     def test_plan_over_limit_rejected(self):
-        """Plan with more than MAX_NODES (11) should be rejected."""
-        plan = _make_plan(11)
+        """Plan with more than max_nodes (26) should be rejected."""
+        plan = _make_plan(26)
         validator = PlanValidator()
-        with pytest.raises(PlanValidationError, match="11 nodes"):
+        with pytest.raises(PlanValidationError, match="26 nodes"):
             validator.validate(plan)
 
     def test_plan_far_over_limit_rejected(self):
-        """Plan with 20 nodes (the R21 scenario) should be rejected."""
-        plan = _make_plan(20)
+        """Plan with 40 nodes (the R21 scenario) should be rejected."""
+        plan = _make_plan(40)
         validator = PlanValidator()
-        with pytest.raises(PlanValidationError, match="20 nodes"):
+        with pytest.raises(PlanValidationError, match="40 nodes"):
             validator.validate(plan)
 
     def test_error_message_includes_max(self):
         """Error message should mention the maximum allowed."""
-        plan = _make_plan(15)
+        plan = _make_plan(30)
         validator = PlanValidator()
-        with pytest.raises(PlanValidationError, match="maximum 10"):
+        with pytest.raises(PlanValidationError, match="maximum 25"):
             validator.validate(plan)
 
     def test_empty_plan_passes(self):
@@ -68,6 +68,13 @@ class TestNodeCountLimit:
         result = validator.validate(plan)
         assert result is not None
 
-    def test_max_nodes_constant(self):
-        """MAX_NODES is accessible for documentation/testing."""
-        assert PlanValidator.MAX_NODES == 10
+    def test_custom_max_nodes(self):
+        """PlanValidator(max_nodes=N) uses a custom limit."""
+        plan = _make_plan(6)
+        validator = PlanValidator(max_nodes=5)
+        with pytest.raises(PlanValidationError, match="6 nodes"):
+            validator.validate(plan)
+        # Exactly at custom limit should pass
+        plan_at_limit = _make_plan(5)
+        result = validator.validate(plan_at_limit)
+        assert result is not None
