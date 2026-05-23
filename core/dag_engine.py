@@ -491,6 +491,8 @@ class DAGExecutionEngine:
                                     "agent_type": node.agent_type,
                                     "status": completed_node.status.value,
                                     "duration_ms": duration_ms,
+                                    "input_tokens": completed_node.token_usage.get("input_tokens", 0),
+                                    "output_tokens": completed_node.token_usage.get("output_tokens", 0),
                                 },
                             ))
                             node_span.__exit__(None, None, None)
