@@ -84,6 +84,13 @@ class ToolRegistry:
             return Path.cwd().resolve() / path
 
         # Explicit workspace: enforce containment
+        # #827: Strip leading project dir name if file_path starts with it,
+        # preventing doubled paths like project/project/file.py.
+        if not path.is_absolute():
+            cwd_name = self.base_cwd.name
+            parts = path.parts
+            if parts and parts[0] == cwd_name:
+                path = Path(*parts[1:]) if len(parts) > 1 else Path(".")
         resolved = (self.base_cwd / path).resolve()
         if not (resolved == self.base_cwd or self.base_cwd in resolved.parents):
             raise ValueError(f"Path escapes workspace: {file_path}")
