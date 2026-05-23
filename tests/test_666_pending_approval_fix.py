@@ -46,27 +46,31 @@ class TestInteractiveApprovalPrompt:
 
     def test_high_risk_approved_via_prompt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", return_value="y"):
+        with patch("builtins.input", return_value="y"), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "allowed"
         assert "approved by user" in result.reason
 
     def test_high_risk_denied_via_prompt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", return_value="n"):
+        with patch("builtins.input", return_value="n"), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
         assert "denied by user" in result.reason
 
     def test_high_risk_denied_on_eof(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", side_effect=EOFError):
+        with patch("builtins.input", side_effect=EOFError), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
 
     def test_high_risk_denied_on_keyboard_interrupt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
+        with patch("builtins.input", side_effect=KeyboardInterrupt), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
 
@@ -79,6 +83,14 @@ class TestInteractiveApprovalPrompt:
         g = self._make_interactive_guardrails()
         result = g.evaluate("read", {"file_path": "/tmp/test.txt"})
         assert result.decision == "allowed"
+
+    def test_high_risk_auto_approved_when_no_tty(self):
+        """#830: HIGH risk tools auto-approved when stdin is not a TTY."""
+        g = self._make_interactive_guardrails()
+        with patch("sys.stdin.isatty", return_value=False):
+            result = g.evaluate("bash", {"command": "ls"})
+        assert result.decision == "allowed"
+        assert "non-TTY" in result.reason
 
 
 class TestNonInteractiveStillPending:
@@ -191,4 +203,4 @@ class TestNodeExecutorPendingApproval:
 
         await node_executor.execute_node(dag, "downstream")
         assert executor_called
-        assert dag.nodes["downstream"].status == NodeStatus.COMPLETED
+        assert dag.nodes["downstream"].status == NodeStatus.SUCCESS

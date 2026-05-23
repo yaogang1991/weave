@@ -291,8 +291,21 @@ class Guardrails:
 
         Thread-safe: serialises stdin access via _stdin_lock to prevent
         garbled prompts when multiple nodes run concurrently.
+
+        When stdin is not a TTY (piped input, background process), auto-approve
+        to avoid EOFError blocking all HIGH risk tools (#830).
         """
         risk_label = risk.name
+        # #830: stdin not attached — auto-approve instead of blocking
+        if not sys.stdin.isatty():
+            logger.warning(
+                "stdin is not a TTY — auto-approving %s risk '%s' (#830)",
+                risk_label, tool_name,
+            )
+            return GuardrailResult(
+                decision="allowed",
+                reason=f"{risk_label} risk '{tool_name}' auto-approved (non-TTY stdin)",
+            )
         with self._stdin_lock:
             print(
                 f"\n  {risk_label} risk tool: {tool_name}",
