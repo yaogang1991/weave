@@ -97,6 +97,8 @@ class DAGExecutionEngine:
         backend_registry: Any | None = None,
         # M4.2: Token budget manager
         budget_manager: BudgetManager | None = None,
+        # #795: Max DAG node count to prevent replan explosion
+        max_dag_nodes: int = 25,
     ):
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
@@ -104,6 +106,7 @@ class DAGExecutionEngine:
         self.replan_handler = replan_handler
         self.max_replans = max_replans
         self.max_parallel = max_parallel
+        self.max_dag_nodes = max_dag_nodes
         # Note: evaluator is stored in NodeExecutor (created below).
         # The .evaluator property proxies to it.
         self.artifact_path = artifact_path
@@ -833,6 +836,16 @@ class DAGExecutionEngine:
         )
         old_dag = dag
         dag = self._merge_dag_results(dag, new_dag)
+
+        # #795: Abort if merged DAG exceeds node limit.
+        if len(dag.nodes) > self.max_dag_nodes:
+            logger.warning(
+                "Merged DAG has %d nodes (limit %d) — "
+                "aborting replan to prevent explosion (#795)",
+                len(dag.nodes), self.max_dag_nodes,
+            )
+            return old_dag, levels, level_idx, replan_count, False
+
         # #775: Rewire downstream edges from failed node to its replacement.
         self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
         replan_count += 1
@@ -909,25 +922,36 @@ class DAGExecutionEngine:
     def _check_planner_circuit_break(
         self, dag: DAG, failed_id: str,
     ) -> bool:
-        """Check planner timeout circuit breaker (#750).
+        """Check circuit breaker for futile replans (#750, #795).
 
         Returns True if replan should be blocked due to too many
-        consecutive planner node timeouts.
+        consecutive failures indicating a provider-level issue
+        (planner timeouts, empty args degeneration, etc.)
+        rather than task-specific fixable problems.
         """
         node = dag.nodes[failed_id]
-        is_planner_timeout = (
-            node.agent_type == "planner"
-            and (node.error or "").lower().find("timeout") != -1
+        error_lower = (node.error or "").lower()
+        is_provider_issue = (
+            # #750: Planner timeout streak
+            (
+                node.agent_type == "planner"
+                and "timeout" in error_lower
+            )
+            # #795: Empty args degeneration (provider-wide issue)
+            or "empty" in error_lower
+            or "degeneration" in error_lower
+            or "{}" in (node.error or "")
         )
-        if is_planner_timeout:
+        if is_provider_issue:
             self._planner_timeout_streak += 1
         else:
             self._planner_timeout_streak = 0
 
         if self._planner_timeout_streak >= self._PLANNER_CIRCUIT_BREAKER_THRESHOLD:
             logger.warning(
-                "Planner timeout circuit breaker tripped "
-                "(%d consecutive, threshold %d) — blocking replan (#750)",
+                "Replan circuit breaker tripped "
+                "(%d consecutive provider issues, threshold %d) "
+                "— blocking replan (#750, #795)",
                 self._planner_timeout_streak,
                 self._PLANNER_CIRCUIT_BREAKER_THRESHOLD,
             )
