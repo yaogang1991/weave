@@ -294,6 +294,13 @@ class Guardrails:
         """
         risk_label = risk.name
         with self._stdin_lock:
+            # #830: When stdin has no TTY, input() raises EOFError and blocks
+            # the agent. Fall back to pending_approval instead.
+            if not sys.stdin.isatty():
+                return GuardrailResult(
+                    decision="pending_approval",
+                    reason=f"{risk_label} risk '{tool_name}' (no TTY, awaiting approval)",
+                )
             print(
                 f"\n  {risk_label} risk tool: {tool_name}",
                 flush=True,
