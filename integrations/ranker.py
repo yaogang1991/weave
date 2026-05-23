@@ -56,6 +56,16 @@ class IssueRanker:
         if isinstance(text, list):
             text = " ".join(b.get("text", "") for b in text if isinstance(b, dict))
 
-        numbers = json.loads(text.strip())
+        # #823: Extract JSON array from potentially markdown-wrapped response.
+        import re
+        match = re.search(r'\[.*\]', text.strip())
+        if not match:
+            logger.warning("LLM ranking returned no JSON array, falling back to default order")
+            return issues
+        numbers = json.loads(match.group())
         issue_map = {i.number: i for i in issues}
-        return [issue_map[n] for n in numbers if n in issue_map]
+        ranked = [issue_map[n] for n in numbers if n in issue_map]
+        missing = set(numbers) - set(issue_map.keys())
+        if missing:
+            logger.warning("Issues dropped from ranking: %s", missing)
+        return ranked if ranked else issues

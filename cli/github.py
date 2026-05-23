@@ -57,17 +57,26 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
 
     _, service = _make_services()
     requirement = issue.to_requirement()
-    job = await service.submit_job(
-        requirement=requirement,
-        metadata={
-            "issue_number": issue.number,
-            "issue_url": issue.url,
-            "integration_type": "github",
-            "branch_name": branch,
-        },
-    )
-    print(f"  Job {job.id} submitted, running...")
-    run = await service.run_job(job.id)
+    try:
+        job = await service.submit_job(
+            requirement=requirement,
+            metadata={
+                "issue_number": issue.number,
+                "issue_url": issue.url,
+                "integration_type": "github",
+                "branch_name": branch,
+            },
+        )
+        print(f"  Job {job.id} submitted, running...")
+        run = await service.run_job(job.id)
+    except Exception:
+        # #823: Revert label on submit/run failure so the issue can be retried.
+        await host.update_labels(
+            repo, issue.number,
+            add=[config.label.trigger_label],
+            remove=[config.label.running_label],
+        )
+        raise
 
     if run.status.value in ("succeeded",):
         print(f"  Issue #{issue.number} completed successfully")
