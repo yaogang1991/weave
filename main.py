@@ -59,6 +59,7 @@ from cli.learning import (  # noqa: E402
 )
 from cli.skills import cmd_skills, cmd_skill, cmd_templates  # noqa: E402
 from cli.impact import cmd_impact_predict, cmd_impact_graph, cmd_impact_history  # noqa: E402
+from cli.github import cmd_issue_poll, cmd_issue_run, cmd_issue_status  # noqa: E402
 from cli.args import (  # noqa: E402
     add_project_arg, add_display_args, add_template_args,
     add_execution_args, add_self_modify_arg, add_requirement_arg,
@@ -328,6 +329,35 @@ Examples:
     )
     impact_history_parser.set_defaults(func=cmd_impact_history)
 
+    # ------------------------------------------------------------------
+    # GitHub issue integration commands (M5.2)
+    # ------------------------------------------------------------------
+
+    issue_poll_parser = subparsers.add_parser(
+        "issue-poll", help="Poll GitHub issues and execute top-ranked issue",
+    )
+    issue_poll_parser.add_argument("--repo", help="GitHub repo (owner/repo)")
+    issue_poll_parser.add_argument(
+        "--limit", type=int, default=1, help="Max issues to execute (default: 1)",
+    )
+    issue_poll_parser.add_argument(
+        "--dry-run", action="store_true", help="Show issues without executing",
+    )
+    issue_poll_parser.set_defaults(func=cmd_issue_poll)
+
+    issue_run_parser = subparsers.add_parser(
+        "issue-run", help="Execute a specific GitHub issue by number",
+    )
+    issue_run_parser.add_argument("number", type=int, help="Issue number")
+    issue_run_parser.add_argument("--repo", help="GitHub repo (owner/repo)")
+    issue_run_parser.set_defaults(func=cmd_issue_run)
+
+    issue_status_parser = subparsers.add_parser(
+        "issue-status", help="Show status of Weave-managed GitHub issues",
+    )
+    issue_status_parser.add_argument("--repo", help="GitHub repo (owner/repo)")
+    issue_status_parser.set_defaults(func=cmd_issue_status)
+
     args = parser.parse_args()
 
     # Validate --pass-threshold range (0, 10] early for clear error messages.
@@ -353,6 +383,7 @@ Examples:
         "impact-predict", "impact-graph", "impact-history",
         "skills",
         "serve",
+        "issue-status",
     }
     # Template-based plan doesn't need an LLM key (run still executes agents)
     if args.command == "plan" and getattr(args, "template", None):

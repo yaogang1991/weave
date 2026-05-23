@@ -1,6 +1,7 @@
 """CLI commands for GitHub issue integration (M5.2)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import sys
 
@@ -28,10 +29,12 @@ def _make_ranker():
 
 
 def _make_services():
+    from core.config import WeaveConfig
     from control_plane.repository import JobRepository
     from control_plane.service import RunService
+    cfg = WeaveConfig.from_env()
     repo = JobRepository()
-    service = RunService(repository=repo)
+    service = RunService(repository=repo, llm_config=cfg.llm)
     return repo, service
 
 
@@ -39,7 +42,9 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
     """Execute a single issue: labels -> branch -> submit -> run -> result labels."""
     config = IntegrationConfig.from_env()
     host = _make_host()
-    branch_mgr = BranchManager()
+    # P2: Use project workspace for branch operations, not default cwd.
+    project_path = getattr(issue, "repo", "") or "."
+    branch_mgr = BranchManager(repo_root=project_path)
 
     if dry_run:
         print(f"[DRY RUN] Would execute: #{issue.number} {issue.title}")
@@ -55,7 +60,7 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
 
     branch = await branch_mgr.create_branch(repo, issue)
 
-    _, service = _make_services()
+    repository, service = _make_services()
     requirement = issue.to_requirement()
     try:
         job = await service.submit_job(
@@ -80,13 +85,35 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
 
     if run.status.value in ("succeeded",):
         print(f"  Issue #{issue.number} completed successfully")
+        # P2: Remove running label, add PR label on success.
+        await host.update_labels(
+            repo, issue.number,
+            add=[config.label.pr_label],
+            remove=[config.label.running_label],
+        )
+        # P2: Push branch and create PR on success.
+        pushed = await branch_mgr.push_branch(branch)
+        if pushed:
+            pr_url = await host.create_pr(
+                repo, branch,
+                title=f"fix: resolve #{issue.number} {issue.title}",
+                body=f"Automated resolution for #{issue.number}.\n\nCloses #{issue.number}",
+            )
+            if pr_url:
+                print(f"  PR created: {pr_url}")
+            else:
+                print(f"  Branch pushed but PR creation failed")
+        else:
+            print(f"  Branch push failed")
     else:
         await host.update_labels(
             repo, issue.number,
             add=[config.label.failed_label],
             remove=[config.label.running_label],
         )
-        error_msg = run.error or "Unknown error"
+        # P2: Read error from job's last_error, not run.error (which doesn't exist).
+        job = repository.get_job(job.id)
+        error_msg = job.last_error if job and job.last_error else "Unknown error"
         await host.comment_on_issue(
             repo, issue.number,
             f"Weave attempted to resolve this issue but encountered an error.\n\n"
@@ -116,6 +143,10 @@ async def cmd_issue_poll(args):
     if not raw_issues:
         print("No issues found.")
         return
+
+    # P2: Inject repo into raw issue data so normalize preserves it.
+    for r in raw_issues:
+        r.data.setdefault("repo", repo)
 
     issues = [tracker.normalize(r) for r in raw_issues]
     ranker = _make_ranker()
@@ -173,10 +204,22 @@ async def cmd_issue_status(args):
 
     tracker = _make_tracker()
     config = IntegrationConfig.from_env()
-    raw_issues = await tracker.fetch(repo)
+
+    # P2: Filter to Weave-managed labels only (trigger, running, pr, failed).
+    managed_labels = [
+        config.label.trigger_label,
+        config.label.running_label,
+        config.label.pr_label,
+        config.label.failed_label,
+    ]
+    raw_issues = await tracker.fetch(repo, labels=managed_labels)
     if not raw_issues:
         print("No Weave-managed issues found.")
         return
+
+    # P2: Inject repo into raw issue data so normalize preserves it.
+    for r in raw_issues:
+        r.data.setdefault("repo", repo)
 
     issues = [tracker.normalize(r) for r in raw_issues]
     print(f"Weave-managed issues in {repo}:")
