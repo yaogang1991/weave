@@ -810,14 +810,14 @@ class DAGExecutionEngine:
                             if replanned:
                                 break  # Break out of failed_in_level loop
                             # Replan handler unavailable or failed — skip
-                            # the failed node and continue (#718).
+                            # the failed node and continue (#718, #829).
                             logger.warning(
                                 "Replan not available for %s; "
                                 "skipping and continuing (#718)",
                                 failed_id,
                             )
                             dag.update_node(failed_id, status=NodeStatus.SKIPPED)
-                            return dag
+                            continue  # Process remaining failed nodes in this level
                     else:
                         # All failed nodes in this level were handled without replan
                         # Continue to next level
@@ -905,6 +905,14 @@ class DAGExecutionEngine:
                 "Replan handler failed for node %s: %s. "
                 "Falling back to skip (#718).",
                 failed_id, e,
+            )
+            return dag, levels, level_idx, replan_count, False
+
+        if new_dag is None:
+            logger.error(
+                "Replan handler returned None for node %s. "
+                "Falling back to skip (#829).",
+                failed_id,
             )
             return dag, levels, level_idx, replan_count, False
 
