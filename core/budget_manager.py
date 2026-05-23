@@ -88,16 +88,29 @@ class BudgetManager:
             self._used_output += output_tokens
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize budget state for job result artifact."""
+        """Serialize budget state for job result artifact.
+
+        All reads are inside a single lock acquisition so the dict
+        represents a consistent point-in-time snapshot.
+        """
         with self._lock:
-            used_total = self._used_input + self._used_output
+            used_input = self._used_input
+            used_output = self._used_output
+            used_total = used_input + used_output
+            if self._config.is_unlimited:
+                remaining = -1
+                fraction = 0.0
+            else:
+                remaining = max(0, self._config.total_tokens - used_total)
+                fraction = used_total / self._config.total_tokens
+            warning = self._warning_emitted
         return {
             "enabled": self._config.enabled,
             "total_budget": self._config.total_tokens,
-            "used_input_tokens": self._used_input,
-            "used_output_tokens": self._used_output,
+            "used_input_tokens": used_input,
+            "used_output_tokens": used_output,
             "used_total_tokens": used_total,
-            "remaining_tokens": self.remaining_tokens,
-            "usage_fraction": round(self.usage_fraction, 4),
-            "warning_emitted": self._warning_emitted,
+            "remaining_tokens": remaining,
+            "usage_fraction": round(fraction, 4),
+            "warning_emitted": warning,
         }
