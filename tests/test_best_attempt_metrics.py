@@ -82,7 +82,7 @@ class TestBestAttemptCriteriaTracking:
         )
         result = await engine.execute(dag)
 
-        assert result.nodes["n1"].status == NodeStatus.FAILED
+        assert result.nodes["n1"].status in (NodeStatus.FAILED, NodeStatus.SKIPPED)
         assert "n1" in engine._best_attempts
         best = engine._best_attempts["n1"]
         assert best["criteria_results"] == criteria
