@@ -1,6 +1,5 @@
 """Tests for #828: print failed node details on DAG execution failure."""
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -34,7 +33,8 @@ class TestFailureOutput:
         )
         store = MagicMock()
 
-        asyncio.get_event_loop().run_until_complete(
+        import asyncio
+        asyncio.run(
             _finalize_execution(engine, dag, store, "test-session", {}, None)
         )
 
@@ -57,7 +57,8 @@ class TestFailureOutput:
         )
         store = MagicMock()
 
-        asyncio.get_event_loop().run_until_complete(
+        import asyncio
+        asyncio.run(
             _finalize_execution(engine, dag, store, "s1", {}, None)
         )
 
