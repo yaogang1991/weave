@@ -296,10 +296,13 @@ class SessionStore:
             label: Optional label for the checkpoint (used for log message).
         """
         state = self.restore_state(session_id)
-        events = self.get_events(session_id)
+        # Use actual line count for truncation, not parsed event count.
+        # get_events() may skip corrupted lines, so len(events) can be
+        # less than the true line count, causing incomplete truncation (#891).
+        line_count = self._count_lines(session_id)
         snapshot = SessionSnapshot(
             state=state,
-            event_index=len(events),
+            event_index=line_count,
             timestamp=datetime.now(timezone.utc),
         )
         self._save_snapshot(session_id, snapshot)
@@ -348,6 +351,13 @@ class SessionStore:
         except Exception as exc:
             logger.warning("Failed to load snapshot for session %s: %s", session_id, exc)
             return None
+
+    def _count_lines(self, session_id: str) -> int:
+        """Count lines in the session JSONL file."""
+        path = self._session_file(session_id)
+        if not path.exists():
+            return 0
+        return sum(1 for _ in open(path, "r", encoding="utf-8"))
 
     def _truncate_log(self, session_id: str, event_index: int) -> None:
         """Remove events up to event_index from the JSONL log."""
