@@ -280,7 +280,8 @@ class TestRuntimeContextInjection:
         )
         ctx = worker._build_runtime_context()
         assert "## Runtime Environment" in ctx
-        assert "PROJECT_ROOT: /custom/project" in ctx
+        expected_root = str(Path(tool_registry.base_cwd).resolve())
+        assert f"PROJECT_ROOT: {expected_root}" in ctx
         assert "Path rules:" in ctx
 
     def test_build_runtime_context_falls_back_to_cwd(self):
