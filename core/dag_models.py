@@ -36,6 +36,7 @@ class NodeStatus(str, Enum):
     WARNED = "warned"              # Passed but has uncheckable/warned criteria
     FAILED = "failed"
     SKIPPED = "skipped"
+    SUPERSEDED = "superseded"  # Replaced by replan (#789)
     RETRYING = "retrying"
     PENDING_APPROVAL = "pending_approval"
 
