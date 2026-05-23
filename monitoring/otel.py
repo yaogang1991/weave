@@ -9,6 +9,7 @@ https://opentelemetry.io/docs/specs/semconv/gen-ai/
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Union
 
 logger = logging.getLogger(__name__)
 
@@ -117,8 +118,13 @@ def start_span(name: str, attributes: dict | None = None):
 
 # -- M5.1: Typed span helpers for 4-layer tracing --
 
+if TYPE_CHECKING:
+    from opentelemetry.trace import Span as OTelSpan
 
-def start_run_span(run_id: str, requirement: str) -> NoOpSpan:
+SpanLike = Union["OTelSpan", NoOpSpan]
+
+
+def start_run_span(run_id: str, requirement: str) -> SpanLike:
     """Create a Run-level OTel span (M5.1)."""
     return start_span("weave.run", {
         "weave.run.id": run_id,
@@ -126,7 +132,7 @@ def start_run_span(run_id: str, requirement: str) -> NoOpSpan:
     })
 
 
-def start_node_span(run_id: str, node_id: str, agent_type: str) -> NoOpSpan:
+def start_node_span(run_id: str, node_id: str, agent_type: str) -> SpanLike:
     """Create a Node-level OTel span (M5.1)."""
     return start_span("weave.node", {
         "weave.run.id": run_id,
@@ -135,7 +141,7 @@ def start_node_span(run_id: str, node_id: str, agent_type: str) -> NoOpSpan:
     })
 
 
-def start_llm_turn_span(node_id: str, model: str) -> NoOpSpan:
+def start_llm_turn_span(node_id: str, model: str) -> SpanLike:
     """Create an LLM Turn-level OTel span (M5.1)."""
     return start_span("weave.llm_turn", {
         "weave.node.id": node_id,
@@ -143,7 +149,7 @@ def start_llm_turn_span(node_id: str, model: str) -> NoOpSpan:
     })
 
 
-def start_tool_call_span(node_id: str, tool_name: str) -> NoOpSpan:
+def start_tool_call_span(node_id: str, tool_name: str) -> SpanLike:
     """Create a Tool Call-level OTel span (M5.1)."""
     return start_span("weave.tool_call", {
         "weave.node.id": node_id,
