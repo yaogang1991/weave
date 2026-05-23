@@ -34,6 +34,7 @@ class BackendResult(BaseModel):
         """Convert to the dict format expected by NodeExecutor.
 
         Includes token_usage and cost_usd from metadata when present (#612 #9).
+        Promotes trace-relevant fields (tool_calls, model, backend) for M5.1.
         """
         result: dict[str, Any] = {
             "status": self.status.value,
@@ -41,15 +42,14 @@ class BackendResult(BaseModel):
             "artifacts": self.artifacts,
             "output": self.output,
         }
-        token_usage = self.metadata.get("token_usage")
-        if token_usage:
-            result["token_usage"] = token_usage
-        cost_usd = self.metadata.get("cost_usd")
-        if cost_usd is not None:
-            result["cost_usd"] = cost_usd
-        session_id = self.metadata.get("session_id")
-        if session_id:
-            result["session_id"] = session_id
+        _promote = (
+            "token_usage", "cost_usd", "session_id",
+            "tool_calls", "model", "backend",
+        )
+        for key in _promote:
+            val = self.metadata.get(key)
+            if val is not None and val != "" and val != []:
+                result[key] = val
         return result
 
 

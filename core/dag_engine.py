@@ -827,27 +827,6 @@ class DAGExecutionEngine:
             # #455: All levels completed — clean up checkpoint
             self._cleanup_checkpoint()
 
-            # M5.1: Trace run end
-            run_duration_ms = int((time.monotonic() - run_start_time) * 1000)
-            total_input = 0
-            total_output = 0
-            for n in dag.nodes.values():
-                tu = n.token_usage if hasattr(n, 'token_usage') else {}
-                total_input += tu.get("input_tokens", 0)
-                total_output += tu.get("output_tokens", 0)
-            await self._emit(ExecutionEvent(
-                node_id="",
-                event_type="trace",
-                details={
-                    "trace_type": "run_end",
-                    "run_id": run_id,
-                    "duration_ms": run_duration_ms,
-                    "total_input_tokens": total_input,
-                    "total_output_tokens": total_output,
-                    "total_nodes": len(dag.nodes),
-                },
-            ))
-
             return dag
         except asyncio.CancelledError:
             # External cancellation (timeout, signal) — log before cleanup (#304)
@@ -863,7 +842,31 @@ class DAGExecutionEngine:
             )
             raise
         finally:
-            # M5.1: Always close run span
+            # M5.1: Always emit run_end and close run span
+            try:
+                run_duration_ms = int(
+                    (time.monotonic() - run_start_time) * 1000,
+                )
+                total_input = 0
+                total_output = 0
+                for n in dag.nodes.values():
+                    tu = n.token_usage
+                    total_input += tu.get("input_tokens", 0)
+                    total_output += tu.get("output_tokens", 0)
+                await self._emit(ExecutionEvent(
+                    node_id="",
+                    event_type="trace",
+                    details={
+                        "trace_type": "run_end",
+                        "run_id": run_id,
+                        "duration_ms": run_duration_ms,
+                        "total_input_tokens": total_input,
+                        "total_output_tokens": total_output,
+                        "total_nodes": len(dag.nodes),
+                    },
+                ))
+            except Exception:
+                logger.debug("Failed to emit run_end trace", exc_info=True)
             run_span.__exit__(None, None, None)
             # M2.0: Stop watchdog
             self._stop_watchdog()

@@ -157,33 +157,44 @@ class NodeExecutor:
                         prep.input_artifacts,
                         workspace_path=prep.workspace_path,
                     )
-                    # M5.1: Trace LLM turn with token usage
+                    # M5.1: Trace LLM turn and tool calls (isolated from
+                    # execution retry logic — trace failures must not trigger
+                    # node retry).
                     if result:
-                        token_usage = result.get("token_usage", {})
-                        await self._emit(ExecutionEvent(
-                            node_id=node_id,
-                            event_type="trace",
-                            details={
-                                "trace_type": "llm_turn",
-                                "node_id": node_id,
-                                "input_tokens": token_usage.get("input_tokens", 0),
-                                "output_tokens": token_usage.get("output_tokens", 0),
-                                "model": result.get("model", "unknown"),
-                                "backend": result.get("backend", "unknown"),
-                            },
-                        ))
-                        # M5.1: Trace tool calls from backend result
-                        tool_calls = result.get("tool_calls", [])
-                        for tc in tool_calls:
+                        try:
+                            token_usage = result.get("token_usage", {})
                             await self._emit(ExecutionEvent(
                                 node_id=node_id,
                                 event_type="trace",
                                 details={
-                                    "trace_type": "tool_call",
+                                    "trace_type": "llm_turn",
                                     "node_id": node_id,
-                                    "tool_name": tc.get("name", "unknown"),
+                                    "input_tokens": token_usage.get(
+                                        "input_tokens", 0,
+                                    ),
+                                    "output_tokens": token_usage.get(
+                                        "output_tokens", 0,
+                                    ),
+                                    "model": result.get("model", "unknown"),
+                                    "backend": result.get("backend", "unknown"),
                                 },
                             ))
+                            tool_calls = result.get("tool_calls", [])
+                            for tc in tool_calls:
+                                await self._emit(ExecutionEvent(
+                                    node_id=node_id,
+                                    event_type="trace",
+                                    details={
+                                        "trace_type": "tool_call",
+                                        "node_id": node_id,
+                                        "tool_name": tc.get("name", "unknown"),
+                                    },
+                                ))
+                        except Exception:
+                            logger.debug(
+                                "Trace emission failed for node %s",
+                                node_id, exc_info=True,
+                            )
                 except (
                     asyncio.CancelledError,
                     PendingApprovalError,
