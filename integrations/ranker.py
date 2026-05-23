@@ -23,7 +23,7 @@ class IssueRanker:
         try:
             return await self._llm_rank(issues)
         except Exception:
-            logger.warning("LLM ranking failed, falling back to chronological")
+            logger.exception("LLM ranking failed, falling back to chronological")
             return sorted(issues, key=lambda i: i.created_at or datetime.min)
 
     async def _llm_rank(self, issues: list[NormalizedIssue]) -> list[NormalizedIssue]:
