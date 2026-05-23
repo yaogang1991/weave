@@ -74,6 +74,10 @@ class ToolRegistry:
         When base_cwd was explicitly set (e.g., via --project), enforces
         containment to prevent path traversal (#500). When not set (default
         standalone usage), resolves without containment checks (#529).
+
+        #827: Strips leading directory segment when it matches the
+        base_cwd directory name (LLM sometimes includes the project
+        folder name in relative paths, causing doubled paths).
         """
         path = Path(file_path)
 
@@ -82,6 +86,12 @@ class ToolRegistry:
             if path.is_absolute():
                 return path.resolve()
             return Path.cwd().resolve() / path
+
+        # #827: Strip doubled project directory prefix
+        if not path.is_absolute() and path.parts:
+            cwd_name = self.base_cwd.name
+            if path.parts[0] == cwd_name:
+                path = Path(*path.parts[1:]) if len(path.parts) > 1 else Path(".")
 
         # Explicit workspace: enforce containment
         resolved = (self.base_cwd / path).resolve()
