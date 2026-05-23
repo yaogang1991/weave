@@ -20,6 +20,7 @@ class GitHubCodeHost(CodeHost):
         )
         if result.returncode != 0:
             logger.error("git checkout -b failed: %s", result.stderr)
+            return ""
         return name
 
     async def push_changes(self, repo: str, branch: str) -> bool:
