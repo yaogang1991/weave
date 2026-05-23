@@ -49,10 +49,15 @@ class BranchManager:
             )
             return branch
 
-        run_with_progress(
+        result = run_with_progress(
             ["git", "checkout", "-b", branch],
             cwd=self._repo_root, timeout=30,
         )
+        if result.returncode != 0:
+            logger.error(
+                "Failed to create branch %s: %s", branch, result.stderr,
+            )
+            raise RuntimeError(f"git checkout -b {branch} failed: {result.stderr}")
         logger.info("Created branch %s for issue #%d", branch, issue.number)
         return branch
 

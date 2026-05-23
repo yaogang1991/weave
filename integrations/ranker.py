@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 
@@ -56,6 +57,15 @@ class IssueRanker:
         if isinstance(text, list):
             text = " ".join(b.get("text", "") for b in text if isinstance(b, dict))
 
+        # Extract JSON array from potentially markdown-wrapped response
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            text = match.group(0)
+
         numbers = json.loads(text.strip())
         issue_map = {i.number: i for i in issues}
-        return [issue_map[n] for n in numbers if n in issue_map]
+        ranked = [issue_map[n] for n in numbers if n in issue_map]
+        dropped = set(issue_map.keys()) - set(numbers)
+        if dropped:
+            logger.warning("Issues dropped from ranking: %s", dropped)
+        return ranked
