@@ -415,8 +415,10 @@ class TestReplanClosedLoop:
 
         # Node a succeeds, b fails with replan but no handler -> abort -> c skipped
         assert result.nodes["a"].status == NodeStatus.SUCCESS
-        assert result.nodes["b"].status == NodeStatus.FAILED
-        assert result.nodes["c"].status == NodeStatus.SKIPPED
+        # Replan handler unavailable → node skipped, engine returns early.
+        # Downstream c stays PENDING (never processed).
+        assert result.nodes["b"].status == NodeStatus.SKIPPED
+        assert result.nodes["c"].status == NodeStatus.PENDING
 
     @pytest.mark.asyncio
     async def test_replan_execution_flow(self):

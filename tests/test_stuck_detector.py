@@ -85,12 +85,12 @@ class TestStuckDetector:
             any_tool_executed=False,
         )
         assert r.needs_hint is True
-        # 2nd: no hint (already injected)
+        # 2nd: #733 — second hint injection for stronger recovery
         r = sd.observe(
             _msg(tool_calls=[_tc(arguments={})]),
             any_tool_executed=False,
         )
-        assert r.needs_hint is False
+        assert r.needs_hint is True
         assert not r.is_stuck
         # 3rd: no hint, still counting
         r = sd.observe(
@@ -184,10 +184,12 @@ class TestStuckDetector:
             any_tool_executed=False,
         )
         assert not r.is_stuck
-        assert r.needs_hint is True  # First degenerate: hint
+        assert r.needs_hint is True
         r = sd.observe(
             _msg(tool_calls=[_tc(arguments={})]),
             any_tool_executed=False,
         )
-        assert r.is_stuck
-        assert r.pattern == StuckPattern.DEGENERATE_ARGS
+        # With threshold=2 and count=2, hint injection fires (<=2 check)
+        # before stuck check (>=threshold). Stuck fires on count=3+.
+        assert r.needs_hint is True
+        assert not r.is_stuck
