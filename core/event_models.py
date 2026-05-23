@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Literal
 
@@ -84,11 +84,19 @@ class EventType(str, Enum):
     # Degeneration events
     DEGENERATION_RECOVERED = "degeneration_recovered"
 
+    # Trace events (M5.1)
+    TRACE_RUN_START = "trace.run_start"
+    TRACE_RUN_END = "trace.run_end"
+    TRACE_NODE_START = "trace.node_start"
+    TRACE_NODE_END = "trace.node_end"
+    TRACE_LLM_TURN = "trace.llm_turn"
+    TRACE_TOOL_CALL = "trace.tool_call"
+
 
 class Event(BaseModel):
     """Immutable event in the session log."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     type: EventType
     session_id: str
     payload: dict[str, Any] = Field(default_factory=dict)

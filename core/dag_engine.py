@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import time
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
@@ -40,7 +41,7 @@ from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
 from core.dag_checkpoint import CheckpointManager
-from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
+from monitoring.otel import start_span, start_run_span, start_node_span  # noqa: E402 — optional OTel (#509)
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
@@ -410,6 +411,21 @@ class DAGExecutionEngine:
         replan_count = 0
         level_idx = 0
 
+        # M5.1: Trace run start
+        run_start_time = time.monotonic()
+        run_id = self._run_id or self._session_id or ""
+        run_span = start_run_span(run_id, dag.reasoning if hasattr(dag, 'reasoning') else "")
+        run_span.__enter__()
+        await self._emit(ExecutionEvent(
+            node_id="",
+            event_type="trace",
+            details={
+                "trace_type": "run_start",
+                "run_id": run_id,
+                "node_count": len(dag.nodes),
+            },
+        ))
+
         try:
             while level_idx < len(levels):
                 level = levels[level_idx]
@@ -438,7 +454,41 @@ class DAGExecutionEngine:
                     node_id: str, sem: asyncio.Semaphore, dag_ref: DAG,
                 ) -> None:
                     async with sem:
-                        await self._node_executor.execute_node(dag_ref, node_id)
+                        # M5.1: Trace node start
+                        node = dag_ref.nodes[node_id]
+                        node_span = start_node_span(run_id, node_id, node.agent_type)
+                        node_span.__enter__()
+                        node_start = time.monotonic()
+                        await self._emit(ExecutionEvent(
+                            node_id=node_id,
+                            event_type="trace",
+                            details={
+                                "trace_type": "node_start",
+                                "run_id": run_id,
+                                "agent_type": node.agent_type,
+                            },
+                        ))
+                        try:
+                            await self._node_executor.execute_node(dag_ref, node_id)
+                        finally:
+                            # M5.1: Trace node end
+                            duration_ms = int(
+                                (time.monotonic() - node_start) * 1000
+                            )
+                            completed_node = dag_ref.nodes[node_id]
+                            await self._emit(ExecutionEvent(
+                                node_id=node_id,
+                                event_type="trace",
+                                details={
+                                    "trace_type": "node_end",
+                                    "run_id": run_id,
+                                    "node_id": node_id,
+                                    "agent_type": node.agent_type,
+                                    "status": completed_node.status.value,
+                                    "duration_ms": duration_ms,
+                                },
+                            ))
+                            node_span.__exit__(None, None, None)
 
                 tasks = [run_with_limit(nid, semaphore, dag) for nid in pending]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -792,6 +842,32 @@ class DAGExecutionEngine:
             )
             raise
         finally:
+            # M5.1: Always emit run_end and close run span
+            try:
+                run_duration_ms = int(
+                    (time.monotonic() - run_start_time) * 1000,
+                )
+                total_input = 0
+                total_output = 0
+                for n in dag.nodes.values():
+                    tu = n.token_usage
+                    total_input += tu.get("input_tokens", 0)
+                    total_output += tu.get("output_tokens", 0)
+                await self._emit(ExecutionEvent(
+                    node_id="",
+                    event_type="trace",
+                    details={
+                        "trace_type": "run_end",
+                        "run_id": run_id,
+                        "duration_ms": run_duration_ms,
+                        "total_input_tokens": total_input,
+                        "total_output_tokens": total_output,
+                        "total_nodes": len(dag.nodes),
+                    },
+                ))
+            except Exception:
+                logger.debug("Failed to emit run_end trace", exc_info=True)
+            run_span.__exit__(None, None, None)
             # M2.0: Stop watchdog
             self._stop_watchdog()
             self._watchdog.clear()

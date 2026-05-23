@@ -230,7 +230,8 @@ class TestEventEmission:
         engine = DAGExecutionEngine(_noop_executor, _noop_failure_handler)
         engine.on_event(event_handler)
         await engine.execute(dag)
-        assert events == ["started", "completed"]
+        non_trace_events = [e for e in events if e != "trace"]
+        assert non_trace_events == ["started", "completed"]
 
 
 class TestEvaluatorFeedbackPropagation:
