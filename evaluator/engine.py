@@ -363,8 +363,16 @@ class EvaluatorEngine:
         if crit.type == CriterionType.LINT:
             if not output_artifacts:
                 return True, "No files to lint (passed by default)", True
+            # #790: Scope lint to .py files only — filter out directories
+            # and non-Python artifacts to prevent cross-node contamination.
+            py_targets = [
+                a for a in output_artifacts
+                if a.endswith(".py")
+            ]
+            if not py_targets:
+                return True, "No Python files to lint (passed by default)", True
             passed, msg, autofixed, formatted, new_issues, all_issues = run_lint(
-                output_artifacts, Path(work_dir), self.auto_format_before_eval,
+                py_targets, Path(work_dir), self.auto_format_before_eval,
             )
             self._last_autofixed = autofixed
             self._last_auto_formatted = formatted

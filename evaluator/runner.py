@@ -207,9 +207,6 @@ def run_lint(
         p = work_dir / t
         if p.is_file() and p.suffix == ".py":
             resolved.append(str(p))
-        elif p.is_dir():
-            for f in p.glob("*.py"):
-                resolved.append(str(f))
         elif Path(t).is_file() and Path(t).suffix == ".py":
             resolved.append(str(Path(t)))
     if not resolved:
