@@ -76,7 +76,7 @@ class SessionStore:
         file_path = self._session_file(session_id)
         try:
             with open(file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(event.model_dump(mode="json"), default=str) + "\n")
+                f.write(json.dumps(event.model_dump(mode="json"), default=str, ensure_ascii=False) + "\n")
         except OSError as exc:
             logger.error(
                 "Failed to write event %s to session %s: %s",
@@ -326,7 +326,7 @@ class SessionStore:
         path = self._snapshot_file(session_id)
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.write(json.dumps(snapshot.model_dump(mode="json"), indent=2, default=str))
+                f.write(json.dumps(snapshot.model_dump(mode="json"), indent=2, default=str, ensure_ascii=False))
         except OSError as exc:
             logger.error("Failed to save snapshot for session %s: %s", session_id, exc)
 
