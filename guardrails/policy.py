@@ -519,7 +519,10 @@ class PersonalGuardrails(Guardrails):
     ) -> None:
         super().__init__(policy, tool_registry, project_dir=project_dir)
         self.personal_policy = policy
-        self.non_interactive = non_interactive
+        # #835: Also check WEAVE_NON_INTERACTIVE env var, not just the caller flag.
+        import os
+        env_non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+        self.non_interactive = non_interactive or env_non_interactive
         self.approval_repo = approval_repo
 
     # -- tri-state evaluate override ----------------------------------
