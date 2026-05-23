@@ -413,9 +413,9 @@ class TestReplanClosedLoop:
         engine = DAGExecutionEngine(fail_on_b, replan_decision)
         result = await engine.execute(dag)
 
-        # Node a succeeds, b fails with replan but no handler -> abort -> c skipped
+        # Node a succeeds, b fails with replan but no handler -> skip b -> c skipped
         assert result.nodes["a"].status == NodeStatus.SUCCESS
-        assert result.nodes["b"].status == NodeStatus.FAILED
+        assert result.nodes["b"].status == NodeStatus.SKIPPED
         assert result.nodes["c"].status == NodeStatus.SKIPPED
 
     @pytest.mark.asyncio

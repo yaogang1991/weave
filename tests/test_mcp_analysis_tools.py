@@ -127,13 +127,18 @@ class TestImpactGraphTool:
         tool = server._tools["weave.impact_graph"]
         result = tool.handler(project=".")
         assert isinstance(result, dict)
-        assert "files" in result
-        assert result["tracked_files"] > 0
-        # Each file entry has path, mtime, size
-        first_file = result["files"][0]
-        assert "path" in first_file
-        assert "mtime" in first_file
-        assert "size" in first_file
+        # Large repos may exceed the file limit and return a truncation message
+        if "truncated" in result and result["truncated"]:
+            assert "message" in result
+            assert result["tracked_files"] > 0
+        else:
+            assert "files" in result
+            assert result["tracked_files"] > 0
+            # Each file entry has path, mtime, size
+            first_file = result["files"][0]
+            assert "path" in first_file
+            assert "mtime" in first_file
+            assert "size" in first_file
 
     def test_bad_project_path(self):
         server = _server_with_analysis_tools()

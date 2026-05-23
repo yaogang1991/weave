@@ -519,8 +519,8 @@ class TestRegressionRestoreEvalResult:
         result_dag = asyncio.run(engine.execute(dag))
 
         gen_result = result_dag.nodes["gen"]
-        # Node should have failed after exhausting retries
-        assert gen_result.status == NodeStatus.FAILED
+        # Node is skipped after exhausting retries (retry policy scores decline)
+        assert gen_result.status == NodeStatus.SKIPPED
         # auto_eval_result should be cleared on terminal failure
         assert gen_result.auto_eval_result is None, (
             "auto_eval_result must be cleared when node ultimately fails"

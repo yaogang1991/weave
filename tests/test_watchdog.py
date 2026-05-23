@@ -451,8 +451,9 @@ class TestHealthEventChain:
         decision_event = next(
             e for e in events if e.event_type == "failure_decision"
         )
-        assert decision_event.details["action"] == "retry"
-        assert decision_event.details["reasoning"] == "Transient error"
+        assert decision_event.details["action"] == "skip"
+        # When retry is downgraded to skip, reasoning reflects the auto-downgrade
+        assert "skip" in decision_event.details["reasoning"].lower()
         # failure_decision event includes action, reasoning, and error
         assert "error" in decision_event.details
 

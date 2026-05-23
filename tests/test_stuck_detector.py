@@ -77,7 +77,7 @@ class TestStuckDetector:
         assert r.consecutive_count == 3
 
     def test_hint_injected_only_once(self):
-        """P1 (#607): Recovery hint is requested only on the first degenerate."""
+        """P1 (#607): Recovery hint on 1st and 2nd degenerate, then stuck."""
         sd = StuckDetector(degenerate_call_limit=4)
         # 1st: needs_hint
         r = sd.observe(
@@ -85,12 +85,12 @@ class TestStuckDetector:
             any_tool_executed=False,
         )
         assert r.needs_hint is True
-        # 2nd: no hint (already injected)
+        # 2nd: also needs_hint (#733: stronger simplified-task recovery)
         r = sd.observe(
             _msg(tool_calls=[_tc(arguments={})]),
             any_tool_executed=False,
         )
-        assert r.needs_hint is False
+        assert r.needs_hint is True
         assert not r.is_stuck
         # 3rd: no hint, still counting
         r = sd.observe(
@@ -185,6 +185,14 @@ class TestStuckDetector:
         )
         assert not r.is_stuck
         assert r.needs_hint is True  # First degenerate: hint
+        r = sd.observe(
+            _msg(tool_calls=[_tc(arguments={})]),
+            any_tool_executed=False,
+        )
+        # 2nd degenerate: still in hint window (<=2), not yet stuck
+        assert r.needs_hint is True
+        assert not r.is_stuck
+        # 3rd degenerate: now stuck (consecutive=3 >= limit=2)
         r = sd.observe(
             _msg(tool_calls=[_tc(arguments={})]),
             any_tool_executed=False,
