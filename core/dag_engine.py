@@ -1022,7 +1022,9 @@ class DAGExecutionEngine:
                 and "timeout" in error_lower
             )
             # #795: Empty args degeneration (provider-wide issue)
-            or "empty" in error_lower
+            # #825: Narrow "empty" to specific patterns to avoid false positives
+            or "empty args" in error_lower
+            or "empty tool" in error_lower
             or "degeneration" in error_lower
             or "{}" in (node.error or "")
         )
