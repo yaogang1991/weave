@@ -46,27 +46,31 @@ class TestInteractiveApprovalPrompt:
 
     def test_high_risk_approved_via_prompt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", return_value="y"):
+        with patch("sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", return_value="y"):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "allowed"
         assert "approved by user" in result.reason
 
     def test_high_risk_denied_via_prompt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", return_value="n"):
+        with patch("sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", return_value="n"):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
         assert "denied by user" in result.reason
 
     def test_high_risk_denied_on_eof(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", side_effect=EOFError):
+        with patch("sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", side_effect=EOFError):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
 
     def test_high_risk_denied_on_keyboard_interrupt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
+        with patch("sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", side_effect=KeyboardInterrupt):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
 
