@@ -252,6 +252,7 @@ class EvaluatorEngine:
             )
             if import_errors:
                 overall_passed = False
+                score = 0.0  # #802: reset score for consistency
                 for err_file, err_msg in import_errors:
                     feedback_parts.append(
                         f"FAIL import_check: {err_file} — {err_msg}"

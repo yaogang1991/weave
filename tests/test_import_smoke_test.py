@@ -39,6 +39,9 @@ def test_import_smoke_test_catches_import_error(tmp_path):
     # Should have import_check feedback
     assert "import_check" in result.feedback
     assert "mymod.py" in result.feedback
+    # #802: score must be reset to 0.0 when import check fails
+    assert result.score == 0.0
+    assert result.passed is False
 
 
 def test_import_smoke_test_passes_valid_module(tmp_path):
