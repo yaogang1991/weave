@@ -191,4 +191,4 @@ class TestNodeExecutorPendingApproval:
 
         await node_executor.execute_node(dag, "downstream")
         assert executor_called
-        assert dag.nodes["downstream"].status == NodeStatus.COMPLETED
+        assert dag.nodes["downstream"].status == NodeStatus.SUCCESS
