@@ -328,6 +328,33 @@ Examples:
     )
     impact_history_parser.set_defaults(func=cmd_impact_history)
 
+    # ------------------------------------------------------------------
+    # GitHub issue integration commands (M5.2)
+    # ------------------------------------------------------------------
+
+    from cli.github import cmd_issue_poll, cmd_issue_run, cmd_issue_status  # noqa: E402
+
+    issue_poll_parser = subparsers.add_parser(
+        "issue-poll", help="Poll and execute GitHub issues",
+    )
+    issue_poll_parser.add_argument("--repo", help="GitHub repo (owner/repo)")
+    issue_poll_parser.add_argument("--limit", type=int, default=1, help="Max issues to execute")
+    issue_poll_parser.add_argument("--dry-run", action="store_true", help="Show issues without executing")
+    issue_poll_parser.set_defaults(func=cmd_issue_poll)
+
+    issue_run_parser = subparsers.add_parser(
+        "issue-run", help="Execute a specific GitHub issue",
+    )
+    issue_run_parser.add_argument("number", type=int, help="Issue number")
+    issue_run_parser.add_argument("--repo", help="GitHub repo (owner/repo)")
+    issue_run_parser.set_defaults(func=cmd_issue_run)
+
+    issue_status_parser = subparsers.add_parser(
+        "issue-status", help="Show status of Weave-managed issues",
+    )
+    issue_status_parser.add_argument("--repo", help="GitHub repo (owner/repo)")
+    issue_status_parser.set_defaults(func=cmd_issue_status)
+
     args = parser.parse_args()
 
     # Validate --pass-threshold range (0, 10] early for clear error messages.

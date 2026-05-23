@@ -27,6 +27,10 @@ class BranchManager:
     def __init__(self, repo_root: str = ".") -> None:
         self._repo_root = repo_root
 
+    @property
+    def repo_root(self) -> str:
+        return self._repo_root
+
     def _branch_name(self, issue: NormalizedIssue) -> str:
         slug = generate_slug(issue.title)
         if not slug:
@@ -34,25 +38,39 @@ class BranchManager:
         return f"fix/{issue.number}-{slug}"
 
     async def create_branch(self, repo: str, issue: NormalizedIssue) -> str:
-        """Create a branch for the given issue. Returns branch name."""
+        """Create a branch for the given issue. Returns branch name.
+
+        Args:
+            repo: GitHub repo slug (owner/repo). Used for context only;
+                  branch operations run in ``self._repo_root``.
+        """
         branch = self._branch_name(issue)
+        cwd = self._repo_root
 
         check = run_with_progress(
             ["git", "rev-parse", "--verify", branch],
-            cwd=self._repo_root, timeout=10,
+            cwd=cwd, timeout=10,
         )
         if check.returncode == 0:
             logger.info("Branch %s already exists, reusing", branch)
-            run_with_progress(
+            result = run_with_progress(
                 ["git", "checkout", branch],
-                cwd=self._repo_root, timeout=30,
+                cwd=cwd, timeout=30,
             )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"git checkout {branch} failed: {result.stderr}"
+                )
             return branch
 
-        run_with_progress(
+        result = run_with_progress(
             ["git", "checkout", "-b", branch],
-            cwd=self._repo_root, timeout=30,
+            cwd=cwd, timeout=30,
         )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git checkout -b {branch} failed: {result.stderr}"
+            )
         logger.info("Created branch %s for issue #%d", branch, issue.number)
         return branch
 

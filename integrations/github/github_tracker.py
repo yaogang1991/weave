@@ -33,7 +33,11 @@ class GitHubIssueTracker(IssueTracker):
             return []
 
         items = json.loads(result.stdout) if result.stdout.strip() else []
-        return [RawIssue(source="github", data=item) for item in items]
+        # Preserve repo context so normalize() can populate NormalizedIssue.repo.
+        return [
+            RawIssue(source="github", data={**item, "repo": repo})
+            for item in items
+        ]
 
     def normalize(self, raw: RawIssue) -> NormalizedIssue:
         d = raw.data

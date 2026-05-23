@@ -30,9 +30,12 @@ def _make_ranker():
 def _make_services():
     from control_plane.repository import JobRepository
     from control_plane.service import RunService
-    repo = JobRepository()
-    service = RunService(repository=repo)
-    return repo, service
+    from core.config import WeaveConfig
+
+    cfg = WeaveConfig.from_env()
+    repository = JobRepository()
+    service = RunService(repository=repository, llm_config=cfg.llm)
+    return repository, service
 
 
 async def _execute_issue(issue, repo: str, dry_run: bool = False):
@@ -55,18 +58,16 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
 
     branch = await branch_mgr.create_branch(repo, issue)
 
-    _, service = _make_services()
+    repository, service = _make_services()
     requirement = issue.to_requirement()
     try:
         job = await service.submit_job(
             requirement=requirement,
-            metadata={
-                "issue_number": issue.number,
-                "issue_url": issue.url,
-                "integration_type": "github",
-                "branch_name": branch,
-            },
         )
+        # Transition job to RUNNING before calling run_job (required by
+        # RunService.run_job which validates status == RUNNING).
+        from control_plane.models import JobStatus
+        repository.transition_job_status(job.id, JobStatus.RUNNING)
         print(f"  Job {job.id} submitted, running...")
         run = await service.run_job(job.id)
     except Exception:
@@ -80,17 +81,24 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
 
     if run.status.value in ("succeeded",):
         print(f"  Issue #{issue.number} completed successfully")
+        # Clear running label and add PR label on success.
+        await host.update_labels(
+            repo, issue.number,
+            add=[config.label.pr_label],
+            remove=[config.label.running_label],
+        )
     else:
         await host.update_labels(
             repo, issue.number,
             add=[config.label.failed_label],
             remove=[config.label.running_label],
         )
-        error_msg = run.error or "Unknown error"
+        # Run model uses dag_result for error info, not a direct .error attr.
+        error_msg = run.dag_result.get("error", "Unknown error")
         await host.comment_on_issue(
             repo, issue.number,
             f"Weave attempted to resolve this issue but encountered an error.\n\n"
-            f"**Error**: {error_msg[:500]}\n**Branch**: {branch}\n\n"
+            f"**Error**: {str(error_msg)[:500]}\n**Branch**: {branch}\n\n"
             f"The worktree has been preserved for debugging.",
         )
         print(f"  Issue #{issue.number} failed: {error_msg}")
@@ -173,7 +181,15 @@ async def cmd_issue_status(args):
 
     tracker = _make_tracker()
     config = IntegrationConfig.from_env()
-    raw_issues = await tracker.fetch(repo)
+
+    # Only fetch issues with weave-related labels.
+    all_labels = [
+        config.label.trigger_label,
+        config.label.running_label,
+        config.label.pr_label,
+        config.label.failed_label,
+    ]
+    raw_issues = await tracker.fetch(repo, labels=all_labels)
     if not raw_issues:
         print("No Weave-managed issues found.")
         return
