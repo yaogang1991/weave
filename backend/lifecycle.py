@@ -444,7 +444,7 @@ class BackendManager:
         if not expected_artifacts:
             return []
 
-        expected_set = {a.replace("/", os.sep) for a in expected_artifacts}
+        expected_set = {a.replace("\\", "/") for a in expected_artifacts}
         cleaned: list[str] = []
 
         for py_file in work_path.rglob("*.py"):
