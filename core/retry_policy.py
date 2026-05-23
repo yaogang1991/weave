@@ -151,6 +151,15 @@ class RetryPolicyEngine:
     # ------------------------------------------------------------------
 
     @staticmethod
+    @staticmethod
+    def _safe_path(work_dir: str, art: str) -> str | None:
+        """Resolve path and return it only if within work_dir, else None."""
+        resolved = os.path.realpath(os.path.join(work_dir, art))
+        if not resolved.startswith(os.path.realpath(work_dir) + os.sep):
+            return None
+        return resolved
+
+    @staticmethod
     def capture_file_snapshot(
         work_dir: str,
         artifacts: list[str],
@@ -158,7 +167,9 @@ class RetryPolicyEngine:
         """Capture file contents for rollback on regression."""
         snapshot: dict[str, str] = {}
         for art in artifacts:
-            path = os.path.join(work_dir, art)
+            path = RetryPolicyEngine._safe_path(work_dir, art)
+            if path is None:
+                continue
             try:
                 if os.path.isfile(path):
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -177,7 +188,9 @@ class RetryPolicyEngine:
         Creates a .bak backup of existing files before overwriting.
         """
         for art, content in snapshot.items():
-            path = os.path.join(work_dir, art)
+            path = RetryPolicyEngine._safe_path(work_dir, art)
+            if path is None:
+                continue
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
             # Backup existing file before overwriting
             if os.path.isfile(path):
@@ -197,7 +210,9 @@ class RetryPolicyEngine:
         Removes the .bak file after successful restore.
         """
         for art in snapshot:
-            path = os.path.join(work_dir, art)
+            path = RetryPolicyEngine._safe_path(work_dir, art)
+            if path is None:
+                continue
             backup_path = path + ".bak"
             if os.path.isfile(backup_path):
                 import shutil
