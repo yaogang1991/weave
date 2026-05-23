@@ -260,6 +260,10 @@ class ExecutionFactory:
                         session_id, mapped_type,
                         {"node_id": event.node_id, **event.details},
                     )
+                else:
+                    logger.debug(
+                        "Unknown trace_type '%s' dropped", trace_type,
+                    )
                 return
             mapped_type = event_type_map.get(event.event_type)
             if mapped_type:

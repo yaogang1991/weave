@@ -51,32 +51,58 @@ class TokenReporter:
             elif event_type == EventType.TRACE_NODE_END:
                 nid = payload.get("node_id", "")
                 existing = nodes.get(nid)
-                if existing:
-                    existing.agent_type = payload.get("agent_type", existing.agent_type)
-                    existing.duration_ms = payload.get("duration_ms", existing.duration_ms)
-                    existing.input_tokens = payload.get("input_tokens", existing.input_tokens)
-                    existing.output_tokens = payload.get("output_tokens", existing.output_tokens)
-                else:
-                    nodes[nid] = NodeTokenSummary(
-                        node_id=nid,
-                        agent_type=payload.get("agent_type", ""),
-                        input_tokens=payload.get("input_tokens", 0),
-                        output_tokens=payload.get("output_tokens", 0),
-                        duration_ms=payload.get("duration_ms", 0),
-                    )
+                nodes[nid] = NodeTokenSummary(
+                    node_id=nid,
+                    agent_type=payload.get(
+                        "agent_type",
+                        existing.agent_type if existing else "",
+                    ),
+                    input_tokens=payload.get(
+                        "input_tokens",
+                        existing.input_tokens if existing else 0,
+                    ),
+                    output_tokens=payload.get(
+                        "output_tokens",
+                        existing.output_tokens if existing else 0,
+                    ),
+                    duration_ms=payload.get(
+                        "duration_ms",
+                        existing.duration_ms if existing else 0,
+                    ),
+                    tool_call_count=existing.tool_call_count if existing else 0,
+                )
 
             elif event_type == EventType.TRACE_LLM_TURN:
                 nid = payload.get("node_id", "")
-                if nid not in nodes:
-                    nodes[nid] = NodeTokenSummary(node_id=nid)
-                nodes[nid].input_tokens += payload.get("input_tokens", 0)
-                nodes[nid].output_tokens += payload.get("output_tokens", 0)
+                existing = nodes.get(nid)
+                nodes[nid] = NodeTokenSummary(
+                    node_id=nid,
+                    agent_type=existing.agent_type if existing else "",
+                    input_tokens=(
+                        (existing.input_tokens if existing else 0)
+                        + payload.get("input_tokens", 0)
+                    ),
+                    output_tokens=(
+                        (existing.output_tokens if existing else 0)
+                        + payload.get("output_tokens", 0)
+                    ),
+                    duration_ms=existing.duration_ms if existing else 0,
+                    tool_call_count=existing.tool_call_count if existing else 0,
+                )
 
             elif event_type == EventType.TRACE_TOOL_CALL:
                 nid = payload.get("node_id", "")
-                if nid not in nodes:
-                    nodes[nid] = NodeTokenSummary(node_id=nid)
-                nodes[nid].tool_call_count += 1
+                existing = nodes.get(nid)
+                nodes[nid] = NodeTokenSummary(
+                    node_id=nid,
+                    agent_type=existing.agent_type if existing else "",
+                    input_tokens=existing.input_tokens if existing else 0,
+                    output_tokens=existing.output_tokens if existing else 0,
+                    duration_ms=existing.duration_ms if existing else 0,
+                    tool_call_count=(
+                        (existing.tool_call_count if existing else 0) + 1
+                    ),
+                )
 
         return TokenSummary(
             run_id=run_id,

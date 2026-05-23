@@ -472,9 +472,10 @@ class DAGExecutionEngine:
                             await self._node_executor.execute_node(dag_ref, node_id)
                         finally:
                             # M5.1: Trace node end
-                            duration_ms = int((time.monotonic() - node_start) * 1000)
+                            duration_ms = int(
+                                (time.monotonic() - node_start) * 1000
+                            )
                             completed_node = dag_ref.nodes[node_id]
-                            tu = completed_node.token_usage if hasattr(completed_node, 'token_usage') else {}
                             await self._emit(ExecutionEvent(
                                 node_id=node_id,
                                 event_type="trace",
