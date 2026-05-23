@@ -161,6 +161,12 @@ class EvaluatorEngine:
             owned_files=owned_files,
         )
 
+        # #790: Extract file paths from FILE_EXISTS criteria for lint scoping.
+        self._lint_scope_files = [
+            c.path for c in structured
+            if c.type == CriterionType.FILE_EXISTS and c.path
+        ]
+
         results: dict[str] = {}
         hard_labels: set[str] = set()
         score = 0.0
@@ -363,8 +369,10 @@ class EvaluatorEngine:
         if crit.type == CriterionType.LINT:
             if not output_artifacts:
                 return True, "No files to lint (passed by default)", True
+            scope = getattr(self, "_lint_scope_files", None) or None
             passed, msg, autofixed, formatted, new_issues, all_issues = run_lint(
                 output_artifacts, Path(work_dir), self.auto_format_before_eval,
+                scope_files=scope,
             )
             self._last_autofixed = autofixed
             self._last_auto_formatted = formatted
