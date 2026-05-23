@@ -227,15 +227,16 @@ class NodeExecutor:
             reason = (
                 "rate_limit" if isinstance(e, RateLimitError) else "timeout"
             )
+            # Do NOT increment retry_count — timeout/rate-limit are
+            # infrastructure errors, not code quality failures (#432).
+            # Infinite retry protection comes from max_replans and the
+            # failure_handler (which may return skip/abort).
             dag.update_node(
                 node_id,
                 status=NodeStatus.FAILED,
                 error=str(e),
                 completed_at=datetime.now(timezone.utc),
                 auto_eval_result=None,
-                # Increment retry_count so dag_engine can enforce max_retries
-                # and prevent infinite retry loops (#717).
-                retry_count=dag.nodes[node_id].retry_count + 1,
             )
             await self._emit(ExecutionEvent(
                 node_id=node_id,
