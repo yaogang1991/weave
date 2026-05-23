@@ -463,8 +463,11 @@ class NodeExecutor:
         )
         dag.update_node(node_id, error=error_str)
 
+        # #831: NodeTimeoutError/RateLimitError should not consume retry budget.
+        no_budget = isinstance(exc, (NodeTimeoutError, RateLimitError))
+        new_count = node.retry_count if no_budget else node.retry_count + 1
         node = dag.update_node(
-            node_id, retry_count=node.retry_count + 1,
+            node_id, retry_count=new_count,
         )
 
         if node.retry_count < node.max_retries:
