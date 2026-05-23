@@ -276,8 +276,8 @@ class TestHardCriteriaProtection:
     def test_soft_criteria_can_still_be_overridden(self, tmp_store, tmp_path):
         """LINT/NO_CRITICAL (soft) failures CAN be overridden by threshold."""
         ev = EvaluatorEngine(tmp_store, pass_threshold=5.0)
-        (tmp_path / "a.py").write_text("ok", encoding="utf-8")
-        (tmp_path / "b.py").write_text("ok", encoding="utf-8")
+        (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (tmp_path / "b.py").write_text("y = 2\n", encoding="utf-8")
         result = ev.evaluate_stage(
             "s1", "impl",
             [
