@@ -26,7 +26,7 @@ from core.models import (  # noqa: E402
 
 
 async def _mock_failure_handler(node, error, dag):
-    return FailureDecision(action="retry")
+    return FailureDecision(action="abort")
 
 
 def _make_eval_result(
