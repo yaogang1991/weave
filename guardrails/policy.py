@@ -291,8 +291,36 @@ class Guardrails:
 
         Thread-safe: serialises stdin access via _stdin_lock to prevent
         garbled prompts when multiple nodes run concurrently.
+
+        #830/#835: When stdin is not a TTY AND WEAVE_NON_INTERACTIVE is set,
+        auto-approve to avoid EOFError blocking all HIGH risk tools.
+        Otherwise (no TTY but not configured non-interactive), return
+        pending_approval for the approval ticket workflow.
         """
         risk_label = risk.name
+        non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in (
+            "true", "1", "yes",
+        )
+        if not sys.stdin.isatty():
+            if non_interactive:
+                logger.warning(
+                    "Non-TTY + WEAVE_NON_INTERACTIVE — auto-approving %s risk '%s' (#830/#835)",
+                    risk_label, tool_name,
+                )
+                return GuardrailResult(
+                    decision="allowed",
+                    reason=f"{risk_label} risk '{tool_name}' auto-approved (non-interactive, non-TTY)",
+                )
+            # Non-TTY but not explicitly non-interactive: defer to approval workflow
+            logger.info(
+                "Non-TTY stdin without WEAVE_NON_INTERACTIVE — "
+                "deferring %s risk '%s' to approval workflow",
+                risk_label, tool_name,
+            )
+            return GuardrailResult(
+                decision="pending_approval",
+                reason=f"{risk_label} risk '{tool_name}' requires approval (non-TTY stdin)",
+            )
         with self._stdin_lock:
             print(
                 f"\n  {risk_label} risk tool: {tool_name}",

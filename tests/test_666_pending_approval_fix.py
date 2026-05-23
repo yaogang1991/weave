@@ -6,6 +6,8 @@ Verifies that:
 3. Node executor sets PENDING_APPROVAL then re-raises for caller handling
 4. Downstream nodes are skipped when a dependency is PENDING_APPROVAL
 """
+import os
+
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -46,27 +48,31 @@ class TestInteractiveApprovalPrompt:
 
     def test_high_risk_approved_via_prompt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", return_value="y"):
+        with patch("builtins.input", return_value="y"), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "allowed"
         assert "approved by user" in result.reason
 
     def test_high_risk_denied_via_prompt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", return_value="n"):
+        with patch("builtins.input", return_value="n"), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
         assert "denied by user" in result.reason
 
     def test_high_risk_denied_on_eof(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", side_effect=EOFError):
+        with patch("builtins.input", side_effect=EOFError), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
 
     def test_high_risk_denied_on_keyboard_interrupt(self):
         g = self._make_interactive_guardrails()
-        with patch("builtins.input", side_effect=KeyboardInterrupt):
+        with patch("builtins.input", side_effect=KeyboardInterrupt), \
+             patch("sys.stdin.isatty", return_value=True):
             result = g.evaluate("bash", {"command": "curl http://example.com"})
         assert result.decision == "blocked"
 
@@ -79,6 +85,23 @@ class TestInteractiveApprovalPrompt:
         g = self._make_interactive_guardrails()
         result = g.evaluate("read", {"file_path": "/tmp/test.txt"})
         assert result.decision == "allowed"
+
+    def test_non_tty_with_env_auto_approves(self):
+        """#830/#835: Non-TTY + WEAVE_NON_INTERACTIVE → auto-approve."""
+        g = self._make_interactive_guardrails()
+        with patch("sys.stdin.isatty", return_value=False), \
+             patch.dict(os.environ, {"WEAVE_NON_INTERACTIVE": "true"}):
+            result = g.evaluate("bash", {"command": "ls"})
+        assert result.decision == "allowed"
+        assert "auto-approved" in result.reason
+
+    def test_non_tty_without_env_defers_to_approval(self):
+        """#835: Non-TTY without WEAVE_NON_INTERACTIVE → pending_approval."""
+        g = self._make_interactive_guardrails()
+        with patch("sys.stdin.isatty", return_value=False), \
+             patch.dict(os.environ, {}, clear=True):
+            result = g.evaluate("bash", {"command": "ls"})
+        assert result.decision == "pending_approval"
 
 
 class TestNonInteractiveStillPending:
