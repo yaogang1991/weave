@@ -147,8 +147,9 @@ async def cmd_issue_run(args):
         sys.exit(1)
 
     from core.subprocess_runner import run_with_progress
+    import asyncio
     import json
-    result = run_with_progress(
+    result = await asyncio.to_thread(run_with_progress,
         ["gh", "issue", "view", str(issue_number), "--repo", repo,
          "--json", "number,title,body,labels,url,createdAt,author"],
         timeout=15,

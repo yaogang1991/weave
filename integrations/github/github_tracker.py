@@ -1,6 +1,7 @@
 """GitHub IssueTracker -- fetches issues via gh CLI."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -27,7 +28,7 @@ class GitHubIssueTracker(IssueTracker):
             for label in labels:
                 cmd.extend(["--label", label])
 
-        result = run_with_progress(cmd, timeout=30)
+        result = await asyncio.to_thread(run_with_progress, cmd, timeout=30)
         if result.returncode != 0:
             logger.error("gh issue list failed: %s", result.stderr)
             return []
@@ -60,5 +61,5 @@ class GitHubIssueTracker(IssueTracker):
         )
 
     async def health_check(self) -> bool:
-        result = run_with_progress(["gh", "auth", "status"], timeout=10)
+        result = await asyncio.to_thread(run_with_progress, ["gh", "auth", "status"], timeout=10)
         return result.returncode == 0
