@@ -23,7 +23,6 @@ from core.models import (
     DAG,
     DAGNode,
     NodeStatus,
-    EvalStatus,
     ExecutionEvent,
     FailureDecision,
     HandoffArtifact,
@@ -41,7 +40,11 @@ from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
 from core.dag_checkpoint import CheckpointManager
-from monitoring.otel import start_span, start_run_span, start_node_span  # noqa: E402 — optional OTel (#509)
+from monitoring.otel import (  # noqa: E402 — optional OTel (#509)
+    start_span,
+    start_run_span,
+    start_node_span,
+)
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
@@ -670,7 +673,9 @@ class DAGExecutionEngine:
                                         )
                                         await self._node_executor.execute_node(dag, target_id)
 
-                                        if QualityGate.is_terminal_success(dag.nodes[target_id].status):
+                                        if QualityGate.is_terminal_success(
+                                            dag.nodes[target_id].status,
+                                        ):
                                             # Re-run evaluator after generator fix
                                             dag.update_node(
                                                 failed_id,

@@ -504,7 +504,13 @@ class ClaudeCodeBackend(AgentBackend):
         """Extract tool call info from SDK/CLI result data (M5.1)."""
         tool_uses = data.get("tool_uses", [])
         if tool_uses:
-            return [{"name": tu.get("name", "unknown"), "input_preview": str(tu.get("input", ""))[:200]} for tu in tool_uses]
+            return [
+                {
+                    "name": tu.get("name", "unknown"),
+                    "input_preview": str(tu.get("input", ""))[:200],
+                }
+                for tu in tool_uses
+            ]
         messages = data.get("messages", [])
         calls = []
         for msg in messages:
@@ -512,7 +518,12 @@ class ClaudeCodeBackend(AgentBackend):
             if isinstance(content_blocks, list):
                 for block in content_blocks:
                     if isinstance(block, dict) and block.get("type") == "tool_use":
-                        calls.append({"name": block.get("name", "unknown"), "input_preview": str(block.get("input", ""))[:200]})
+                        calls.append({
+                            "name": block.get("name", "unknown"),
+                            "input_preview": str(
+                                block.get("input", "")
+                            )[:200],
+                        })
         return calls if calls else []
 
     # -- Error classification ------------------------------------------------
