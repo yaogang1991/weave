@@ -280,7 +280,7 @@ class TestRuntimeContextInjection:
         )
         ctx = worker._build_runtime_context()
         assert "## Runtime Environment" in ctx
-        assert "PROJECT_ROOT: /custom/project" in ctx
+        assert f"PROJECT_ROOT: {Path('/custom/project').resolve()}" in ctx
         assert "Path rules:" in ctx
 
     def test_build_runtime_context_falls_back_to_cwd(self):
@@ -335,5 +335,5 @@ class TestRuntimeContextInjection:
         assert len(captured_prompts) == 1
         prompt = captured_prompts[0]
         assert "## Runtime Environment" in prompt
-        assert "PROJECT_ROOT: /test/project" in prompt
+        assert f"PROJECT_ROOT: {Path('/test/project').resolve()}" in prompt
         assert "Your task: do something" in prompt
