@@ -69,7 +69,7 @@ class TestDependencyGraphTool:
         result = tool.handler(project="/etc")
         assert "error" in result
         assert result.get("isError") is True
-        assert "not found" in result["error"]
+        assert "not allowed" in result["error"]
 
     def test_has_input_schema(self):
         server = _server_with_analysis_tools()
