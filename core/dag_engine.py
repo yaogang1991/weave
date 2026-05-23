@@ -60,6 +60,9 @@ class DAGExecutionEngine:
     5. Supporting true replanning with max_replans limit and DAG result merging
     """
 
+    # #795: Safety cap on total DAG nodes after replan merge.
+    MAX_DAG_NODES: int = 25
+
     def __init__(
         self,
         agent_executor: Callable[[DAGNode, list[HandoffArtifact]], Awaitable[dict]],
@@ -907,6 +910,17 @@ class DAGExecutionEngine:
             "Replan produced %d nodes (was %d) (#718)",
             len(new_dag.nodes), len(dag.nodes),
         )
+
+        # #795: Cap total DAG nodes to prevent replan explosion.
+        projected = len(dag.nodes) + len(new_dag.nodes)
+        if projected > self.MAX_DAG_NODES:
+            logger.warning(
+                "Replan aborted: merged DAG would have %d nodes "
+                "(limit %d). Skipping failed node %s instead (#795).",
+                projected, self.MAX_DAG_NODES, failed_id,
+            )
+            return dag, levels, level_idx, replan_count, False
+
         old_dag = dag
         dag = self._merge_dag_results(dag, new_dag)
         # #775: Rewire downstream edges from failed node to its replacement.
