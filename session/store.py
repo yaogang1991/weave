@@ -107,8 +107,15 @@ class SessionStore:
                     continue
                 if end is not None and idx >= end:
                     break
-                data = json.loads(line.strip())
-                event = Event(**data)
+                try:
+                    data = json.loads(line.strip())
+                    event = Event(**data)
+                except (json.JSONDecodeError, Exception) as exc:
+                    logger.warning(
+                        "Skipping corrupted event at line %d in session %s: %s",
+                        idx, session_id, exc,
+                    )
+                    continue
                 if event_type is None or event.type == event_type:
                     events.append(event)
         return events
