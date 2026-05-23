@@ -413,10 +413,12 @@ class DAGExecutionEngine:
         try:
             while level_idx < len(levels):
                 level = levels[level_idx]
-                # #455: Skip already-completed nodes
+                # #455: Skip already-completed / superseded nodes
                 pending = [
                     nid for nid in level
-                    if dag.nodes[nid].status != NodeStatus.SUCCESS
+                    if dag.nodes[nid].status not in (
+                        NodeStatus.SUCCESS, NodeStatus.SUPERSEDED,
+                    )
                 ]
                 if not pending:
                     logger.info(
@@ -831,10 +833,16 @@ class DAGExecutionEngine:
             "Replan produced %d nodes (was %d) (#718)",
             len(new_dag.nodes), len(dag.nodes),
         )
+        # Save replan node IDs before merge mutates new_dag
+        replan_node_ids = set(new_dag.nodes.keys())
         old_dag = dag
         dag = self._merge_dag_results(dag, new_dag)
         # #775: Rewire downstream edges from failed node to its replacement.
         self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
+        # #789: Mark original failed node as superseded so it won't
+        # re-trigger replan when other nodes fail later.
+        if failed_id in dag.nodes and failed_id not in replan_node_ids:
+            dag.update_node(failed_id, status=NodeStatus.SUPERSEDED)
         replan_count += 1
         levels = dag.topological_levels()
         level_idx = 0
