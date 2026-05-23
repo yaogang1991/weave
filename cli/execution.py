@@ -500,6 +500,24 @@ async def _finalize_execution(engine, result_dag, store, session_id, viz, mcp_cl
     print(f"  Skipped: {summary['skipped']}")
     print(f"  Session ID: {session_id}")
 
+    # #828: Print details of failed/skipped nodes so the user sees
+    # what went wrong instead of a silent exit.
+    if summary["failed"] > 0 or summary["skipped"] > 0:
+        print()
+        for nid, details in summary.get("node_details", {}).items():
+            status = details.get("status", "")
+            if status in ("failed", "skipped"):
+                error = details.get("error", "No error details")
+                agent = details.get("agent", "unknown")
+                print(f"  [{status.upper()}] {nid} ({agent}): {error}")
+
+    if not summary.get("all_succeeded", False):
+        print(
+            "\nSome nodes did not succeed. Check the session event log "
+            f"for details: session_id={session_id}",
+            file=sys.stderr,
+        )
+
     store.emit_event(
         session_id,
         EventType.SESSION_END,

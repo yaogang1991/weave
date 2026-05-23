@@ -1162,6 +1162,10 @@ class DAGExecutionEngine:
                         {"eval_feedback": n.eval_feedback}
                         if n.eval_feedback else {}
                     ),
+                    **(
+                        {"error": n.error}
+                        if n.error else {}
+                    ),
                 }
                 for nid, n in dag.nodes.items()
             }
