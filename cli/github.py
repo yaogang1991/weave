@@ -53,11 +53,12 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
         remove=[config.label.trigger_label],
     )
 
-    branch = await branch_mgr.create_branch(repo, issue)
-
-    _, service = _make_services()
-    requirement = issue.to_requirement()
     try:
+        branch = await branch_mgr.create_branch(repo, issue)
+
+        _, service = _make_services()
+        requirement = issue.to_requirement()
+
         job = await service.submit_job(
             requirement=requirement,
             metadata={
@@ -69,14 +70,19 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
         )
         print(f"  Job {job.id} submitted, running...")
         run = await service.run_job(job.id)
-    except Exception:
-        # #823: Revert label on submit/run failure so the issue can be retried.
+    except Exception as exc:
+        # Revert label on any execution failure so the issue can be retried.
+        logger.exception("Issue #%d execution failed", issue.number)
         await host.update_labels(
             repo, issue.number,
-            add=[config.label.trigger_label],
+            add=[config.label.failed_label],
             remove=[config.label.running_label],
         )
-        raise
+        await host.comment_on_issue(
+            repo, issue.number,
+            f"Weave execution failed with exception: {str(exc)[:500]}",
+        )
+        return
 
     if run.status.value in ("succeeded",):
         print(f"  Issue #{issue.number} completed successfully")

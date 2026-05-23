@@ -240,3 +240,77 @@ class TestIssueRanker:
         result = await ranker.rank(issues)
         assert result[0].number == 1
         assert result[1].number == 2
+
+
+# -- _execute_issue exception handling (#857) --
+
+class TestExecuteIssueErrorHandling:
+    """Verify _execute_issue handles exceptions from create_branch/submit/run."""
+
+    def _make_issue(self):
+        return NormalizedIssue(number=42, title="Fix bug", body="Details")
+
+    @pytest.mark.asyncio
+    async def test_create_branch_failure_sets_failed_label(self):
+        issue = self._make_issue()
+        mock_host = AsyncMock()
+        mock_host.update_labels = AsyncMock()
+        mock_host.comment_on_issue = AsyncMock()
+
+        with patch("cli.github._make_host", return_value=mock_host), \
+             patch("cli.github.IntegrationConfig.from_env") as mock_cfg, \
+             patch("cli.github.BranchManager") as MockBranchMgr:
+            mock_cfg.return_value = IntegrationConfig()
+            MockBranchMgr.return_value.create_branch = AsyncMock(
+                side_effect=RuntimeError("branch creation failed")
+            )
+
+            from cli.github import _execute_issue
+            await _execute_issue(issue, "owner/repo")
+
+        label_calls = mock_host.update_labels.call_args_list
+        assert len(label_calls) == 2
+
+        # First call: set running label
+        first = label_calls[0]
+        assert "running" in str(first)
+
+        # Second call: set failed label, remove running
+        second = label_calls[1]
+        assert second.kwargs.get("add") == ["weave-failed"] or \
+               "failed" in str(second.kwargs.get("add", []))
+
+        mock_host.comment_on_issue.assert_called_once()
+        comment_body = mock_host.comment_on_issue.call_args[0][2]
+        assert "branch creation failed" in comment_body
+
+    @pytest.mark.asyncio
+    async def test_submit_job_failure_sets_failed_label(self):
+        issue = self._make_issue()
+        mock_host = AsyncMock()
+        mock_host.update_labels = AsyncMock()
+        mock_host.comment_on_issue = AsyncMock()
+
+        with patch("cli.github._make_host", return_value=mock_host), \
+             patch("cli.github.IntegrationConfig.from_env") as mock_cfg, \
+             patch("cli.github.BranchManager") as MockBranchMgr, \
+             patch("cli.github._make_services") as mock_services:
+            mock_cfg.return_value = IntegrationConfig()
+            MockBranchMgr.return_value.create_branch = AsyncMock(return_value="fix/42-bug")
+
+            mock_repo = MagicMock()
+            mock_service = AsyncMock()
+            mock_service.submit_job = AsyncMock(
+                side_effect=RuntimeError("submit failed")
+            )
+            mock_services.return_value = (mock_repo, mock_service)
+
+            from cli.github import _execute_issue
+            await _execute_issue(issue, "owner/repo")
+
+        label_calls = mock_host.update_labels.call_args_list
+        assert len(label_calls) == 2
+        second = label_calls[1]
+        assert "failed" in str(second.kwargs.get("add", []))
+
+        mock_host.comment_on_issue.assert_called_once()
