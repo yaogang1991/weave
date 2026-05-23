@@ -79,6 +79,11 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
         raise
 
     if run.status.value in ("succeeded",):
+        await host.update_labels(
+            repo, issue.number,
+            add=[config.label.pr_label],
+            remove=[config.label.running_label],
+        )
         print(f"  Issue #{issue.number} completed successfully")
     else:
         await host.update_labels(
@@ -98,20 +103,19 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
 
 async def cmd_issue_poll(args):
     """Poll GitHub issues with weave label, rank, and execute top issue."""
-    repo = getattr(args, "repo", None) or IntegrationConfig.from_env().github_repo
+    config = IntegrationConfig.from_env()
+    repo = getattr(args, "repo", None) or config.github_repo
     if not repo:
         print("Error: --repo required or set WEAVE_GITHUB_REPO")
         sys.exit(1)
 
-    dry_run = getattr(args, "dry_run", False) or IntegrationConfig.from_env().dry_run
+    dry_run = getattr(args, "dry_run", False) or config.dry_run
     limit = getattr(args, "limit", 1)
 
     tracker = _make_tracker()
     if not await tracker.health_check():
         print("Error: gh not authenticated. Run: gh auth login")
         sys.exit(1)
-
-    config = IntegrationConfig.from_env()
     raw_issues = await tracker.fetch(repo, labels=[config.label.trigger_label])
     if not raw_issues:
         print("No issues found.")
