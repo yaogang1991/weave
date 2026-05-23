@@ -19,7 +19,6 @@ read blocks indefinitely).
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import re
@@ -224,7 +223,10 @@ class LLMClient:
 
         for attempt in range(retries + 1):
             try:
-                result = self._call_once(messages, tools, tool_choice, progress_tracker, cancel_event)
+                result = self._call_once(
+                    messages, tools, tool_choice,
+                    progress_tracker, cancel_event,
+                )
                 # Mark rate-limit recovery time (#583)
                 if rate_limited_in_this_call:
                     self._last_rate_limit_recovery = time.monotonic()

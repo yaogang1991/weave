@@ -67,8 +67,6 @@ class ExecutionFactory:
 
     def create_orchestrator(self, store: SessionStore) -> IntelligentOrchestrator:
         """Build an IntelligentOrchestrator with default registries."""
-        from core.config import WeaveConfig
-
         registry = AgentRegistry()
         # Get learning optimizer from LearningHook (if registered)
         learning_optimizer = None

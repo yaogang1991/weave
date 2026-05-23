@@ -23,7 +23,6 @@ from core.models import (
     DAG,
     DAGNode,
     NodeStatus,
-    EvalStatus,
     ExecutionEvent,
     FailureDecision,
     HandoffArtifact,
@@ -41,7 +40,9 @@ from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
 from core.dag_checkpoint import CheckpointManager
-from monitoring.otel import start_span, start_run_span, start_node_span  # noqa: E402 — optional OTel (#509)
+from monitoring.otel import (
+    start_span, start_run_span, start_node_span,  # optional OTel (#509)
+)
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
@@ -486,8 +487,12 @@ class DAGExecutionEngine:
                                     "agent_type": node.agent_type,
                                     "status": completed_node.status.value,
                                     "duration_ms": duration_ms,
-                                    "input_tokens": completed_node.token_usage.get("input_tokens", 0),
-                                    "output_tokens": completed_node.token_usage.get("output_tokens", 0),
+                                    "input_tokens": completed_node.token_usage.get(
+                                        "input_tokens", 0,
+                                    ),
+                                    "output_tokens": completed_node.token_usage.get(
+                                        "output_tokens", 0,
+                                    ),
                                 },
                             ))
                             node_span.__exit__(None, None, None)
@@ -670,9 +675,13 @@ class DAGExecutionEngine:
                                             error="",
                                             eval_feedback=node.eval_feedback,
                                         )
-                                        await self._node_executor.execute_node(dag, target_id)
+                                        await self._node_executor.execute_node(
+                                            dag, target_id,
+                                        )
 
-                                        if QualityGate.is_terminal_success(dag.nodes[target_id].status):
+                                        if QualityGate.is_terminal_success(
+                                            dag.nodes[target_id].status,
+                                        ):
                                             # Re-run evaluator after generator fix
                                             dag.update_node(
                                                 failed_id,

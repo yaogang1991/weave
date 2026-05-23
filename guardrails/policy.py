@@ -528,7 +528,10 @@ class PersonalGuardrails(Guardrails):
         self.personal_policy = policy
         # #835: Also check WEAVE_NON_INTERACTIVE env var, not just the caller flag.
         import os
-        env_non_interactive = os.environ.get("WEAVE_NON_INTERACTIVE", "").lower() in ("true", "1", "yes")
+        env_non_interactive = (
+            os.environ.get("WEAVE_NON_INTERACTIVE", "").lower()
+            in ("true", "1", "yes")
+        )
         self.non_interactive = non_interactive or env_non_interactive
         self.approval_repo = approval_repo
 
