@@ -1,6 +1,7 @@
 """Branch management for GitHub integration."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -37,19 +38,22 @@ class BranchManager:
         """Create a branch for the given issue. Returns branch name."""
         branch = self._branch_name(issue)
 
-        check = run_with_progress(
+        check = await asyncio.to_thread(
+            run_with_progress,
             ["git", "rev-parse", "--verify", branch],
             cwd=self._repo_root, timeout=10,
         )
         if check.returncode == 0:
             logger.info("Branch %s already exists, reusing", branch)
-            run_with_progress(
+            await asyncio.to_thread(
+                run_with_progress,
                 ["git", "checkout", branch],
                 cwd=self._repo_root, timeout=30,
             )
             return branch
 
-        run_with_progress(
+        await asyncio.to_thread(
+            run_with_progress,
             ["git", "checkout", "-b", branch],
             cwd=self._repo_root, timeout=30,
         )
@@ -61,7 +65,7 @@ class BranchManager:
         args = ["git", "push", "origin", branch]
         if force:
             args.insert(2, "--force")
-        result = run_with_progress(args, cwd=self._repo_root, timeout=60)
+        result = await asyncio.to_thread(run_with_progress, args, cwd=self._repo_root, timeout=60)
         if result.returncode != 0:
             logger.error("git push failed: %s", result.stderr)
             return False
