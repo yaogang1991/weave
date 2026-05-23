@@ -22,7 +22,7 @@ class TestCredentialIsolation:
         os.environ["MY_CUSTOM_VAR"] = "safe_value"
         try:
             result = await self.sandbox.run_command(
-                "echo $ANTHROPIC_API_KEY $OPENAI_API_KEY $GITHUB_TOKEN $MY_CUSTOM_VAR",
+                'python -c "import os; print(os.environ.get(\'ANTHROPIC_API_KEY\',\'\'), os.environ.get(\'OPENAI_API_KEY\',\'\'), os.environ.get(\'GITHUB_TOKEN\',\'\'), os.environ.get(\'MY_CUSTOM_VAR\',\'\'))"',
                 cwd=".",
                 timeout=5,
             )
@@ -39,7 +39,7 @@ class TestCredentialIsolation:
     async def test_explicit_env_is_not_filtered(self):
         """When env is explicitly passed, use it as-is (trust caller)."""
         result = await self.sandbox.run_command(
-            "echo $MY_VAR",
+            'python -c "import os; print(os.environ.get(\'MY_VAR\',\'\'))"',
             cwd=".",
             timeout=5,
             env={"MY_VAR": "explicit_value", "PATH": os.environ.get("PATH", "")},
