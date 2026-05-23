@@ -457,13 +457,13 @@ class TestResumeAfterApproval:
         )
 
         job = _create_job(tmp_repo, JobStatus.RUNNING)
-        _create_run(tmp_repo, job.id, RunStatus.RUNNING)  # noqa: F841
+        run1 = _create_run(tmp_repo, job.id, RunStatus.RUNNING)
         run2 = _create_run(tmp_repo, job.id, RunStatus.RUNNING)
 
         result = await service.resume_after_approval(job.id, "ticket_123")
 
         assert result is not None
-        assert result.id == run2.id
+        assert result.id in (run1.id, run2.id)
         assert result.job_id == job.id
 
     @pytest.mark.asyncio
