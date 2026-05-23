@@ -104,10 +104,22 @@ class StuckDetector:
         )
         if all_empty_dict:
             self._consecutive_degenerate += 1
-            # P1 (#607): On first degenerate detection, signal for prompt
-            # hint injection.  #733: Also signal on second detection so
-            # the worker can inject a stronger, simplified-task recovery.
-            # Both injections happen before counting toward the stuck limit.
+            # Stuck check takes priority over hint check so that
+            # low thresholds (e.g. 2) still trigger is_stuck correctly.
+            if self._consecutive_degenerate >= self._degenerate_call_limit:
+                return StuckResult(
+                    is_stuck=True,
+                    pattern=StuckPattern.DEGENERATE_ARGS,
+                    consecutive_count=self._consecutive_degenerate,
+                    threshold=self._degenerate_call_limit,
+                    message=(
+                        f"Agent loop stuck: {self._consecutive_degenerate} "
+                        f"consecutive iterations with completely empty tool "
+                        f"call args."
+                    ),
+                )
+            # P1 (#607): On first/second degenerate detection, signal for
+            # prompt hint injection.  #733: Two hints before stuck limit.
             if self._consecutive_degenerate <= 2:
                 return StuckResult(
                     is_stuck=False,
@@ -120,18 +132,6 @@ class StuckDetector:
                         "requesting prompt hint injection for recovery."
                     ),
                     needs_hint=True,
-                )
-            if self._consecutive_degenerate >= self._degenerate_call_limit:
-                return StuckResult(
-                    is_stuck=True,
-                    pattern=StuckPattern.DEGENERATE_ARGS,
-                    consecutive_count=self._consecutive_degenerate,
-                    threshold=self._degenerate_call_limit,
-                    message=(
-                        f"Agent loop stuck: {self._consecutive_degenerate} "
-                        f"consecutive iterations with completely empty tool "
-                        f"call args."
-                    ),
                 )
         else:
             self._consecutive_degenerate = 0
