@@ -476,17 +476,29 @@ class DAGExecutionEngine:
                                 (time.monotonic() - node_start) * 1000
                             )
                             completed_node = dag_ref.nodes[node_id]
+                            node_end_details = {
+                                "trace_type": "node_end",
+                                "run_id": run_id,
+                                "node_id": node_id,
+                                "agent_type": node.agent_type,
+                                "status": completed_node.status.value,
+                                "duration_ms": duration_ms,
+                            }
+                            # #805: Include per-node token counts so
+                            # TokenReporter can aggregate without relying
+                            # solely on TRACE_LLM_TURN events.
+                            tu = completed_node.token_usage
+                            if tu:
+                                node_end_details["input_tokens"] = (
+                                    tu.get("input_tokens", 0)
+                                )
+                                node_end_details["output_tokens"] = (
+                                    tu.get("output_tokens", 0)
+                                )
                             await self._emit(ExecutionEvent(
                                 node_id=node_id,
                                 event_type="trace",
-                                details={
-                                    "trace_type": "node_end",
-                                    "run_id": run_id,
-                                    "node_id": node_id,
-                                    "agent_type": node.agent_type,
-                                    "status": completed_node.status.value,
-                                    "duration_ms": duration_ms,
-                                },
+                                details=node_end_details,
                             ))
                             node_span.__exit__(None, None, None)
 
