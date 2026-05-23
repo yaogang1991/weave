@@ -14,6 +14,17 @@ class NodeTokenSummary(BaseModel):
     tool_call_count: int = 0
     duration_ms: int = 0
 
+    def copy_with(self, **overrides) -> NodeTokenSummary:
+        """Return a new instance with specified fields overridden (#804)."""
+        return NodeTokenSummary(**{
+            "node_id": overrides.get("node_id", self.node_id),
+            "agent_type": overrides.get("agent_type", self.agent_type),
+            "input_tokens": overrides.get("input_tokens", self.input_tokens),
+            "output_tokens": overrides.get("output_tokens", self.output_tokens),
+            "tool_call_count": overrides.get("tool_call_count", self.tool_call_count),
+            "duration_ms": overrides.get("duration_ms", self.duration_ms),
+        })
+
 
 class TokenSummary(BaseModel):
     run_id: str = ""
@@ -50,58 +61,27 @@ class TokenReporter:
 
             elif event_type == EventType.TRACE_NODE_END:
                 nid = payload.get("node_id", "")
-                existing = nodes.get(nid)
-                nodes[nid] = NodeTokenSummary(
-                    node_id=nid,
-                    agent_type=payload.get(
-                        "agent_type",
-                        existing.agent_type if existing else "",
-                    ),
-                    input_tokens=payload.get(
-                        "input_tokens",
-                        existing.input_tokens if existing else 0,
-                    ),
-                    output_tokens=payload.get(
-                        "output_tokens",
-                        existing.output_tokens if existing else 0,
-                    ),
-                    duration_ms=payload.get(
-                        "duration_ms",
-                        existing.duration_ms if existing else 0,
-                    ),
-                    tool_call_count=existing.tool_call_count if existing else 0,
+                existing = nodes.get(nid, NodeTokenSummary(node_id=nid))
+                nodes[nid] = existing.copy_with(
+                    agent_type=payload.get("agent_type", existing.agent_type),
+                    input_tokens=payload.get("input_tokens", existing.input_tokens),
+                    output_tokens=payload.get("output_tokens", existing.output_tokens),
+                    duration_ms=payload.get("duration_ms", existing.duration_ms),
                 )
 
             elif event_type == EventType.TRACE_LLM_TURN:
                 nid = payload.get("node_id", "")
-                existing = nodes.get(nid)
-                nodes[nid] = NodeTokenSummary(
-                    node_id=nid,
-                    agent_type=existing.agent_type if existing else "",
-                    input_tokens=(
-                        (existing.input_tokens if existing else 0)
-                        + payload.get("input_tokens", 0)
-                    ),
-                    output_tokens=(
-                        (existing.output_tokens if existing else 0)
-                        + payload.get("output_tokens", 0)
-                    ),
-                    duration_ms=existing.duration_ms if existing else 0,
-                    tool_call_count=existing.tool_call_count if existing else 0,
+                existing = nodes.get(nid, NodeTokenSummary(node_id=nid))
+                nodes[nid] = existing.copy_with(
+                    input_tokens=existing.input_tokens + payload.get("input_tokens", 0),
+                    output_tokens=existing.output_tokens + payload.get("output_tokens", 0),
                 )
 
             elif event_type == EventType.TRACE_TOOL_CALL:
                 nid = payload.get("node_id", "")
-                existing = nodes.get(nid)
-                nodes[nid] = NodeTokenSummary(
-                    node_id=nid,
-                    agent_type=existing.agent_type if existing else "",
-                    input_tokens=existing.input_tokens if existing else 0,
-                    output_tokens=existing.output_tokens if existing else 0,
-                    duration_ms=existing.duration_ms if existing else 0,
-                    tool_call_count=(
-                        (existing.tool_call_count if existing else 0) + 1
-                    ),
+                existing = nodes.get(nid, NodeTokenSummary(node_id=nid))
+                nodes[nid] = existing.copy_with(
+                    tool_call_count=existing.tool_call_count + 1,
                 )
 
         return TokenSummary(
