@@ -9,6 +9,7 @@ Inspired by Anthropic's Session design:
 
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -41,6 +42,7 @@ class SessionStore:
         self._snapshot_interval = snapshot_interval
         # Track event counts per session for auto-snapshot (#510)
         self._event_counts: dict[str, int] = {}
+        self._write_lock = threading.Lock()
 
     def _session_file(self, session_id: str) -> Path:
         return self.base_path / f"{session_id}.jsonl"
@@ -74,19 +76,20 @@ class SessionStore:
             metadata=metadata or {},
         )
         file_path = self._session_file(session_id)
-        try:
-            with open(file_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(event.model_dump(mode="json"), default=str, ensure_ascii=False) + "\n")
-        except OSError as exc:
-            logger.error(
-                "Failed to write event %s to session %s: %s",
-                event_type.value, session_id, exc,
+        with self._write_lock:
+            try:
+                with open(file_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(event.model_dump(mode="json"), default=str, ensure_ascii=False) + "\n")
+            except OSError as exc:
+                logger.error(
+                    "Failed to write event %s to session %s: %s",
+                    event_type.value, session_id, exc,
+                )
+            # Auto-snapshot: create periodic checkpoint (#510)
+            self._event_counts[session_id] = (
+                self._event_counts.get(session_id, 0) + 1
             )
-        # Auto-snapshot: create periodic checkpoint (#510)
-        self._event_counts[session_id] = (
-            self._event_counts.get(session_id, 0) + 1
-        )
-        self._maybe_snapshot(session_id)
+            self._maybe_snapshot(session_id)
         return event
 
     def get_events(
