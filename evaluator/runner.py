@@ -81,9 +81,8 @@ def find_test_files(
                     if rel not in test_files:
                         test_files.append(rel)
 
-    # No broad fallback: when no test files match artifacts, return empty
-    # to avoid cross-module test pollution (#898). Previously fell back to
-    # ALL test_*.py which caused false negatives from unrelated modules.
+    # #898: No broad fallback — returns only test files that match artifacts by name.
+    # Previously fell back to ALL test_*.py which caused cross-module test pollution.
 
     return test_files
 

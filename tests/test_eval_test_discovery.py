@@ -4,25 +4,29 @@ from unittest.mock import patch, MagicMock
 from evaluator.runner import find_test_files, run_tests
 
 
-class TestFindTestFilesFallback:
-    """find_test_files discovers tests even without artifact hints (#598)."""
+class TestFindTestFilesNoFallback:
+    """find_test_files no longer falls back to ALL tests (#898).
 
-    def test_fallback_discovers_tests_in_project(self, tmp_path):
-        """When artifacts don't match any test by name/stem, fallback finds all test_*.py."""
+    The broad fallback was removed because it caused cross-module test
+    pollution: module A's failing tests would poison module B's evaluation.
+    """
+
+    def test_no_fallback_when_artifact_has_no_matching_test(self, tmp_path):
+        """When artifacts don't match any test by name/stem, return empty (#898)."""
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_main.py").write_text("def test_ok(): pass")
         (tmp_path / "tests" / "test_utils.py").write_text("def test_ok(): pass")
 
-        # Use an artifact that doesn't match any test file by name or stem
+        # "parser" doesn't match "test_main" or "test_utils"
         result = find_test_files(["src/parser.py"], tmp_path)
-        assert len(result) >= 2
+        assert result == []
 
-    def test_fallback_discovers_tests_in_workdir(self, tmp_path):
-        """When artifacts exist but no tests/ dir, fallback finds test_*.py in work_dir."""
+    def test_no_fallback_in_workdir(self, tmp_path):
+        """When artifacts exist but no matching tests, return empty (#898)."""
         (tmp_path / "test_app.py").write_text("def test_ok(): pass")
 
-        result = find_test_files(["src/app.py"], tmp_path)
-        assert len(result) >= 1
+        result = find_test_files(["src/other.py"], tmp_path)
+        assert result == []
 
     def test_artifact_match_takes_priority(self, tmp_path):
         """Direct artifact matches are found before fallback."""

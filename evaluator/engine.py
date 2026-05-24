@@ -356,9 +356,9 @@ class EvaluatorEngine:
                 test_targets = crit.test_path
             elif output_artifacts:
                 test_targets = find_test_files(output_artifacts, Path(work_dir))
-            if not test_targets:
-                # Broad fallback: discover any test files in project (#598)
-                test_targets = find_test_files([], Path(work_dir))
+            # #898: Do NOT fall back to all test files when artifact matching
+            # returns empty — that causes cross-module test pollution where
+            # module A's failing tests poison module B's evaluation.
             if not test_targets:
                 return True, (
                     "No test files found to run — tests not verified. "
