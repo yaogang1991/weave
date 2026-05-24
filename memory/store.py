@@ -127,6 +127,11 @@ class MemoryStore:
             if json_file.name.endswith(".tmp"):
                 continue
             stem = json_file.stem
+            if stem in self._id_to_path:
+                logger.warning(
+                    "Duplicate memory ID '%s' in index: %s overwrites %s (#906)",
+                    stem, json_file, self._id_to_path[stem],
+                )
             self._id_to_path[stem] = json_file
         self._index_loaded = True
 
