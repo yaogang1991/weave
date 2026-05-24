@@ -314,7 +314,7 @@ class TestMemoryStore:
         updated = memory_store.get(sample_entry.id)
         assert updated is not None
         assert updated.access_count == 1
-        assert updated.last_accessed_at > sample_entry.created_at
+        assert updated.last_accessed_at.timestamp() > sample_entry.created_at.timestamp()
 
     def test_cleanup_expired_removes_old_entries(self, memory_store):
         expired_entry = MemoryEntry(
