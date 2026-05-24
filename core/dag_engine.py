@@ -39,6 +39,7 @@ from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
+from core.provider_health import ProviderHealthTracker
 from core.dag_checkpoint import CheckpointManager
 from monitoring.otel import (
     start_span, start_run_span, start_node_span,  # optional OTel (#509)
@@ -101,6 +102,8 @@ class DAGExecutionEngine:
         budget_manager: BudgetManager | None = None,
         # #795: Max DAG node count to prevent replan explosion
         max_dag_nodes: int = 25,
+        # #900: Cross-node provider health detection
+        provider_health: ProviderHealthTracker | None = None,
     ):
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
@@ -109,6 +112,8 @@ class DAGExecutionEngine:
         self.max_replans = max_replans
         self.max_parallel = max_parallel
         self.max_dag_nodes = max_dag_nodes
+        # #900: Provider health tracker
+        self._provider_health = provider_health or ProviderHealthTracker()
         # Note: evaluator is stored in NodeExecutor (created below).
         # The .evaluator property proxies to it.
         self.artifact_path = artifact_path
@@ -470,7 +475,29 @@ class DAGExecutionEngine:
                             },
                         ))
                         try:
+                            # #900: Skip node if provider is unhealthy
+                            node = dag_ref.nodes[node_id]
+                            llm_cfg = getattr(
+                                self._node_executor, "_node_timeout_config", None
+                            )
+                            provider = getattr(llm_cfg, "provider", "anthropic") if llm_cfg else "anthropic"
+                            model = getattr(llm_cfg, "model", "") if llm_cfg else ""
+                            if not self._provider_health.is_healthy(provider, model):
+                                logger.warning(
+                                    "Skipping node %s — provider %s/%s is unhealthy (#900)",
+                                    node_id, provider, model,
+                                )
+                                dag_ref.update_node(
+                                    node_id, status=NodeStatus.SKIPPED,
+                                )
+                                return
                             await self._node_executor.execute_node(dag_ref, node_id)
+                            # #900: Report success
+                            final = dag_ref.nodes[node_id]
+                            if QualityGate.is_terminal_success(final.status):
+                                self._provider_health.record_success(provider, model)
+                            elif final.status == NodeStatus.FAILED:
+                                self._provider_health.record_failure(provider, model)
                         finally:
                             # M5.1: Trace node end
                             duration_ms = int(
