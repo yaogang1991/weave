@@ -932,11 +932,17 @@ class DAGExecutionEngine:
         dag = self._merge_dag_results(dag, new_dag)
 
         # #795: Abort if merged DAG exceeds node limit.
-        if len(dag.nodes) > self.max_dag_nodes:
+        # #899: Only count active nodes (not SKIPPED/FAILED/SUPERSEDED) so
+        # dead nodes from cascade failures don't block viable recovery paths.
+        _DEAD_STATUSES = {NodeStatus.SKIPPED, NodeStatus.FAILED, NodeStatus.SUPERSEDED}
+        active_count = sum(
+            1 for n in dag.nodes.values() if n.status not in _DEAD_STATUSES
+        )
+        if active_count > self.max_dag_nodes:
             logger.warning(
-                "Merged DAG has %d nodes (limit %d) — "
-                "aborting replan to prevent explosion (#795)",
-                len(dag.nodes), self.max_dag_nodes,
+                "Merged DAG has %d active nodes (%d total, limit %d) — "
+                "aborting replan to prevent explosion (#795, #899)",
+                active_count, len(dag.nodes), self.max_dag_nodes,
             )
             return old_dag, levels, level_idx, replan_count, False
 
