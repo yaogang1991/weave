@@ -81,23 +81,9 @@ def find_test_files(
                     if rel not in test_files:
                         test_files.append(rel)
 
-    # Fallback: when no test files found from artifacts, discover all test
-    # files in the project to avoid false PASS (#598, #599).
-    # Guard: only fallback when artifacts were actually provided (#605).
-    if not test_files and output_artifacts:
-        for search_dir in [work_dir / "tests", work_dir]:
-            if not search_dir.is_dir():
-                continue
-            for tf in search_dir.glob("test_*.py"):
-                rel = (
-                    str(tf.relative_to(work_dir))
-                    if tf.is_relative_to(work_dir)
-                    else str(tf)
-                )
-                if rel not in test_files:
-                    test_files.append(rel)
-            if test_files:
-                break  # Found tests in first available directory
+    # No broad fallback: when no test files match artifacts, return empty
+    # to avoid cross-module test pollution (#898). Previously fell back to
+    # ALL test_*.py which caused false negatives from unrelated modules.
 
     return test_files
 
