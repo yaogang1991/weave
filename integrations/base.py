@@ -34,7 +34,8 @@ class CodeHost(abc.ABC):
         ...
 
     @abc.abstractmethod
-    async def push_changes(self, repo: str, branch: str) -> bool:
+    async def push_changes(self, repo: str, branch: str, *,
+                          cwd: str | None = None) -> bool:
         ...
 
     @abc.abstractmethod

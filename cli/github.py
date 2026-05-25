@@ -66,6 +66,8 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
                 "issue_url": issue.url,
                 "integration_type": "github",
                 "branch_name": branch,
+                "repo": repo,
+                "requirement": issue.title,
             },
         )
         print(f"  Job {job.id} submitted, running...")
@@ -79,27 +81,44 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
         )
         raise
 
-    if run.status.value in ("succeeded",):
+    from integrations.github.post_execution import handle_result
+
+    result = await handle_result(run, job.metadata, host)
+
+    if result.status == "success":
         await host.update_labels(
             repo, issue.number,
             add=[config.label.pr_label],
             remove=[config.label.running_label],
         )
-        print(f"  Issue #{issue.number} completed successfully")
+        print(f"  Issue #{issue.number} completed successfully — {result.pr_url}")
+    elif result.status == "partial":
+        await host.update_labels(
+            repo, issue.number,
+            add=[config.label.pr_label],
+            remove=[config.label.running_label],
+        )
+        if result.issue_comment:
+            await host.comment_on_issue(repo, issue.number, result.issue_comment)
+        print(f"  Issue #{issue.number} partial success (draft PR) — {result.pr_url}")
+    elif result.status == "no_output":
+        await host.update_labels(
+            repo, issue.number,
+            add=[config.label.failed_label],
+            remove=[config.label.running_label],
+        )
+        if result.issue_comment:
+            await host.comment_on_issue(repo, issue.number, result.issue_comment)
+        print(f"  Issue #{issue.number} no code changes produced")
     else:
         await host.update_labels(
             repo, issue.number,
             add=[config.label.failed_label],
             remove=[config.label.running_label],
         )
-        error_msg = run.error or "Unknown error"
-        await host.comment_on_issue(
-            repo, issue.number,
-            f"Weave attempted to resolve this issue but encountered an error.\n\n"
-            f"**Error**: {error_msg[:500]}\n**Branch**: {branch}\n\n"
-            f"The worktree has been preserved for debugging.",
-        )
-        print(f"  Issue #{issue.number} failed: {error_msg}")
+        if result.issue_comment:
+            await host.comment_on_issue(repo, issue.number, result.issue_comment)
+        print(f"  Issue #{issue.number} failed: {result.issue_comment[:200]}")
 
 
 async def cmd_issue_poll(args):
