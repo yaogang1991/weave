@@ -1,6 +1,6 @@
 """Tests for get_execution_summary including eval_feedback (#665)."""
 from core.models import DAG, DAGNode, NodeStatus
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 
 def _make_engine() -> DAGExecutionEngine:
@@ -8,7 +8,7 @@ def _make_engine() -> DAGExecutionEngine:
     return DAGExecutionEngine(
         agent_executor=lambda *a, **kw: None,
         failure_handler=lambda *a, **kw: None,
-        max_parallel=1,
+        config=DAGEngineConfig(max_parallel=1),
     )
 
 

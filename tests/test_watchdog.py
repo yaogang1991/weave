@@ -30,7 +30,7 @@ from core.models import (  # noqa: E402
     NodeHealth,
     NodeStatus,
 )
-from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -54,9 +54,11 @@ def engine():
     return DAGExecutionEngine(
         agent_executor=mock_executor,
         failure_handler=mock_failure_handler,
-        heartbeat_interval_sec=0.1,
-        heartbeat_miss_threshold=2,
-        enable_watchdog=True,
+        config=DAGEngineConfig(
+            heartbeat_interval_sec=0.1,
+            heartbeat_miss_threshold=2,
+            enable_watchdog=True,
+        ),
     )
 
 
@@ -151,9 +153,11 @@ class TestWatchdog:
         engine = DAGExecutionEngine(
             agent_executor=None,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=0.05,
-            heartbeat_miss_threshold=2,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.05,
+                heartbeat_miss_threshold=2,
+                enable_watchdog=True,
+            ),
         )
 
         async def hanging_executor(node, artifacts, **kwargs):
@@ -197,9 +201,11 @@ class TestWatchdog:
         eng = DAGExecutionEngine(
             agent_executor=healthy_executor,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=30.0,
-            heartbeat_miss_threshold=10,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=30.0,
+                heartbeat_miss_threshold=10,
+                enable_watchdog=True,
+            ),
         )
 
         dag = DAG(
@@ -232,9 +238,11 @@ class TestWatchdog:
         eng = DAGExecutionEngine(
             agent_executor=slow_executor,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=30.0,
-            heartbeat_miss_threshold=10,
-            enable_watchdog=False,  # Disabled
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=30.0,
+                heartbeat_miss_threshold=10,
+                enable_watchdog=False,  # Disabled
+            ),
         )
 
         dag = DAG(
@@ -262,9 +270,11 @@ class TestWatchdog:
         eng = DAGExecutionEngine(
             agent_executor=None,  # type: ignore[arg-type]
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=5.0,
-            heartbeat_miss_threshold=10,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=5.0,
+                heartbeat_miss_threshold=10,
+                enable_watchdog=True,
+            ),
         )
 
         assert eng.heartbeat_interval_sec == 5.0
@@ -421,9 +431,11 @@ class TestHealthEventChain:
         engine = DAGExecutionEngine(
             agent_executor=failing_executor,
             failure_handler=retry_failure_handler,
-            heartbeat_interval_sec=0.1,
-            heartbeat_miss_threshold=2,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.1,
+                heartbeat_miss_threshold=2,
+                enable_watchdog=True,
+            ),
         )
         engine.on_event(capture_event)
 
@@ -475,9 +487,11 @@ class TestHealthEventChain:
         engine = DAGExecutionEngine(
             agent_executor=failing_executor,
             failure_handler=abort_failure_handler,
-            heartbeat_interval_sec=0.1,
-            heartbeat_miss_threshold=2,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.1,
+                heartbeat_miss_threshold=2,
+                enable_watchdog=True,
+            ),
         )
         engine.on_event(capture_event)
 
@@ -526,9 +540,11 @@ class TestHealthEventChain:
         engine = DAGExecutionEngine(
             agent_executor=failing_executor,
             failure_handler=skip_failure_handler,
-            heartbeat_interval_sec=0.1,
-            heartbeat_miss_threshold=2,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.1,
+                heartbeat_miss_threshold=2,
+                enable_watchdog=True,
+            ),
         )
         engine.on_event(capture_event)
 
@@ -576,12 +592,14 @@ class TestPerAgentWatchdog:
         engine = DAGExecutionEngine(
             agent_executor=slow_executor,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=30.0,
-            heartbeat_miss_threshold=10,
-            enable_watchdog=True,
-            watchdog_overrides={
-                "generator": (30.0, 10),
-            },
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=30.0,
+                heartbeat_miss_threshold=10,
+                enable_watchdog=True,
+                watchdog_overrides={
+                    "generator": (30.0, 10),
+                },
+            ),
         )
 
         dag = DAG(
@@ -610,12 +628,14 @@ class TestPerAgentWatchdog:
         engine = DAGExecutionEngine(
             agent_executor=hanging_executor,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=0.05,
-            heartbeat_miss_threshold=2,
-            enable_watchdog=True,
-            watchdog_overrides={
-                "generator": (30.0, 20),
-            },
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.05,
+                heartbeat_miss_threshold=2,
+                enable_watchdog=True,
+                watchdog_overrides={
+                    "generator": (30.0, 20),
+                },
+            ),
         )
 
         dag = DAG(
@@ -644,8 +664,10 @@ class TestPerAgentWatchdog:
         engine = DAGExecutionEngine(
             agent_executor=noop_executor,
             failure_handler=noop_handler,
-            heartbeat_interval_sec=30.0,
-            heartbeat_miss_threshold=5,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=30.0,
+                heartbeat_miss_threshold=5,
+            ),
         )
 
         interval, threshold = engine._get_heartbeat_settings("planner")
@@ -663,11 +685,13 @@ class TestPerAgentWatchdog:
         engine = DAGExecutionEngine(
             agent_executor=noop_executor,
             failure_handler=noop_handler,
-            heartbeat_interval_sec=30.0,
-            heartbeat_miss_threshold=5,
-            watchdog_overrides={
-                "generator": (60.0, 10),
-            },
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=30.0,
+                heartbeat_miss_threshold=5,
+                watchdog_overrides={
+                    "generator": (60.0, 10),
+                },
+            ),
         )
 
         interval, threshold = engine._get_heartbeat_settings("generator")
@@ -695,9 +719,11 @@ class TestPerAgentWatchdog:
         engine = DAGExecutionEngine(
             agent_executor=hanging_executor,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=0.05,
-            heartbeat_miss_threshold=2,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.05,
+                heartbeat_miss_threshold=2,
+                enable_watchdog=True,
+            ),
         )
         engine.on_event(capture_event)
 
@@ -745,11 +771,13 @@ class TestAlertThreshold:
         engine = DAGExecutionEngine(
             agent_executor=None,
             failure_handler=mock_failure_handler,
-            heartbeat_interval_sec=0.05,
-            heartbeat_miss_threshold=10,
-            enable_watchdog=True,
-            # Alert only at 50% of threshold (missed >= 5)
-            alert_thresholds={"test": 5},
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=0.05,
+                heartbeat_miss_threshold=10,
+                enable_watchdog=True,
+                # Alert only at 50% of threshold (missed >= 5)
+                alert_thresholds={"test": 5},
+            ),
         )
         engine.on_event(capture_event)
 
@@ -808,7 +836,9 @@ class TestAlertThreshold:
         engine = DAGExecutionEngine(
             agent_executor=noop,
             failure_handler=noop_handler,
-            alert_thresholds={"generator": 5},
+            config=DAGEngineConfig(
+                alert_thresholds={"generator": 5},
+            ),
         )
         assert engine._get_alert_threshold("generator") == 5
         assert engine._get_alert_threshold("evaluator") == 2
@@ -837,9 +867,11 @@ class TestDedicatedHeartbeatCoroutine:
         engine = DAGExecutionEngine(
             agent_executor=slow_executor,
             failure_handler=noop_handler,
-            heartbeat_interval_sec=30.0,
-            heartbeat_miss_threshold=50,
-            enable_watchdog=True,
+            config=DAGEngineConfig(
+                heartbeat_interval_sec=30.0,
+                heartbeat_miss_threshold=50,
+                enable_watchdog=True,
+            ),
         )
 
         dag = DAG(

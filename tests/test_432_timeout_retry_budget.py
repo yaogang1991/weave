@@ -11,7 +11,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from core.models import DAG, DAGNode, NodeStatus
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.exceptions import NodeTimeoutError, RateLimitError
 
 
@@ -52,8 +52,12 @@ class TestNodeTimeoutRetryBudget:
             )
 
         engine = DAGExecutionEngine(
-            timeout_executor, _noop_failure_handler, enable_watchdog=False,
-        )
+            timeout_executor, _noop_failure_handler
+        ,
+        config=DAGEngineConfig(
+            enable_watchdog=False,
+        ),
+    )
         await engine._node_executor.execute_node(dag, "n1")
 
         node = dag.nodes["n1"]
@@ -77,8 +81,12 @@ class TestNodeTimeoutRetryBudget:
             )
 
         engine = DAGExecutionEngine(
-            rate_limit_executor, _noop_failure_handler, enable_watchdog=False,
-        )
+            rate_limit_executor, _noop_failure_handler
+        ,
+        config=DAGEngineConfig(
+            enable_watchdog=False,
+        ),
+    )
         await engine._node_executor.execute_node(dag, "n1")
 
         node = dag.nodes["n1"]
@@ -98,8 +106,12 @@ class TestNodeTimeoutRetryBudget:
             raise RuntimeError("something went wrong")
 
         engine = DAGExecutionEngine(
-            fail_executor, _noop_failure_handler, enable_watchdog=False,
-        )
+            fail_executor, _noop_failure_handler
+        ,
+        config=DAGEngineConfig(
+            enable_watchdog=False,
+        ),
+    )
         await engine._node_executor.execute_node(dag, "n1")
 
         node = dag.nodes["n1"]
@@ -120,8 +132,12 @@ class TestNodeTimeoutRetryBudget:
             )
 
         engine = DAGExecutionEngine(
-            timeout_executor, _noop_failure_handler, enable_watchdog=False,
-        )
+            timeout_executor, _noop_failure_handler
+        ,
+        config=DAGEngineConfig(
+            enable_watchdog=False,
+        ),
+    )
         engine.event_handlers.append(lambda e: emitted_events.append(e))
 
         await engine._node_executor.execute_node(dag, "n1")

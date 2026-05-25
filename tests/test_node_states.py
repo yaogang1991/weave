@@ -20,7 +20,7 @@ from core.models import (  # noqa: F401
     DAG, DAGNode, DAGEdge, NodeStatus, EvalStatus, EvaluationResult,
     HandoffArtifact, SuccessCriterion, CriterionType,
 )
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.quality_gate import QualityGate
 
 
@@ -37,10 +37,14 @@ def _make_engine(**overrides) -> DAGExecutionEngine:
         "agent_executor": AsyncMock(return_value={"artifacts": []}),
         "failure_handler": AsyncMock(return_value=MagicMock(action="abort", reasoning="test")),
         "evaluator": None,
-        "enable_watchdog": False,
     }
     defaults.update(overrides)
-    return DAGExecutionEngine(**defaults)
+    config_keys = {"enable_watchdog", "max_parallel", "max_replans", "max_dag_nodes",
+        "artifact_path", "heartbeat_interval_sec", "heartbeat_miss_threshold",
+        "watchdog_overrides", "alert_thresholds", "backoff_base", "backoff_cap"}
+    config_kwargs = {k: overrides[k] for k in overrides if k in config_keys}
+    direct_kwargs = {k: v for k, v in defaults.items() if k not in config_keys}
+    return DAGExecutionEngine(**direct_kwargs, config=DAGEngineConfig(**config_kwargs))
 
 
 # =====================================================================

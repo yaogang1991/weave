@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from core.models import DAG, DAGNode, NodeStatus, FailureDecision
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 
 async def _abort_handler(dag, node_id, error):
@@ -37,10 +37,13 @@ class TestMaxDagNodes:
             ))
 
         engine = DAGExecutionEngine(
+
             agent_executor=AsyncMock(return_value={}),
             failure_handler=_abort_handler,
+    config=DAGEngineConfig(
             max_dag_nodes=25,
         )
+)
 
         # _try_execute_replan should return (old_dag, ..., replanned=False)
         dag, levels, level_idx, replan_count, replanned = (
@@ -57,10 +60,13 @@ class TestMaxDagNodes:
     def test_node_limit_check(self):
         """_check_node_limit returns False when nodes exceed max."""
         engine = DAGExecutionEngine(
+
             agent_executor=AsyncMock(return_value={}),
             failure_handler=_abort_handler,
+    config=DAGEngineConfig(
             max_dag_nodes=25,
         )
+)
         engine.replan_handler = AsyncMock()  # Not None
 
         dag = DAG(reasoning="test")

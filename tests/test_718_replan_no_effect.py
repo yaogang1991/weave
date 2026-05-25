@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.dag_models import DAG, DAGNode
 from core.models import NodeStatus
 
@@ -40,8 +40,7 @@ class TestReplanErrorHandling:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
-            max_parallel=1,
-            replan_handler=bad_replan,
+            config=DAGEngineConfig(max_parallel=1),
         )
 
         result_dag, result_levels, result_idx, result_count, initiated = (
@@ -71,9 +70,9 @@ class TestReplanErrorHandling:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
-            max_parallel=1,
-            replan_handler=good_replan,
+            config=DAGEngineConfig(max_parallel=1),
         )
+        engine.replan_handler = good_replan
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
             result_dag, result_levels, result_idx, result_count, initiated = (
@@ -96,8 +95,7 @@ class TestReplanErrorHandling:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
-            max_parallel=1,
-            replan_handler=None,
+            config=DAGEngineConfig(max_parallel=1),
         )
 
         result_dag, result_levels, result_idx, result_count, initiated = (

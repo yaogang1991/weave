@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.dag_models import DAG, DAGNode
 from core.models import NodeStatus, FailureDecision
 
@@ -52,11 +52,13 @@ class TestSupersededAfterReplan:
             return new_dag
 
         engine = DAGExecutionEngine(
-            agent_executor=AsyncMock(),
-            failure_handler=AsyncMock(),
+        agent_executor=AsyncMock(),
+        failure_handler=AsyncMock(),
+        replan_handler=good_replan,
+        config=DAGEngineConfig(
             max_parallel=1,
-            replan_handler=good_replan,
-        )
+        ),
+    )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
             result_dag, *_ = await engine._try_execute_replan(
@@ -81,11 +83,13 @@ class TestSupersededAfterReplan:
             return new_dag
 
         engine = DAGExecutionEngine(
-            agent_executor=AsyncMock(),
-            failure_handler=AsyncMock(),
+        agent_executor=AsyncMock(),
+        failure_handler=AsyncMock(),
+        replan_handler=replan_with_original,
+        config=DAGEngineConfig(
             max_parallel=1,
-            replan_handler=replan_with_original,
-        )
+        ),
+    )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
             result_dag, *_ = await engine._try_execute_replan(
@@ -137,11 +141,13 @@ class TestSupersededAfterReplan:
             return replan_new_dag
 
         engine = DAGExecutionEngine(
-            agent_executor=counting_executor,
-            failure_handler=counting_failure_handler,
-            replan_handler=counting_replan,
+        agent_executor=counting_executor,
+        failure_handler=counting_failure_handler,
+        replan_handler=counting_replan,
+        config=DAGEngineConfig(
             max_parallel=1,
-        )
+        ),
+    )
 
         result = await engine.execute(dag)
 

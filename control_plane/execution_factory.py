@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from core.config import WeaveConfig, LLMConfig, WatchdogConfig
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.agent_registry import AgentRegistry
 from core.models import EventType, PersonalGuardrailPolicy
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
@@ -207,26 +207,28 @@ class ExecutionFactory:
             agent_executor=pool.get_executor(session_id),
             failure_handler=orchestrator.adapt_to_failure,
             replan_handler=replan_handler,
-            max_parallel=self._max_parallel,
+            config=DAGEngineConfig(
+                max_parallel=self._max_parallel,
+                artifact_path=self._artifact_path,
+                heartbeat_interval_sec=self._watchdog_config.heartbeat_interval_sec,
+                heartbeat_miss_threshold=self._watchdog_config.heartbeat_miss_threshold,
+                enable_watchdog=self._watchdog_config.enabled,
+                watchdog_overrides={
+                    agent_type: (ov.heartbeat_interval_sec, ov.heartbeat_miss_threshold)
+                    for agent_type, ov in self._watchdog_config.agent_overrides.items()
+                    if ov.heartbeat_interval_sec is not None
+                    and ov.heartbeat_miss_threshold is not None
+                },
+                alert_thresholds={
+                    agent_type: self._watchdog_config.alert_threshold_for(agent_type)
+                    for agent_type in self._watchdog_config.agent_overrides
+                },
+                node_timeout_config=_cfg.node_timeout,
+            ),
             evaluator=evaluator,
-            artifact_path=self._artifact_path,
             work_dir=str(work_dir) if work_dir else None,
             memory_manager=memory_manager,
             session_id=session_id,
-            heartbeat_interval_sec=self._watchdog_config.heartbeat_interval_sec,
-            heartbeat_miss_threshold=self._watchdog_config.heartbeat_miss_threshold,
-            enable_watchdog=self._watchdog_config.enabled,
-            watchdog_overrides={
-                agent_type: (ov.heartbeat_interval_sec, ov.heartbeat_miss_threshold)
-                for agent_type, ov in self._watchdog_config.agent_overrides.items()
-                if ov.heartbeat_interval_sec is not None
-                and ov.heartbeat_miss_threshold is not None
-            },
-            alert_thresholds={
-                agent_type: self._watchdog_config.alert_threshold_for(agent_type)
-                for agent_type in self._watchdog_config.agent_overrides
-            },
-            node_timeout_config=_cfg.node_timeout,
             backend_manager=backend_manager,
             job_id=job_id,
             run_id=run_id or "",
