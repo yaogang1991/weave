@@ -369,7 +369,8 @@ def _build_runtime(
         agent_executor=pool.get_executor(session_id),
         failure_handler=orchestrator.adapt_to_failure,
         replan_handler=lambda dag_ref, failed_id: orchestrator.replan(
-            dag_ref, failed_id, args.requirement,
+            dag_ref, failed_id,
+            getattr(args, "requirement", "") or dag_ref.reasoning or "",
         ),
         max_parallel=args.max_parallel,
         evaluator=evaluator,
