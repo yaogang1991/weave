@@ -31,6 +31,10 @@ if hasattr(sys.stderr, "reconfigure"):
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+# #937: Configure structured logging early (WEAVE_LOG_FORMAT=json to enable)
+from monitoring.logging_config import setup_logging  # noqa: E402
+setup_logging()
+
 from control_plane.models import JobStatus  # noqa: E402
 from control_plane.approval import TicketStatus  # noqa: E402
 
