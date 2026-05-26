@@ -37,6 +37,7 @@ from core.progress import ProgressReport
 from core.exceptions import RateLimitError, HardTimeoutError
 from monitoring.otel import (  # noqa: E402 — optional OTel (#509)
     start_llm_turn_span, set_llm_usage_attributes,
+    capture_llm_content,  # noqa: E402 — #940
 )
 from monitoring.otel_metrics import (  # noqa: E402 — optional metrics (#938)
     record_token_usage, LLMDurationTracker,
@@ -387,12 +388,13 @@ class LLMClient:
         self, messages: list[dict], tools: list[dict] | None = None,
         tool_choice: dict | None = None,
     ) -> dict:
-        """Dispatch to provider-specific call with OTel span and metrics (#936, #938)."""
+        """Dispatch to provider-specific call with OTel span and metrics (#936, #938, #940)."""
         with start_llm_turn_span(
             node_id="", model=self.config.model, provider=self.config.provider,
         ) as span, LLMDurationTracker(
             model=self.config.model, provider=self.config.provider,
         ):
+            capture_llm_content(span, prompt_messages=messages)
             try:
                 if self.config.provider == "anthropic":
                     result = self._call_anthropic(messages, tools or [], tool_choice)
@@ -416,6 +418,12 @@ class LLMClient:
                         provider=self.config.provider,
                         input_tokens=usage.get("input_tokens", 0),
                         output_tokens=usage.get("output_tokens", 0),
+                    )
+                # #940: Capture completion content
+                if isinstance(result, dict):
+                    capture_llm_content(
+                        span,
+                        completion_messages=result.get("messages"),
                     )
                 return result
             except Exception as e:

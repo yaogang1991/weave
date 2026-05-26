@@ -103,6 +103,9 @@ class NoOpSpan:
     def record_exception(self, *args, **kwargs):
         pass
 
+    def add_event(self, *args, **kwargs):
+        pass
+
 
 def start_span(name: str, attributes: dict | None = None):
     """Start an OTel span, with graceful fallback to no-op."""
@@ -226,3 +229,50 @@ def inject_trace_context(env: dict[str, str]) -> dict[str, str]:
     if trace_ctx:
         return {**env, **trace_ctx}
     return env
+
+
+# -- #940: LLM content capture as span events --
+
+
+import json as _json
+import os as _os
+
+
+def _is_content_capture_enabled() -> bool:
+    """Check if WEAVE_OTEL_CAPTURE_CONTENT is enabled (#940)."""
+    return _os.getenv("WEAVE_OTEL_CAPTURE_CONTENT", "").lower() == "true"
+
+
+def capture_llm_content(
+    span: SpanLike,
+    *,
+    prompt_messages: list[dict] | None = None,
+    completion_messages: list[dict] | None = None,
+    max_size: int = 10000,
+) -> None:
+    """Capture LLM prompt/completion as span events (#940).
+
+    Controlled by WEAVE_OTEL_CAPTURE_CONTENT=true env var (default: false).
+    Content is emitted as span events (not attributes) per GenAI conventions.
+    Truncated at max_size characters to prevent oversized spans.
+    """
+    if not _is_content_capture_enabled():
+        return
+    if isinstance(span, NoOpSpan):
+        return
+
+    if prompt_messages:
+        content = _json.dumps(prompt_messages, ensure_ascii=False, default=str)
+        if len(content) > max_size:
+            content = content[:max_size] + "...(truncated)"
+        span.add_event("gen_ai.content.prompt", {
+            "gen_ai.input.messages": content,
+        })
+
+    if completion_messages:
+        content = _json.dumps(completion_messages, ensure_ascii=False, default=str)
+        if len(content) > max_size:
+            content = content[:max_size] + "...(truncated)"
+        span.add_event("gen_ai.content.completion", {
+            "gen_ai.output.messages": content,
+        })
