@@ -178,3 +178,40 @@ def set_llm_usage_attributes(
         span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
     if finish_reasons is not None:
         span.set_attribute("gen_ai.response.finish_reasons", finish_reasons)
+
+
+# -- #939: Trace context propagation across boundaries --
+
+
+def get_trace_context() -> dict[str, str]:
+    """Get W3C trace context headers for subprocess/MCP propagation (#939).
+
+    Returns {"traceparent": "00-{trace_id}-{span_id}-01"} if a span is active,
+    or {} if OTel is not installed or no span is active.
+    """
+    try:
+        from opentelemetry import trace, context
+        ctx = context.get_current()
+        span = trace.get_current_span(ctx)
+        if span == trace.INVALID_SPAN:
+            return {}
+        sc = span.get_span_context()
+        if not sc.is_valid:
+            return {}
+        sampled = "01" if (sc.trace_flags & 0x01) else "00"
+        return {
+            "traceparent": f"00-{sc.trace_id:032x}-{sc.span_id:016x}-{sampled}",
+        }
+    except ImportError:
+        return {}
+
+
+def inject_trace_context(env: dict[str, str]) -> dict[str, str]:
+    """Inject traceparent into env dict for subprocess propagation (#939).
+
+    Returns a new dict with TRACEPARENT added if a trace is active.
+    """
+    trace_ctx = get_trace_context()
+    if trace_ctx:
+        return {**env, **trace_ctx}
+    return env

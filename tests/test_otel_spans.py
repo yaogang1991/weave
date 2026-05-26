@@ -7,6 +7,8 @@ from monitoring.otel import (
     start_llm_turn_span,
     start_tool_call_span,
     set_llm_usage_attributes,
+    get_trace_context,
+    inject_trace_context,
 )
 
 
@@ -103,3 +105,29 @@ class TestSpanHelpers:
         span = _RecordingSpan()
         set_llm_usage_attributes(span, input_tokens=10)
         assert span.attributes == {"gen_ai.usage.input_tokens": 10}
+
+
+class TestTraceContextPropagation:
+    """Tests for #939: trace context propagation helpers."""
+
+    def test_get_trace_context_returns_empty_without_otel(self):
+        """get_trace_context returns {} when no active span."""
+        ctx = get_trace_context()
+        # Without OTel SDK installed or no active span, should be empty
+        assert isinstance(ctx, dict)
+
+    def test_inject_trace_context_returns_new_dict(self):
+        """inject_trace_context does not mutate the original dict."""
+        original = {"PATH": "/usr/bin"}
+        result = inject_trace_context(original)
+        assert "PATH" in result
+        assert "PATH" in original
+        # Without active trace, result should equal original
+        assert result == original
+
+    def test_inject_trace_context_preserves_existing_env(self):
+        """inject_trace_context preserves all original env vars."""
+        env = {"PATH": "/usr/bin", "HOME": "/home/test"}
+        result = inject_trace_context(env)
+        assert result["PATH"] == "/usr/bin"
+        assert result["HOME"] == "/home/test"

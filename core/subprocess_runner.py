@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.progress import ProgressTracker, ProgressReport
+from monitoring.otel import inject_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -72,13 +73,16 @@ def run_with_progress(
     if progress_tracker:
         progress_tracker.report(ProgressReport("subprocess_start"))
 
+    # #939: Inject W3C traceparent into subprocess environment
+    final_env = inject_trace_context(env or {})
+
     try:
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=str(cwd) if cwd else None,
-            env=env,
+            env=final_env or None,
             shell=shell,
         )
     except FileNotFoundError as e:

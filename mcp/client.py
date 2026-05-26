@@ -18,6 +18,7 @@ from typing import Any
 
 from core.config import MCPServerConfig
 from core.models import MCPToolInfo, MCPServerStatus
+from monitoring.otel import inject_trace_context
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,8 @@ class MCPServerConnection:
                 if k in ("PATH", "HOME", "LANG", "TERM", "SHELL", "USER")
             }
             env = {**base_env, **self.config.env} if self.config.env else base_env
+            # #939: Inject W3C traceparent for distributed trace correlation
+            env = inject_trace_context(env)
             server_params = StdioServerParameters(
                 command=self.config.command,
                 args=self.config.args,
