@@ -121,5 +121,5 @@ class TestActiveNodeCount:
             dag, "active_0", [["active_0"]], 0, 0,
         )
         dag_out, _, _, _, replanned = result
-        if not replanned:
-            assert len(dag_out.nodes) == 15
+        assert replanned is False
+        assert len(dag_out.nodes) == 15
