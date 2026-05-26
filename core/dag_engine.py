@@ -779,10 +779,27 @@ class DAGExecutionEngine:
                                 # fallback decision (skip / replan / abort)
                                 # instead of leaving the node FAILED and
                                 # silently skipping all downstream (#670).
-                                fallback = await self.failure_handler(
-                                    dag, failed_id,
-                                    dag.nodes[failed_id].error or "",
-                                )
+                                # #911: Skip fallback LLM call when provider
+                                # is unhealthy — avoids 150s timeout.
+                                provider, model = self._get_provider_model()
+                                if not self._provider_health.is_healthy(provider, model):
+                                    logger.warning(
+                                        "Provider %s/%s unhealthy — skipping "
+                                        "fallback failure handler LLM call (#911)",
+                                        provider, model,
+                                    )
+                                    fallback = FailureDecision(
+                                        action="skip",
+                                        reasoning=(
+                                            f"Provider {provider}/{model} is unhealthy, "
+                                            "skipping fallback LLM decision (#911)"
+                                        ),
+                                    )
+                                else:
+                                    fallback = await self.failure_handler(
+                                        dag, failed_id,
+                                        dag.nodes[failed_id].error or "",
+                                    )
                                 # #747: If LLM returns 'retry' after exhaustion,
                                 # remap to 'replan' (first choice) or 'skip'.
                                 # #751: Remap BEFORE emitting audit event so
