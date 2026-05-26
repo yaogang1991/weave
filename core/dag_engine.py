@@ -39,7 +39,7 @@ from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
-from core.provider_health import ProviderHealthTracker
+from core.provider_health import FailureCategory, ProviderHealthTracker
 from core.dag_checkpoint import CheckpointManager
 from monitoring.otel import (
     start_span, start_run_span, start_node_span,  # optional OTel (#509)
@@ -50,6 +50,27 @@ EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
 ReplanHandler = Callable[[DAG, str], Awaitable[DAG]]
 
 logger = logging.getLogger(__name__)
+
+
+def _classify_failure(error: str) -> FailureCategory:
+    """Classify a node failure by its error message for provider health tracking.
+
+    Only API-level errors (connection failures, rate limits) should count
+    toward the provider health threshold. Evaluation failures, timeouts,
+    and stall detections are local issues, not provider issues (#921/#924).
+    """
+    if not error:
+        return FailureCategory.API_ERROR  # conservative: unknown = API error
+    error_lower = error.lower()
+    if "rate_limit" in error_lower or "rate limit" in error_lower or "429" in error_lower:
+        return FailureCategory.RATE_LIMIT
+    if "stall" in error_lower:
+        return FailureCategory.STALL
+    if "eval" in error_lower:
+        return FailureCategory.EVALUATION
+    if "timeout" in error_lower:
+        return FailureCategory.TIMEOUT
+    return FailureCategory.API_ERROR  # conservative: unclassified = API error
 
 
 class DAGExecutionEngine:
@@ -497,7 +518,10 @@ class DAGExecutionEngine:
                             if QualityGate.is_terminal_success(final.status):
                                 self._provider_health.record_success(provider, model)
                             elif final.status == NodeStatus.FAILED:
-                                self._provider_health.record_failure(provider, model)
+                                self._provider_health.record_failure(
+                                    provider, model,
+                                    category=_classify_failure(final.error),
+                                )
                         finally:
                             # M5.1: Trace node end
                             duration_ms = int(
