@@ -12,6 +12,8 @@ def _make_run(status=RunStatus.SUCCEEDED, dag_result=None):
     run = MagicMock()
     run.status = status
     run.dag_result = dag_result or {"work_dir": "/tmp/work"}
+    run.started_at = None
+    run.completed_at = None
     return run
 
 
@@ -21,6 +23,7 @@ METADATA = {
     "branch_name": "fix/42-login",
     "repo": "o/r",
     "issue_url": "https://github.com/o/r/issues/42",
+    "labels": ["bug"],
 }
 
 
@@ -29,8 +32,9 @@ class TestHandleResult:
     async def test_no_output(self):
         run = _make_run()
         host = MagicMock()
+        host.find_existing_pr = AsyncMock(return_value="")
         with patch(
-            "integrations.github.post_execution._has_changes",
+            "integrations.github.post_execution._detect_changes",
             return_value=False,
         ):
             from integrations.github.post_execution import handle_result
@@ -44,9 +48,10 @@ class TestHandleResult:
         run = _make_run(status=RunStatus.SUCCEEDED)
         host = MagicMock()
         host.push_changes = AsyncMock(return_value=True)
+        host.find_existing_pr = AsyncMock(return_value="")
         host.create_pr = AsyncMock(return_value="https://github.com/o/r/pull/99")
         with patch(
-            "integrations.github.post_execution._has_changes",
+            "integrations.github.post_execution._detect_changes",
             return_value=True,
         ), patch(
             "integrations.github.post_execution._commit_changes",
@@ -72,9 +77,10 @@ class TestHandleResult:
         )
         host = MagicMock()
         host.push_changes = AsyncMock(return_value=True)
+        host.find_existing_pr = AsyncMock(return_value="")
         host.create_pr = AsyncMock(return_value="https://github.com/o/r/pull/100")
         with patch(
-            "integrations.github.post_execution._has_changes",
+            "integrations.github.post_execution._detect_changes",
             return_value=True,
         ), patch(
             "integrations.github.post_execution._commit_changes",
@@ -97,7 +103,7 @@ class TestHandleResult:
         host = MagicMock()
         host.push_changes = AsyncMock(return_value=False)
         with patch(
-            "integrations.github.post_execution._has_changes",
+            "integrations.github.post_execution._detect_changes",
             return_value=True,
         ), patch(
             "integrations.github.post_execution._commit_changes",
@@ -117,7 +123,7 @@ class TestHandleResult:
         run = _make_run()
         host = MagicMock()
         with patch(
-            "integrations.github.post_execution._has_changes",
+            "integrations.github.post_execution._detect_changes",
             return_value=True,
         ), patch(
             "integrations.github.post_execution._commit_changes",
@@ -139,3 +145,41 @@ class TestHandleResult:
         result = await handle_result(run, METADATA, host)
         assert result.status == "push_failed"
         assert "work directory" in result.issue_comment.lower()
+
+    @pytest.mark.asyncio
+    async def test_idempotent_pr_update_existing(self):
+        run = _make_run(status=RunStatus.SUCCEEDED)
+        host = MagicMock()
+        host.push_changes = AsyncMock(return_value=True)
+        host.find_existing_pr = AsyncMock(return_value="https://github.com/o/r/pull/55")
+        host.update_pr = AsyncMock(return_value=True)
+        host.create_pr = AsyncMock()
+        with patch(
+            "integrations.github.post_execution._detect_changes",
+            return_value=True,
+        ), patch(
+            "integrations.github.post_execution._commit_changes",
+            return_value=True,
+        ), patch(
+            "integrations.github.post_execution.generate_pr_body",
+            return_value="Updated body",
+        ):
+            from integrations.github.post_execution import handle_result
+
+            result = await handle_result(run, METADATA, host)
+        assert result.status == "success"
+        assert result.pr_url == "https://github.com/o/r/pull/55"
+        host.update_pr.assert_awaited_once()
+        host.create_pr.assert_not_awaited()
+
+
+class TestCommitPrefix:
+    def test_fix_default(self):
+        from integrations.github.post_execution import _commit_prefix
+        assert _commit_prefix(["bug"]) == "Fix"
+        assert _commit_prefix([]) == "Fix"
+
+    def test_feat_for_enhancement(self):
+        from integrations.github.post_execution import _commit_prefix
+        assert _commit_prefix(["enhancement"]) == "Feat"
+        assert _commit_prefix(["enhancement", "bug"]) == "Feat"

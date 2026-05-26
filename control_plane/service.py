@@ -656,7 +656,7 @@ class RunService:
             self.repository.transition_job_status(job_id, JobStatus.SUCCEEDED)
             self._cleanup_workspace(ctx, run=run)
             if ctx.work_dir:
-                run.dag_result["work_dir"] = ctx.work_dir
+                run.dag_result = {**run.dag_result, "work_dir": ctx.work_dir}
             return run
 
         # --- Canceled ---
@@ -669,7 +669,7 @@ class RunService:
                 )
             self._preserve_workspace(ctx, run=run, reason="canceled")
             if ctx.work_dir:
-                run.dag_result["work_dir"] = ctx.work_dir
+                run.dag_result = {**run.dag_result, "work_dir": ctx.work_dir}
             return run
 
         # --- Failed or Timed Out ---
@@ -703,7 +703,7 @@ class RunService:
         )
         self._preserve_workspace(ctx, run=run, reason=ctx.error_cat or "failed")
         if ctx.work_dir:
-            run.dag_result["work_dir"] = ctx.work_dir
+            run.dag_result = {**run.dag_result, "work_dir": ctx.work_dir}
         return run
 
     def _preserve_workspace(

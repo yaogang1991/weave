@@ -68,6 +68,7 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
                 "branch_name": branch,
                 "repo": repo,
                 "requirement": issue.title,
+                "labels": issue.labels,
             },
         )
         print(f"  Job {job.id} submitted, running...")
@@ -81,9 +82,11 @@ async def _execute_issue(issue, repo: str, dry_run: bool = False):
         )
         raise
 
+    from core.config import WeaveConfig
     from integrations.github.post_execution import handle_result
 
-    result = await handle_result(run, job.metadata, host)
+    cfg = WeaveConfig.from_env()
+    result = await handle_result(run, job.metadata, host, llm_config=cfg.llm)
 
     if result.status == "success":
         await host.update_labels(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from integrations.base import CodeHost
@@ -51,6 +52,31 @@ class GitHubCodeHost(CodeHost):
             logger.error("gh pr create failed: %s", result.stderr)
             return ""
         return result.stdout.strip()
+
+    async def find_existing_pr(self, repo: str, branch: str) -> str:
+        result = await asyncio.to_thread(
+            run_with_progress,
+            ["gh", "pr", "list", "--repo", repo, "--head", branch,
+             "--json", "url", "--limit", "1"],
+            timeout=15,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return ""
+        try:
+            prs = json.loads(result.stdout)
+            return prs[0]["url"] if prs else ""
+        except (json.JSONDecodeError, KeyError, IndexError):
+            return ""
+
+    async def update_pr(self, repo: str, pr_url: str, body: str) -> bool:
+        result = await asyncio.to_thread(
+            run_with_progress,
+            ["gh", "pr", "edit", pr_url, "--repo", repo, "--body", body],
+            timeout=15,
+        )
+        if result.returncode != 0:
+            logger.error("gh pr edit failed: %s", result.stderr)
+        return result.returncode == 0
 
     async def comment_on_issue(self, repo: str, issue_number: int, body: str) -> None:
         result = await asyncio.to_thread(
