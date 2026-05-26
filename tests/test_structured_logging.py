@@ -1,6 +1,7 @@
 """Tests for #937: structured logging with trace correlation."""
 import json
 import logging
+import os
 
 from monitoring.logging_config import (
     JsonFormatter,
@@ -89,6 +90,23 @@ class TestJsonFormatter:
         assert parsed["custom_key"] == "custom_value"
         assert parsed["event"] == "tool_selected"
 
+    def test_exception_formatting(self):
+        """Exception info is included in JSON output."""
+        fmt = JsonFormatter()
+        try:
+            raise ValueError("test error")
+        except ValueError:
+            import sys
+            record = logging.LogRecord(
+                name="test", level=logging.ERROR, pathname="", lineno=0,
+                msg="error occurred", args=(), exc_info=sys.exc_info(),
+            )
+        output = fmt.format(record)
+        parsed = json.loads(output)
+        assert "exception" in parsed
+        assert "ValueError" in parsed["exception"]
+        assert "test error" in parsed["exception"]
+
 
 class TestSetupLogging:
     def test_text_format_is_default(self):
@@ -115,6 +133,20 @@ class TestSetupLogging:
             isinstance(f, TraceContextFilter)
             for f in root.handlers[0].filters
         )
+
+    def test_env_var_log_format(self, monkeypatch):
+        """WEAVE_LOG_FORMAT env var controls format."""
+        monkeypatch.setenv("WEAVE_LOG_FORMAT", "json")
+        setup_logging()
+        root = logging.getLogger()
+        assert isinstance(root.handlers[0].formatter, JsonFormatter)
+
+    def test_env_var_log_level(self, monkeypatch):
+        """WEAVE_LOG_LEVEL env var controls level."""
+        monkeypatch.setenv("WEAVE_LOG_LEVEL", "WARNING")
+        setup_logging()
+        root = logging.getLogger()
+        assert root.level == logging.WARNING
 
     def teardown_method(self):
         """Reset root logger after each test."""
