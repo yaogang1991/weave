@@ -287,10 +287,11 @@ class Planner:
                 break
             if attempt < max_retries:
                 failed_content = response.get("content", "")
+                is_truncated = _is_response_truncated(failed_content)
                 if len(failed_content) > 2000:
                     failed_content = failed_content[:2000] + "\n... (truncated)"
                 messages.append({"role": "assistant", "content": failed_content})
-                if _is_response_truncated(failed_content):
+                if is_truncated:
                     messages.append({
                         "role": "user",
                         "content": (
