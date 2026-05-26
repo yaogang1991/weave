@@ -383,7 +383,8 @@ class LLMClient:
                     result = self._call_anthropic(messages, tools or [], tool_choice)
                 else:
                     result = self._call_openai(messages, tools or [], tool_choice)
-                set_llm_usage_attributes(span, finish_reasons=["completed"])
+                finish_reason = result.get("finish_reason", "completed") if isinstance(result, dict) else "completed"
+                set_llm_usage_attributes(span, finish_reasons=[finish_reason])
                 usage = result.get("usage") if isinstance(result, dict) else None
                 if usage:
                     set_llm_usage_attributes(
@@ -573,6 +574,10 @@ class LLMClient:
                 "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
             }
 
+        # Extract stop_reason for OTel finish_reasons (#936)
+        if hasattr(response, "stop_reason") and response.stop_reason:
+            msg["finish_reason"] = response.stop_reason
+
         return msg
 
     # -- OpenAI -----------------------------------------------------------
@@ -616,5 +621,9 @@ class LLMClient:
                 "input_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
                 "output_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
             }
+
+        # Extract finish_reason for OTel (#936)
+        if choice.finish_reason:
+            msg["finish_reason"] = choice.finish_reason
 
         return msg

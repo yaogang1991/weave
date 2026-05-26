@@ -10,6 +10,28 @@ from monitoring.otel import (
 )
 
 
+class _RecordingSpan:
+    """Mock span that records set_attribute calls for assertion."""
+
+    def __init__(self):
+        self.attributes = {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
+    def set_attribute(self, key, value):
+        self.attributes[key] = value
+
+    def set_attributes(self, attrs):
+        self.attributes.update(attrs)
+
+    def record_exception(self, exc):
+        pass
+
+
 class TestNoOpSpan:
     def test_context_manager(self):
         with NoOpSpan() as span:
@@ -62,3 +84,22 @@ class TestSpanHelpers:
             span, input_tokens=100, output_tokens=50,
             finish_reasons=["completed"],
         )
+
+    def test_set_llm_usage_attributes_sets_values(self):
+        """set_llm_usage_attributes sets correct attributes on a real span."""
+        span = _RecordingSpan()
+        set_llm_usage_attributes(
+            span, input_tokens=42, output_tokens=7,
+            finish_reasons=["end_turn"],
+        )
+        assert span.attributes == {
+            "gen_ai.usage.input_tokens": 42,
+            "gen_ai.usage.output_tokens": 7,
+            "gen_ai.response.finish_reasons": ["end_turn"],
+        }
+
+    def test_set_llm_usage_attributes_partial(self):
+        """set_llm_usage_attributes only sets provided attributes."""
+        span = _RecordingSpan()
+        set_llm_usage_attributes(span, input_tokens=10)
+        assert span.attributes == {"gen_ai.usage.input_tokens": 10}
