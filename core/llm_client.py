@@ -33,7 +33,7 @@ from openai import OpenAI
 from core.config import LLMConfig
 from core.progress import ProgressReport
 from core.exceptions import RateLimitError
-from monitoring.otel import start_span  # noqa: E402 — optional OTel (#509)
+from monitoring.otel import start_llm_turn_span, set_llm_usage_attributes  # noqa: E402 — optional OTel (#509)
 
 logger = logging.getLogger(__name__)
 
@@ -374,20 +374,27 @@ class LLMClient:
         self, messages: list[dict], tools: list[dict] | None = None,
         tool_choice: dict | None = None,
     ) -> dict:
-        """Dispatch to provider-specific call with OTel span (#509)."""
-        with start_span("llm.call", {
-            "gen_ai.system": self.config.provider,
-            "gen_ai.request.model": self.config.model,
-        }) as span:
+        """Dispatch to provider-specific call with OTel span (#936)."""
+        with start_llm_turn_span(
+            node_id="", model=self.config.model, provider=self.config.provider,
+        ) as span:
             try:
                 if self.config.provider == "anthropic":
                     result = self._call_anthropic(messages, tools or [], tool_choice)
                 else:
                     result = self._call_openai(messages, tools or [], tool_choice)
-                span.set_attribute("gen_ai.response.finish_reason", "completed")
+                finish_reason = result.get("finish_reason", "completed") if isinstance(result, dict) else "completed"
+                set_llm_usage_attributes(span, finish_reasons=[finish_reason])
+                usage = result.get("usage") if isinstance(result, dict) else None
+                if usage:
+                    set_llm_usage_attributes(
+                        span,
+                        input_tokens=usage.get("input_tokens"),
+                        output_tokens=usage.get("output_tokens"),
+                    )
                 return result
             except Exception as e:
-                span.set_attribute("gen_ai.response.finish_reason", "error")
+                set_llm_usage_attributes(span, finish_reasons=["error"])
                 span.record_exception(e)
                 raise
 
@@ -567,6 +574,10 @@ class LLMClient:
                 "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
             }
 
+        # Extract stop_reason for OTel finish_reasons (#936)
+        if hasattr(response, "stop_reason") and response.stop_reason:
+            msg["finish_reason"] = response.stop_reason
+
         return msg
 
     # -- OpenAI -----------------------------------------------------------
@@ -610,5 +621,9 @@ class LLMClient:
                 "input_tokens": getattr(response.usage, "prompt_tokens", 0) or 0,
                 "output_tokens": getattr(response.usage, "completion_tokens", 0) or 0,
             }
+
+        # Extract finish_reason for OTel (#936)
+        if choice.finish_reason:
+            msg["finish_reason"] = choice.finish_reason
 
         return msg

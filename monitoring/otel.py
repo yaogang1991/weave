@@ -131,25 +131,50 @@ def start_run_span(run_id: str, requirement: str) -> SpanLike:
 
 
 def start_node_span(run_id: str, node_id: str, agent_type: str) -> SpanLike:
-    """Create a Node-level OTel span (M5.1)."""
+    """Create a Node-level OTel span using GenAI Semantic Conventions (#936)."""
     return start_span("weave.node", {
+        "gen_ai.operation.name": "invoke_agent",
         "weave.run.id": run_id,
         "weave.node.id": node_id,
         "weave.node.agent_type": agent_type,
     })
 
 
-def start_llm_turn_span(node_id: str, model: str) -> SpanLike:
-    """Create an LLM Turn-level OTel span (M5.1)."""
-    return start_span("weave.llm_turn", {
-        "weave.node.id": node_id,
+def start_llm_turn_span(
+    node_id: str, model: str, provider: str = "unknown",
+) -> SpanLike:
+    """Create an LLM Turn-level OTel span using GenAI Semantic Conventions (#936)."""
+    return start_span(f"chat {model}", {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.system": provider,
         "gen_ai.request.model": model,
+        "weave.node.id": node_id,
     })
 
 
 def start_tool_call_span(node_id: str, tool_name: str) -> SpanLike:
-    """Create a Tool Call-level OTel span (M5.1)."""
-    return start_span("weave.tool_call", {
+    """Create a Tool Call-level OTel span using GenAI Semantic Conventions (#936)."""
+    return start_span(f"execute_tool {tool_name}", {
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": tool_name,
+        "gen_ai.tool.type": "function",
         "weave.node.id": node_id,
-        "weave.tool.name": tool_name,
     })
+
+
+def set_llm_usage_attributes(
+    span: SpanLike,
+    *,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    finish_reasons: list[str] | None = None,
+) -> None:
+    """Set GenAI usage attributes on an LLM span after response (#936)."""
+    if isinstance(span, NoOpSpan):
+        return
+    if input_tokens is not None:
+        span.set_attribute("gen_ai.usage.input_tokens", input_tokens)
+    if output_tokens is not None:
+        span.set_attribute("gen_ai.usage.output_tokens", output_tokens)
+    if finish_reasons is not None:
+        span.set_attribute("gen_ai.response.finish_reasons", finish_reasons)
