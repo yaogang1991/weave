@@ -17,7 +17,7 @@ def _make_node(nid, agent_type="generator", task="do stuff", **kwargs):
 
 
 def _make_engine():
-    from core.dag_engine import DAGExecutionEngine
+    from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
     from unittest.mock import AsyncMock
 
     async def noop(*a, **kw):
@@ -30,7 +30,9 @@ def _make_engine():
     return DAGExecutionEngine(
         agent_executor=noop,
         failure_handler=noop_failure,
-        max_parallel=1,
+        config=DAGEngineConfig(
+            max_parallel=1,
+        ),
     )
 
 

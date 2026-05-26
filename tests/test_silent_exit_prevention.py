@@ -12,7 +12,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from core.models import DAG, DAGNode, DAGEdge, NodeStatus, FailureDecision
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 
 def _make_simple_dag() -> DAG:
@@ -45,7 +45,9 @@ def engine():
     eng = DAGExecutionEngine(
         agent_executor=agent_executor,
         failure_handler=_abort_handler,
-        max_parallel=3,
+        config=DAGEngineConfig(
+            max_parallel=3,
+        ),
     )
     eng._emit = AsyncMock()  # Suppress event emissions
     return eng

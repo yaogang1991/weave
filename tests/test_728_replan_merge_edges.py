@@ -5,7 +5,7 @@ Verifies:
 2. Old edges connecting preserved nodes are also preserved
 3. topological_levels() correctly orders preserved nodes after merge
 """
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.dag_models import DAG, DAGNode
 from core.models import NodeStatus
 
@@ -14,7 +14,7 @@ def _make_engine() -> DAGExecutionEngine:
     return DAGExecutionEngine(
         agent_executor=lambda *a, **kw: None,
         failure_handler=lambda *a, **kw: None,
-        max_parallel=1,
+        config=DAGEngineConfig(max_parallel=1),
     )
 
 

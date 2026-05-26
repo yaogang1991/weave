@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # noqa: E402
 
 from core.models import DAG, DAGNode, NodeStatus, FailureDecision  # noqa: E402
-from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig  # noqa: E402
 
 
 async def _noop_executor(node, artifacts, **kwargs):
@@ -34,7 +34,9 @@ def _make_engine(tmp_path, session_id="test-session"):
         _noop_executor,
         _noop_failure_handler,
         session_id=session_id,
-        checkpoint_dir=str(tmp_path / "dag_progress"),
+        config=DAGEngineConfig(
+            checkpoint_dir=str(tmp_path / "dag_progress"),
+        )
     )
 
 
@@ -179,7 +181,9 @@ class TestCrashRecovery:
             tracking_executor,
             _noop_failure_handler,
             session_id="test-session",
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()
@@ -213,7 +217,9 @@ class TestCrashRecovery:
             tracking_executor,
             _noop_failure_handler,
             session_id="test-session",
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()
@@ -242,7 +248,9 @@ class TestCrashRecovery:
             tracking_executor,
             _noop_failure_handler,
             session_id="test-session",
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()
@@ -264,7 +272,9 @@ class TestCrashRecovery:
             tracking_executor,
             _noop_failure_handler,
             session_id=None,
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()
@@ -295,7 +305,9 @@ class TestCrashRecovery:
             fail_executor,
             _noop_failure_handler,
             session_id="test-session",
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()
@@ -323,7 +335,9 @@ class TestCrashRecovery:
             tracking_executor,
             _noop_failure_handler,
             session_id="test-session",
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()
@@ -351,7 +365,9 @@ class TestCrashRecovery:
             tracking_executor,
             _noop_failure_handler,
             session_id="test-session",
-            checkpoint_dir=str(tmp_path / "dag_progress"),
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
         )
 
         dag = _make_three_node_dag()

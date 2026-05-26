@@ -25,7 +25,7 @@ def _make_engine(
     max_replans=3,
 ):
     """Create a DAGExecutionEngine with minimal mocked dependencies."""
-    from core.dag_engine import DAGExecutionEngine
+    from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
     async def mock_agent_executor(node, artifacts):
         return _AGENT_RESULT
@@ -34,8 +34,10 @@ def _make_engine(
         agent_executor=mock_agent_executor,
         failure_handler=failure_handler,
         replan_handler=replan_handler,
-        max_replans=max_replans,
-        max_parallel=1,
+        config=DAGEngineConfig(
+            max_replans=max_replans,
+            max_parallel=1,
+        ),
     )
     return engine
 

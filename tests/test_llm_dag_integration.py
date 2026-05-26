@@ -66,7 +66,7 @@ async def test_shortest_dag_path_executes():
     from core.agent_registry import AgentRegistry
     from session.store import SessionStore
     from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
-    from core.dag_engine import DAGExecutionEngine
+    from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
     from agent.agent_pool import AgentPool
     from core.models import FailureDecision
     from tools.registry import ToolRegistry
@@ -102,9 +102,11 @@ async def test_shortest_dag_path_executes():
     engine = DAGExecutionEngine(
         agent_executor=pool.get_executor(session_id),
         failure_handler=abort_handler,
-        max_parallel=2,
-        artifact_path=config.artifact_path,
         session_id=session_id,
+        config=DAGEngineConfig(
+            max_parallel=2,
+            artifact_path=config.artifact_path,
+        ),
     )
 
     result = await engine.execute(dag)

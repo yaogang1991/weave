@@ -5,7 +5,7 @@ Verifies:
 2. implementation_total counts all generator/worker nodes
 3. Planner success does not inflate implementation_success
 """
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.dag_models import DAG, DAGNode
 from core.models import NodeStatus
 
@@ -14,7 +14,7 @@ def _make_engine() -> DAGExecutionEngine:
     return DAGExecutionEngine(
         agent_executor=lambda *a, **kw: None,
         failure_handler=lambda *a, **kw: None,
-        max_parallel=1,
+        config=DAGEngineConfig(max_parallel=1),
     )
 
 

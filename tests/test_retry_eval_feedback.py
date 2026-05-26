@@ -26,7 +26,7 @@ class TestEvalFeedbackPreservedOnRetry:
     @pytest.mark.asyncio
     async def test_eval_feedback_forwarded_on_normal_retry(self):
         """Normal retry preserves eval_feedback from previous attempt."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
         from core.models import FailureDecision
 
         node = _make_node("test_node", "generator")
@@ -46,7 +46,9 @@ class TestEvalFeedbackPreservedOnRetry:
         engine = DAGExecutionEngine(
             agent_executor=mock_executor,
             failure_handler=mock_failure_handler,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            ),
         )
         # Patch execute_node to avoid full re-execution
         engine._node_executor.execute_node = mock_executor
@@ -58,7 +60,7 @@ class TestEvalFeedbackPreservedOnRetry:
     @pytest.mark.asyncio
     async def test_no_feedback_no_crash(self):
         """Retry with no eval_feedback still works."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
         from core.models import FailureDecision
 
         node = _make_node("test_node", "generator")
@@ -74,7 +76,9 @@ class TestEvalFeedbackPreservedOnRetry:
         engine = DAGExecutionEngine(
             agent_executor=mock_executor,
             failure_handler=mock_failure_handler,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            ),
         )
         engine._node_executor.execute_node = mock_executor
         await engine.execute(dag)

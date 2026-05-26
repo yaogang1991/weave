@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from core.dag_models import DAG, DAGNode, DAGEdge, NodeStatus
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 
 def _make_node(nid: str, agent_type: str = "generator") -> DAGNode:
@@ -90,7 +90,9 @@ class TestReplanDownstreamPreserved:
                 "D", (), {"action": "replan", "reasoning": "test"}
             )()),
             replan_handler=replan_handler,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
 
         # Make plan fail on first attempt so replan triggers

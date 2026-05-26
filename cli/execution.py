@@ -342,7 +342,7 @@ def _build_runtime(
     # DAG engine
     project_work_dir = str(Path(args.project).resolve())
     wd_cfg = config.watchdog
-    from core.dag_engine import DAGExecutionEngine
+    from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
     from agent.backends.registry import BackendRegistry
     backend_registry = BackendRegistry(pool=pool, session_id=session_id)
 
@@ -372,26 +372,28 @@ def _build_runtime(
             dag_ref, failed_id,
             getattr(args, "requirement", "") or dag_ref.reasoning or "",
         ),
-        max_parallel=args.max_parallel,
+        config=DAGEngineConfig(
+            max_parallel=args.max_parallel,
+            artifact_path=config.artifact_path,
+            heartbeat_interval_sec=wd_cfg.heartbeat_interval_sec,
+            heartbeat_miss_threshold=wd_cfg.heartbeat_miss_threshold,
+            enable_watchdog=wd_cfg.enabled,
+            watchdog_overrides={
+                agent_type: (ov.heartbeat_interval_sec, ov.heartbeat_miss_threshold)
+                for agent_type, ov in wd_cfg.agent_overrides.items()
+                if ov.heartbeat_interval_sec is not None
+                and ov.heartbeat_miss_threshold is not None
+            },
+            alert_thresholds={
+                agent_type: wd_cfg.alert_threshold_for(agent_type)
+                for agent_type in wd_cfg.agent_overrides
+            },
+            node_timeout_config=config.node_timeout,
+        ),
         evaluator=evaluator,
-        artifact_path=config.artifact_path,
         work_dir=project_work_dir,
         memory_manager=memory_manager,
         session_id=session_id,
-        heartbeat_interval_sec=wd_cfg.heartbeat_interval_sec,
-        heartbeat_miss_threshold=wd_cfg.heartbeat_miss_threshold,
-        enable_watchdog=wd_cfg.enabled,
-        watchdog_overrides={
-            agent_type: (ov.heartbeat_interval_sec, ov.heartbeat_miss_threshold)
-            for agent_type, ov in wd_cfg.agent_overrides.items()
-            if ov.heartbeat_interval_sec is not None
-            and ov.heartbeat_miss_threshold is not None
-        },
-        alert_thresholds={
-            agent_type: wd_cfg.alert_threshold_for(agent_type)
-            for agent_type in wd_cfg.agent_overrides
-        },
-        node_timeout_config=config.node_timeout,
         backend_registry=backend_registry,
         budget_manager=budget_manager,
     )

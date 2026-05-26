@@ -23,11 +23,12 @@ class GitHubCodeHost(CodeHost):
             return ""
         return name
 
-    async def push_changes(self, repo: str, branch: str) -> bool:
+    async def push_changes(self, repo: str, branch: str, *,
+                          cwd: str | None = None) -> bool:
         result = await asyncio.to_thread(
             run_with_progress,
             ["git", "push", "origin", branch, "--force-if-includes"],
-            timeout=60,
+            timeout=60, cwd=cwd,
         )
         if result.returncode != 0:
             logger.error("git push failed: %s", result.stderr)

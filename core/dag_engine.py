@@ -73,6 +73,46 @@ def _classify_failure(error: str) -> FailureCategory:
     return FailureCategory.API_ERROR  # conservative: unclassified = API error
 
 
+class DAGEngineConfig:
+    """Tunable configuration for DAGExecutionEngine (#915).
+
+    Groups value-type parameters that control engine behavior,
+    separating them from service dependencies and identifiers.
+    """
+
+    def __init__(
+        self,
+        max_parallel: int = 5,
+        max_replans: int = 3,
+        max_dag_nodes: int = 25,
+        artifact_path: str = "./data/artifacts",
+        checkpoint_dir: str = "./data/dag_progress",
+        job_timeout: float | None = None,
+        backoff_base: float = 2.0,
+        backoff_cap: float = 60.0,
+        node_timeout_config: NodeTimeoutConfig | None = None,
+        heartbeat_interval_sec: float = 30.0,
+        heartbeat_miss_threshold: int = 5,
+        enable_watchdog: bool = True,
+        watchdog_overrides: dict[str, tuple[float, int]] | None = None,
+        alert_thresholds: dict[str, int] | None = None,
+    ) -> None:
+        self.max_parallel = max_parallel
+        self.max_replans = max_replans
+        self.max_dag_nodes = max_dag_nodes
+        self.artifact_path = artifact_path
+        self.checkpoint_dir = checkpoint_dir
+        self.job_timeout = job_timeout
+        self.backoff_base = backoff_base
+        self.backoff_cap = backoff_cap
+        self.node_timeout_config = node_timeout_config
+        self.heartbeat_interval_sec = heartbeat_interval_sec
+        self.heartbeat_miss_threshold = heartbeat_miss_threshold
+        self.enable_watchdog = enable_watchdog
+        self.watchdog_overrides = watchdog_overrides or {}
+        self.alert_thresholds = alert_thresholds or {}
+
+
 class DAGExecutionEngine:
     """
     Executes a DAG by:
@@ -87,69 +127,47 @@ class DAGExecutionEngine:
         self,
         agent_executor: Callable[[DAGNode, list[HandoffArtifact]], Awaitable[dict]],
         failure_handler: Callable[[DAG, str, str], Awaitable[FailureDecision]],
+        # #915: Tunable config grouped into DAGEngineConfig
+        config: DAGEngineConfig | None = None,
+        # Service dependencies
         replan_handler: ReplanHandler | None = None,
-        max_replans: int = 3,
-        max_parallel: int = 5,
         evaluator: EvaluatorEngine | None = None,
-        artifact_path: str = "./data/artifacts",
-        work_dir: str | None = None,
-        job_timeout: float | None = None,
-        # M2.0: Watchdog configuration
-        heartbeat_interval_sec: float = 30.0,
-        heartbeat_miss_threshold: int = 5,
-        enable_watchdog: bool = True,
-        # M3.2: Memory integration
         memory_manager: MemoryManager | None = None,
-        session_id: str | None = None,
-        # Retry backoff configuration
-        backoff_base: float = 2.0,
-        backoff_cap: float = 60.0,
-        # Per-agent-type heartbeat overrides: {agent_type: (interval, threshold)}
-        watchdog_overrides: dict[str, tuple[float, int]] | None = None,
-        # Per-agent-type alert thresholds: {agent_type: min_missed_for_alert}
-        alert_thresholds: dict[str, int] | None = None,
-        # M3.4: Node timeout configuration (#360)
-        node_timeout_config: NodeTimeoutConfig | None = None,
-        # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         backend_manager: BackendManager | None = None,
-        # Job/run identifiers for workspace isolation (#176 PR2)
+        backend_registry: Any | None = None,
+        budget_manager: BudgetManager | None = None,
+        provider_health: ProviderHealthTracker | None = None,
+        # Identifiers and workspace
+        work_dir: str | None = None,
+        session_id: str | None = None,
         job_id: str = "",
         run_id: str = "",
-        # #455: DAG execution state persistence for crash recovery
-        checkpoint_dir: str = "./data/dag_progress",
-        # M4.0: Backend registry for per-node backend selection
-        backend_registry: Any | None = None,
-        # M4.2: Token budget manager
-        budget_manager: BudgetManager | None = None,
-        # #795: Max DAG node count to prevent replan explosion
-        max_dag_nodes: int = 25,
-        # #900: Cross-node provider health detection
-        provider_health: ProviderHealthTracker | None = None,
     ):
+        cfg = config or DAGEngineConfig()
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
         self.failure_handler = failure_handler
         self.replan_handler = replan_handler
-        self.max_replans = max_replans
-        self.max_parallel = max_parallel
-        self.max_dag_nodes = max_dag_nodes
+        self.max_replans = cfg.max_replans
+        self.max_parallel = cfg.max_parallel
+        self.max_dag_nodes = cfg.max_dag_nodes
         # #900: Provider health tracker
         self._provider_health = provider_health or ProviderHealthTracker()
         # Note: evaluator is stored in NodeExecutor (created below).
         # The .evaluator property proxies to it.
-        self.artifact_path = artifact_path
+        self.artifact_path = cfg.artifact_path
         self.work_dir = work_dir
-        self.job_timeout = job_timeout
-        self.backoff_base = backoff_base
-        self.backoff_cap = backoff_cap
+        self.job_timeout = cfg.job_timeout
+        self.backoff_base = cfg.backoff_base
+        self.backoff_cap = cfg.backoff_cap
         self.event_handlers: list[EventHandler] = []
         # M2.0: Watchdog delegated to WatchdogService (#177 PR4).
         self._watchdog = WatchdogService(
-            heartbeat_interval_sec=heartbeat_interval_sec,
-            heartbeat_miss_threshold=heartbeat_miss_threshold,
-            enabled=enable_watchdog,
-            watchdog_overrides=watchdog_overrides or {},
-            alert_thresholds=alert_thresholds or {},
+            heartbeat_interval_sec=cfg.heartbeat_interval_sec,
+            heartbeat_miss_threshold=cfg.heartbeat_miss_threshold,
+            enabled=cfg.enable_watchdog,
+            watchdog_overrides=cfg.watchdog_overrides,
+            alert_thresholds=cfg.alert_thresholds,
             emit_func=self._emit,
         )
         self._running_tasks: dict[str, asyncio.Task] = {}
@@ -157,11 +175,11 @@ class DAGExecutionEngine:
         self.memory_manager = memory_manager
         self._session_id = session_id
         # M3.4: Node timeout configuration (#360)
-        self._node_timeout_config = node_timeout_config
+        self._node_timeout_config = cfg.node_timeout_config
         # Dedicated thread pool for evaluator calls — avoids global pool
         # join timeout warnings on event loop exit.
         self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max_parallel,
+            max_workers=cfg.max_parallel,
             thread_name_prefix="dag-engine",
         )
         # Best-attempt tracking delegated to RetryPolicyEngine (#177 PR4).
@@ -179,16 +197,16 @@ class DAGExecutionEngine:
             emit_func=self._emit,
             watchdog=self._watchdog,
             evaluator=evaluator,
-            artifact_path=artifact_path,
+            artifact_path=cfg.artifact_path,
             work_dir=work_dir,
             quality_gate=self._quality_gate,
             artifact_handoff=self._artifact_handoff,
-            node_timeout_config=node_timeout_config,
+            node_timeout_config=cfg.node_timeout_config,
             backend_manager=backend_manager,
             job_id=job_id,
             run_id=run_id,
-            backoff_base=backoff_base,
-            backoff_cap=backoff_cap,
+            backoff_base=cfg.backoff_base,
+            backoff_cap=cfg.backoff_cap,
             backend_registry=backend_registry,
             session_id=session_id or "",
             budget_manager=budget_manager,
@@ -199,7 +217,7 @@ class DAGExecutionEngine:
         self._job_id = job_id
         self._run_id = run_id
         # #455: DAG execution state persistence for crash recovery
-        self._checkpoint = CheckpointManager(checkpoint_dir, session_id)
+        self._checkpoint = CheckpointManager(cfg.checkpoint_dir, session_id)
         # M4.2: Budget manager for token tracking
         self._budget_manager = budget_manager
         # #750: Planner timeout circuit breaker — tracks consecutive

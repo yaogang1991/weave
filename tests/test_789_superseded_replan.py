@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.dag_models import DAG, DAGNode
 from core.models import NodeStatus, FailureDecision
 
@@ -54,8 +54,10 @@ class TestSupersededAfterReplan:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
-            max_parallel=1,
             replan_handler=good_replan,
+            config=DAGEngineConfig(
+                max_parallel=1,
+            )
         )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
@@ -83,8 +85,10 @@ class TestSupersededAfterReplan:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
-            max_parallel=1,
             replan_handler=replan_with_original,
+            config=DAGEngineConfig(
+                max_parallel=1,
+            )
         )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
@@ -140,7 +144,9 @@ class TestSupersededAfterReplan:
             agent_executor=counting_executor,
             failure_handler=counting_failure_handler,
             replan_handler=counting_replan,
-            max_parallel=1,
+            config=DAGEngineConfig(
+                max_parallel=1,
+            )
         )
 
         result = await engine.execute(dag)

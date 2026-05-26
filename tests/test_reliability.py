@@ -31,7 +31,7 @@ from core.models import (  # noqa: E402, F401
     HandoffArtifact,
     OrchestratorPlan,
 )
-from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig  # noqa: E402
 from core.provider_health import ProviderHealthTracker, ProviderHealthConfig  # noqa: E402
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator  # noqa: E402
 from control_plane.models import (  # noqa: E402
@@ -523,7 +523,7 @@ class TestMaxReplansProtection:
             always_fail,
             always_replan,
             replan_handler=replan_fn,
-            max_replans=2,
+            config=DAGEngineConfig(max_replans=2),
             provider_health=ProviderHealthTracker(ProviderHealthConfig(
                 failure_threshold=100,
             )),
@@ -550,9 +550,10 @@ class TestMaxReplansProtection:
             return FailureDecision(action="replan", reasoning="try again")
 
         engine = DAGExecutionEngine(
-            always_fail, always_replan,
+            always_fail,
+            always_replan,
             replan_handler=lambda d, f: _make_linear_dag(),
-            max_replans=0,
+            config=DAGEngineConfig(max_replans=0),
         )
 
         result = await engine.execute(dag)
@@ -578,11 +579,13 @@ class TestMaxReplansProtection:
             return _make_linear_dag()
 
         engine = DAGExecutionEngine(
-            always_fail, always_replan,
-            replan_handler=replan_fn, max_replans=3,
-            provider_health=ProviderHealthTracker(ProviderHealthConfig(
-                failure_threshold=100,
-            )),
+            always_fail,
+            always_replan,
+            replan_handler=replan_fn,
+            config=DAGEngineConfig(max_replans=3),
+            provider_health=ProviderHealthTracker(
+                ProviderHealthConfig(failure_threshold=100),
+            ),
         )
 
         result = await engine.execute(dag)

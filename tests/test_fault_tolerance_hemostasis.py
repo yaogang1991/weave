@@ -89,7 +89,7 @@ class TestRateLimitRetryBudget:
     @pytest.mark.asyncio
     async def test_rate_limit_preserves_retry_budget(self):
         """RateLimitError should NOT increment node.retry_count (#360)."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
         node = _make_node("test_node", max_retries=2)
         dag = _make_dag({"test_node": node})
@@ -108,7 +108,9 @@ class TestRateLimitRetryBudget:
         engine = DAGExecutionEngine(
             agent_executor=mock_executor,
             failure_handler=mock_failure_handler,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
         await engine.execute(dag)
 
@@ -119,7 +121,7 @@ class TestRateLimitRetryBudget:
     @pytest.mark.asyncio
     async def test_normal_error_consumes_retry_budget(self):
         """Non-rate-limit errors SHOULD still consume retry budget."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
         node = _make_node("test_node", max_retries=2)
         dag = _make_dag({"test_node": node})
@@ -138,7 +140,9 @@ class TestRateLimitRetryBudget:
         engine = DAGExecutionEngine(
             agent_executor=mock_executor,
             failure_handler=mock_failure_handler,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
         await engine.execute(dag)
 
@@ -221,7 +225,7 @@ class TestNodeTimeoutInDagEngine:
     @pytest.mark.asyncio
     async def test_node_timeout_from_dag_engine(self):
         """Timeout is enforced by dag_engine, not agent_pool (#360 PR2)."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
         node = _make_node("slow_node", max_retries=1)
         dag = _make_dag({"slow_node": node})
@@ -238,7 +242,9 @@ class TestNodeTimeoutInDagEngine:
         engine = DAGExecutionEngine(
             agent_executor=slow_executor,
             failure_handler=mock_failure_handler,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
         # Override timeout to 1s for fast test
         engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 1
@@ -376,7 +382,7 @@ class TestProgressCallback:
     @pytest.mark.asyncio
     async def test_progress_callback_called_after_llm_response(self):
         """progress_callback is invoked after each LLM call (#360 PR3)."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
         progress_calls = 0
 
@@ -394,7 +400,9 @@ class TestProgressCallback:
         engine = DAGExecutionEngine(
             agent_executor=mock_executor,
             failure_handler=None,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
         engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
@@ -405,7 +413,7 @@ class TestProgressCallback:
     @pytest.mark.asyncio
     async def test_progress_callback_receives_cancel_event(self):
         """Agent executor receives cancel_event for cooperative cancellation."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
         import threading
 
         received_cancel = None
@@ -423,7 +431,9 @@ class TestProgressCallback:
         engine = DAGExecutionEngine(
             agent_executor=mock_executor,
             failure_handler=None,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
         engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
@@ -434,11 +444,15 @@ class TestProgressCallback:
     @pytest.mark.asyncio
     async def test_no_heartbeat_loop_coroutine(self):
         """_heartbeat_loop should not exist as a method (#360 PR3)."""
-        from core.dag_engine import DAGExecutionEngine
+        from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
         engine = DAGExecutionEngine(
-            agent_executor=lambda n, a, **kw: asyncio.coroutine(lambda: {"status": "ok"})(),
+            agent_executor=lambda n,
+            a,
+            **kw: asyncio.coroutine(lambda: {"status": "ok"})(),
             failure_handler=None,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
         assert not hasattr(engine, '_heartbeat_loop'), \
             "_heartbeat_loop should have been removed in PR3"

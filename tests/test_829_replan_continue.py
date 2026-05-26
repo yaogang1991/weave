@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from core.dag_models import DAG, DAGNode, DAGEdge, NodeStatus
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 
 def _make_node(nid: str, agent_type: str = "generator") -> DAGNode:
@@ -40,7 +40,9 @@ class TestReplanFailureContinues:
                 "D", (), {"action": "replan", "reasoning": "test"}
             )()),
             replan_handler=failing_replan,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
@@ -65,7 +67,9 @@ class TestReplanFailureContinues:
                 "D", (), {"action": "replan", "reasoning": "test"}
             )()),
             replan_handler=none_replan,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
         )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):

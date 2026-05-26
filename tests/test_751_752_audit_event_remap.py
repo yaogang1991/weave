@@ -29,7 +29,7 @@ def _make_dag_with_failed_node(
 
 def test_751_inner_fallback_emits_remapped_action():
     """After retry exhaustion, inner fallback path emits 'replan' not 'retry' (#751)."""
-    from core.dag_engine import DAGExecutionEngine
+    from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
     dag = _make_dag_with_failed_node(retry_count=3, max_retries=3)
     emitted_events = []
@@ -50,7 +50,9 @@ def test_751_inner_fallback_emits_remapped_action():
             agent_executor=mock_executor,
             failure_handler=mock_failure_handler,
             replan_handler=mock_replan,
-            max_replans=3,
+            config=DAGEngineConfig(
+                max_replans=3,
+            )
         )
 
         # Capture emitted events

@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.dag_engine import DAGExecutionEngine  # noqa: E402
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig  # noqa: E402
 from core.models import (  # noqa: E402
     DAG,
     DAGEdge,
@@ -74,8 +74,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=selective_executor,
             failure_handler=_skip_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
@@ -109,8 +111,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=selective_executor,
             failure_handler=_skip_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
@@ -140,8 +144,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=fail_executor,
             failure_handler=_abort_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
@@ -173,8 +179,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=selective_executor,
             failure_handler=_skip_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
@@ -215,8 +223,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=selective_executor,
             failure_handler=_skip_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
@@ -254,8 +264,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=fail_a_executor,
             failure_handler=retry_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
@@ -299,8 +311,10 @@ class TestDependencyAwareSkip:
         engine = DAGExecutionEngine(
             agent_executor=selective_executor,
             failure_handler=_skip_handler,
-            max_parallel=5,
-            enable_watchdog=False,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+                max_parallel=5,
+            )
         )
 
         result = await engine.execute(dag)
