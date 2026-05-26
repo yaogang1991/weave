@@ -207,6 +207,22 @@ class DAGExecutionEngine:
         self._planner_timeout_streak = 0
         self._PLANNER_CIRCUIT_BREAKER_THRESHOLD = 3
 
+    def _get_provider_model(self) -> tuple[str, str]:
+        """Return the (provider, model) pair used for health tracking.
+
+        TODO(#911-followup): NodeTimeoutConfig doesn't carry provider/model,
+        so this always returns ("anthropic", ""). Should thread LLMConfig or
+        explicit provider/model through the constructor instead.
+        """
+        llm_cfg = getattr(
+            self._node_executor, "_node_timeout_config", None,
+        )
+        provider = (
+            getattr(llm_cfg, "provider", "anthropic") if llm_cfg else "anthropic"
+        )
+        model = getattr(llm_cfg, "model", "") if llm_cfg else ""
+        return provider, model
+
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
         self.event_handlers.append(handler)
@@ -498,11 +514,7 @@ class DAGExecutionEngine:
                         try:
                             # #900: Skip node if provider is unhealthy
                             node = dag_ref.nodes[node_id]
-                            llm_cfg = getattr(
-                                self._node_executor, "_node_timeout_config", None
-                            )
-                            provider = getattr(llm_cfg, "provider", "anthropic") if llm_cfg else "anthropic"
-                            model = getattr(llm_cfg, "model", "") if llm_cfg else ""
+                            provider, model = self._get_provider_model()
                             if not self._provider_health.is_healthy(provider, model):
                                 logger.warning(
                                     "Skipping node %s — provider %s/%s is unhealthy (#900)",
@@ -593,9 +605,26 @@ class DAGExecutionEngine:
 
                 if failed_in_level:
                     for failed_id in failed_in_level:
-                        decision = await self.failure_handler(
-                            dag, failed_id, dag.nodes[failed_id].error,
-                        )
+                        # #911: Skip failure handler LLM call when provider
+                        # is unhealthy — avoids 150s timeout per node.
+                        provider, model = self._get_provider_model()
+                        if not self._provider_health.is_healthy(provider, model):
+                            logger.warning(
+                                "Provider %s/%s unhealthy — skipping "
+                                "failure handler LLM call (#911)",
+                                provider, model,
+                            )
+                            decision = FailureDecision(
+                                action="skip",
+                                reasoning=(
+                                    f"Provider {provider}/{model} is unhealthy, "
+                                    "skipping LLM decision (#911)"
+                                ),
+                            )
+                        else:
+                            decision = await self.failure_handler(
+                                dag, failed_id, dag.nodes[failed_id].error,
+                            )
 
                         # #747/#752: If failure_handler returns 'retry' but
                         # retries are exhausted, remap before audit + execution
@@ -774,10 +803,27 @@ class DAGExecutionEngine:
                                 # fallback decision (skip / replan / abort)
                                 # instead of leaving the node FAILED and
                                 # silently skipping all downstream (#670).
-                                fallback = await self.failure_handler(
-                                    dag, failed_id,
-                                    dag.nodes[failed_id].error or "",
-                                )
+                                # #911: Skip fallback LLM call when provider
+                                # is unhealthy — avoids 150s timeout.
+                                provider, model = self._get_provider_model()
+                                if not self._provider_health.is_healthy(provider, model):
+                                    logger.warning(
+                                        "Provider %s/%s unhealthy — skipping "
+                                        "fallback failure handler LLM call (#911)",
+                                        provider, model,
+                                    )
+                                    fallback = FailureDecision(
+                                        action="skip",
+                                        reasoning=(
+                                            f"Provider {provider}/{model} is unhealthy, "
+                                            "skipping fallback LLM decision (#911)"
+                                        ),
+                                    )
+                                else:
+                                    fallback = await self.failure_handler(
+                                        dag, failed_id,
+                                        dag.nodes[failed_id].error or "",
+                                    )
                                 # #747: If LLM returns 'retry' after exhaustion,
                                 # remap to 'replan' (first choice) or 'skip'.
                                 # #751: Remap BEFORE emitting audit event so
@@ -949,6 +995,15 @@ class DAGExecutionEngine:
         ``while`` re-enters from level 0.
         """
         if self.replan_handler is None:
+            return dag, levels, level_idx, replan_count, False
+
+        # #911: Skip replan LLM call when provider is unhealthy.
+        provider, model = self._get_provider_model()
+        if not self._provider_health.is_healthy(provider, model):
+            logger.warning(
+                "Provider %s/%s unhealthy — skipping replan LLM call (#911)",
+                provider, model,
+            )
             return dag, levels, level_idx, replan_count, False
 
         logger.info(
