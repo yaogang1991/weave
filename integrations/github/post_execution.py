@@ -22,10 +22,10 @@ class PostExecutionResult(BaseModel):
 
 
 async def _has_changes(work_dir: str) -> bool:
-    """Check if there are uncommitted changes in work_dir."""
+    """Check if there are uncommitted or untracked changes in work_dir."""
     result = await asyncio.to_thread(
         run_with_progress,
-        ["git", "diff", "--stat", "HEAD"],
+        ["git", "status", "--porcelain"],
         timeout=15,
         cwd=work_dir,
     )

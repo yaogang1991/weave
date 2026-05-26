@@ -44,12 +44,12 @@ class TestEvalFeedbackPreservedOnRetry:
             return FailureDecision(action="retry", reasoning="test")
 
         engine = DAGExecutionEngine(
-    agent_executor=mock_executor,
-    failure_handler=mock_failure_handler,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=mock_executor,
+            failure_handler=mock_failure_handler,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            ),
+        )
         # Patch execute_node to avoid full re-execution
         engine._node_executor.execute_node = mock_executor
         await engine.execute(dag)
@@ -74,12 +74,12 @@ class TestEvalFeedbackPreservedOnRetry:
             return FailureDecision(action="retry", reasoning="test")
 
         engine = DAGExecutionEngine(
-    agent_executor=mock_executor,
-    failure_handler=mock_failure_handler,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=mock_executor,
+            failure_handler=mock_failure_handler,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            ),
+        )
         engine._node_executor.execute_node = mock_executor
         await engine.execute(dag)
         # Should not crash

@@ -40,6 +40,7 @@ class TestReplanErrorHandling:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
+            replan_handler=bad_replan,
             config=DAGEngineConfig(max_parallel=1),
         )
 
