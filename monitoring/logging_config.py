@@ -13,6 +13,15 @@ import os
 import time
 from typing import Any
 
+# Cache OTel imports at module level to avoid repeated ImportError
+# on every log record when OTel is not installed.
+_otel_trace = None
+_otel_context = None
+try:
+    from opentelemetry import trace as _otel_trace, context as _otel_context  # type: ignore[no-redef]
+except ImportError:
+    pass
+
 
 class TraceContextFilter(logging.Filter):
     """Inject trace_id and span_id into every log record (#937).
@@ -25,17 +34,14 @@ class TraceContextFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.trace_id = ""  # type: ignore[attr-defined]
         record.span_id = ""  # type: ignore[attr-defined]
-        try:
-            from opentelemetry import trace, context
-            ctx = context.get_current()
-            span = trace.get_current_span(ctx)
-            if span != trace.INVALID_SPAN:
+        if _otel_trace is not None:
+            ctx = _otel_context.get_current()
+            span = _otel_trace.get_current_span(ctx)
+            if span != _otel_trace.INVALID_SPAN:
                 sc = span.get_span_context()
                 if sc.is_valid:
                     record.trace_id = format(sc.trace_id, "032x")  # type: ignore[attr-defined]
                     record.span_id = format(sc.span_id, "016x")  # type: ignore[attr-defined]
-        except ImportError:
-            pass
         return True
 
 
@@ -91,6 +97,8 @@ def setup_logging(
 ) -> None:
     """Configure the root logger with optional JSON formatting (#937).
 
+    Removes all existing handlers on the root logger before configuring.
+
     Args:
         level: Log level (default: from WEAVE_LOG_LEVEL env var or INFO).
         log_format: "json" or "text" (default: from WEAVE_LOG_FORMAT env var or text).
@@ -99,7 +107,11 @@ def setup_logging(
     lvl = level or os.getenv("WEAVE_LOG_LEVEL", "INFO")
 
     root = logging.getLogger()
-    root.setLevel(getattr(logging, lvl.upper(), logging.INFO))
+    resolved_level = getattr(logging, lvl.upper(), None)
+    if resolved_level is None:
+        logging.warning("Invalid log level %r, falling back to INFO", lvl)
+        resolved_level = logging.INFO
+    root.setLevel(resolved_level)
 
     # Remove existing handlers to avoid duplicates
     root.handlers.clear()
