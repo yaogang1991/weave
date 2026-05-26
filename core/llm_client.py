@@ -34,6 +34,7 @@ from core.config import LLMConfig
 from core.progress import ProgressReport
 from core.exceptions import RateLimitError
 from monitoring.otel import start_llm_turn_span, set_llm_usage_attributes  # noqa: E402 — optional OTel (#509)
+from monitoring.otel_metrics import record_token_usage, LLMDurationTracker  # noqa: E402 — optional metrics (#938)
 
 logger = logging.getLogger(__name__)
 
@@ -374,10 +375,12 @@ class LLMClient:
         self, messages: list[dict], tools: list[dict] | None = None,
         tool_choice: dict | None = None,
     ) -> dict:
-        """Dispatch to provider-specific call with OTel span (#936)."""
+        """Dispatch to provider-specific call with OTel span and metrics (#936, #938)."""
         with start_llm_turn_span(
             node_id="", model=self.config.model, provider=self.config.provider,
-        ) as span:
+        ) as span, LLMDurationTracker(
+            model=self.config.model, provider=self.config.provider,
+        ) as _tracker:
             try:
                 if self.config.provider == "anthropic":
                     result = self._call_anthropic(messages, tools or [], tool_choice)
@@ -391,6 +394,13 @@ class LLMClient:
                         span,
                         input_tokens=usage.get("input_tokens"),
                         output_tokens=usage.get("output_tokens"),
+                    )
+                    # #938: Record token usage metrics
+                    record_token_usage(
+                        model=self.config.model,
+                        provider=self.config.provider,
+                        input_tokens=usage.get("input_tokens", 0),
+                        output_tokens=usage.get("output_tokens", 0),
                     )
                 return result
             except Exception as e:
