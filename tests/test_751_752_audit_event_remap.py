@@ -47,13 +47,13 @@ def test_751_inner_fallback_emits_remapped_action():
         mock_replan = AsyncMock(return_value=(dag, [["n1"]], 0, 1, False))
 
         engine = DAGExecutionEngine(
-        agent_executor=mock_executor,
-        failure_handler=mock_failure_handler,
-        replan_handler=mock_replan,
-        config=DAGEngineConfig(
-            max_replans=3,
-        ),
-    )
+            agent_executor=mock_executor,
+            failure_handler=mock_failure_handler,
+            replan_handler=mock_replan,
+            config=DAGEngineConfig(
+                max_replans=3,
+            )
+        )
 
         # Capture emitted events
         async def capture_emit(event):

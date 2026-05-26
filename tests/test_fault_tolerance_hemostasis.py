@@ -106,12 +106,12 @@ class TestRateLimitRetryBudget:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(
-    agent_executor=mock_executor,
-    failure_handler=mock_failure_handler,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=mock_executor,
+            failure_handler=mock_failure_handler,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
         await engine.execute(dag)
 
         assert dag.nodes["test_node"].status == NodeStatus.FAILED
@@ -138,12 +138,12 @@ class TestRateLimitRetryBudget:
             return FailureDecision(action="abort", reasoning="test")
 
         engine = DAGExecutionEngine(
-    agent_executor=mock_executor,
-    failure_handler=mock_failure_handler,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=mock_executor,
+            failure_handler=mock_failure_handler,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
         await engine.execute(dag)
 
         # Read from dag.nodes (not stale local `node`) after immutable updates (#486)
@@ -240,12 +240,12 @@ class TestNodeTimeoutInDagEngine:
             return FailureDecision(action="abort", reasoning="timeout")
 
         engine = DAGExecutionEngine(
-    agent_executor=slow_executor,
-    failure_handler=mock_failure_handler,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=slow_executor,
+            failure_handler=mock_failure_handler,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
         # Override timeout to 1s for fast test
         engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 1
         await engine.execute(dag)
@@ -398,12 +398,12 @@ class TestProgressCallback:
         dag = _make_dag({"test_node": node})
 
         engine = DAGExecutionEngine(
-    agent_executor=mock_executor,
-    failure_handler=None,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=mock_executor,
+            failure_handler=None,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
         engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
 
@@ -429,12 +429,12 @@ class TestProgressCallback:
         dag = _make_dag({"test_node": node})
 
         engine = DAGExecutionEngine(
-    agent_executor=mock_executor,
-    failure_handler=None,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=mock_executor,
+            failure_handler=None,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
         engine._node_executor._get_node_timeout = lambda agent_type, artifact_count=0: 300
         await engine.execute(dag)
 
@@ -446,14 +446,14 @@ class TestProgressCallback:
         """_heartbeat_loop should not exist as a method (#360 PR3)."""
         from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
         engine = DAGExecutionEngine(
-    agent_executor=lambda n,
-    a,
-    **kw: asyncio.coroutine(lambda: {"status": "ok"})(),
-    failure_handler=None,
-    config=DAGEngineConfig(
-        enable_watchdog=False,
-    ),
-)
+            agent_executor=lambda n,
+            a,
+            **kw: asyncio.coroutine(lambda: {"status": "ok"})(),
+            failure_handler=None,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
         assert not hasattr(engine, '_heartbeat_loop'), \
             "_heartbeat_loop should have been removed in PR3"
 

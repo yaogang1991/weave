@@ -36,7 +36,7 @@ def _make_engine(tmp_path, session_id="test-session"):
         session_id=session_id,
         config=DAGEngineConfig(
             checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
+        )
     )
 
 
@@ -178,13 +178,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine2 = DAGExecutionEngine(
-        tracking_executor,
-        _noop_failure_handler,
-        session_id="test-session",
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            tracking_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine2.execute(dag)
@@ -214,13 +214,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine2 = DAGExecutionEngine(
-        tracking_executor,
-        _noop_failure_handler,
-        session_id="test-session",
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            tracking_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine2.execute(dag)
@@ -245,13 +245,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine2 = DAGExecutionEngine(
-        tracking_executor,
-        _noop_failure_handler,
-        session_id="test-session",
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            tracking_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine2.execute(dag)
@@ -269,13 +269,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine = DAGExecutionEngine(
-        tracking_executor,
-        _noop_failure_handler,
-        session_id=None,
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            tracking_executor,
+            _noop_failure_handler,
+            session_id=None,
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine.execute(dag)
@@ -302,13 +302,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine2 = DAGExecutionEngine(
-        fail_executor,
-        _noop_failure_handler,
-        session_id="test-session",
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            fail_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine2.execute(dag)
@@ -332,13 +332,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine2 = DAGExecutionEngine(
-        tracking_executor,
-        _noop_failure_handler,
-        session_id="test-session",
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            tracking_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine2.execute(dag)
@@ -362,13 +362,13 @@ class TestCrashRecovery:
             return {"status": "completed", "summary": "done", "artifacts": []}
 
         engine2 = DAGExecutionEngine(
-        tracking_executor,
-        _noop_failure_handler,
-        session_id="test-session",
-        config=DAGEngineConfig(
-            checkpoint_dir=str(tmp_path / "dag_progress"),
-        ),
-    )
+            tracking_executor,
+            _noop_failure_handler,
+            session_id="test-session",
+            config=DAGEngineConfig(
+                checkpoint_dir=str(tmp_path / "dag_progress"),
+            )
+        )
 
         dag = _make_three_node_dag()
         await engine2.execute(dag)

@@ -35,15 +35,15 @@ class TestReplanFailureContinues:
             raise RuntimeError("replan crashed")
 
         engine = DAGExecutionEngine(
-        agent_executor=AsyncMock(side_effect=Exception("exec fail")),
-        failure_handler=AsyncMock(return_value=type(
+            agent_executor=AsyncMock(side_effect=Exception("exec fail")),
+            failure_handler=AsyncMock(return_value=type(
                 "D", (), {"action": "replan", "reasoning": "test"}
             )()),
-        replan_handler=failing_replan,
-        config=DAGEngineConfig(
-            enable_watchdog=False,
-        ),
-    )
+            replan_handler=failing_replan,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
             result = await engine.execute(dag)
@@ -62,15 +62,15 @@ class TestReplanFailureContinues:
             return None
 
         engine = DAGExecutionEngine(
-        agent_executor=AsyncMock(side_effect=Exception("exec fail")),
-        failure_handler=AsyncMock(return_value=type(
+            agent_executor=AsyncMock(side_effect=Exception("exec fail")),
+            failure_handler=AsyncMock(return_value=type(
                 "D", (), {"action": "replan", "reasoning": "test"}
             )()),
-        replan_handler=none_replan,
-        config=DAGEngineConfig(
-            enable_watchdog=False,
-        ),
-    )
+            replan_handler=none_replan,
+            config=DAGEngineConfig(
+                enable_watchdog=False,
+            )
+        )
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
             result = await engine.execute(dag)

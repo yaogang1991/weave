@@ -70,9 +70,9 @@ class TestReplanErrorHandling:
         engine = DAGExecutionEngine(
             agent_executor=AsyncMock(),
             failure_handler=AsyncMock(),
+            replan_handler=good_replan,
             config=DAGEngineConfig(max_parallel=1),
         )
-        engine.replan_handler = good_replan
 
         with patch.object(engine, '_emit', new_callable=AsyncMock):
             result_dag, result_levels, result_idx, result_count, initiated = (

@@ -144,7 +144,6 @@ class DAGExecutionEngine:
         run_id: str = "",
     ):
         cfg = config or DAGEngineConfig()
-        self._cfg = cfg
         # Note: agent_executor is stored in NodeExecutor (created below).
         # The .agent_executor property proxies to it.
         self.failure_handler = failure_handler
