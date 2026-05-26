@@ -39,6 +39,7 @@ from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor
 from core.budget_manager import BudgetManager
+from core.project_config import ProjectConfig
 from core.provider_health import FailureCategory, ProviderHealthTracker
 from core.dag_checkpoint import CheckpointManager
 from monitoring.otel import (
@@ -96,6 +97,7 @@ class DAGEngineConfig:
         enable_watchdog: bool = True,
         watchdog_overrides: dict[str, tuple[float, int]] | None = None,
         alert_thresholds: dict[str, int] | None = None,
+        default_agent_backend: str = "claude_code",
     ) -> None:
         self.max_parallel = max_parallel
         self.max_replans = max_replans
@@ -111,6 +113,7 @@ class DAGEngineConfig:
         self.enable_watchdog = enable_watchdog
         self.watchdog_overrides = watchdog_overrides or {}
         self.alert_thresholds = alert_thresholds or {}
+        self.default_agent_backend = default_agent_backend
 
 
 class DAGExecutionEngine:
@@ -137,6 +140,7 @@ class DAGExecutionEngine:
         backend_registry: Any | None = None,
         budget_manager: BudgetManager | None = None,
         provider_health: ProviderHealthTracker | None = None,
+        project_config: ProjectConfig | None = None,
         # Identifiers and workspace
         work_dir: str | None = None,
         session_id: str | None = None,
@@ -210,6 +214,9 @@ class DAGExecutionEngine:
             backend_registry=backend_registry,
             session_id=session_id or "",
             budget_manager=budget_manager,
+            memory_manager=memory_manager,
+            project_config=project_config,
+            default_agent_backend=cfg.default_agent_backend,
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
