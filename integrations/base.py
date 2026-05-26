@@ -44,6 +44,16 @@ class CodeHost(abc.ABC):
         ...
 
     @abc.abstractmethod
+    async def find_existing_pr(self, repo: str, branch: str) -> str:
+        """Return PR URL if one exists for branch, else empty string."""
+        ...
+
+    @abc.abstractmethod
+    async def update_pr(self, repo: str, pr_url: str, body: str) -> bool:
+        """Update body of existing PR by URL. Return True on success."""
+        ...
+
+    @abc.abstractmethod
     async def comment_on_issue(self, repo: str, issue_number: int, body: str) -> None:
         ...
 
