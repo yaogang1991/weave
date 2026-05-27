@@ -83,6 +83,25 @@ class RateLimitError(Exception):
         )
 
 
+class GuardrailBlockedException(Exception):
+    """Raised when a node-level guardrail blocks execution (M6.2).
+
+    Propagation chain:
+        NodeExecutor._execute_with_timeout() — pre_check blocks
+          -> raises GuardrailBlockedException(phase="pre")
+        NodeExecutor.execute_node() — post_check blocks
+          -> raises GuardrailBlockedException(phase="post")
+        -> execute_node() outer catch — marks node FAILED, no retry
+    """
+
+    def __init__(self, reason: str, phase: str = "pre") -> None:
+        self.reason = reason
+        self.phase = phase
+        super().__init__(
+            f"Guardrail blocked ({phase}): {reason}"
+        )
+
+
 class BudgetExhaustedError(Exception):
     """Raised when cumulative token usage exceeds the configured budget (M4.2).
 

@@ -21,7 +21,9 @@ from core.backend_models import BackendContext, BackendResult, BackendStatus
 from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
 from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
+from agent.backends.stderr_tail import StderrTail
 from agent.backends.stream_parser import StreamParser
+from core.activity_detector import is_meaningful_event
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +313,7 @@ class ClaudeCodeBackend(AgentBackend):
             )
 
         parser = StreamParser()
+        stderr_tail = StderrTail()
         usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
         # Mutable containers for streaming output.
         state: dict[str, str] = {"session_id": "", "result": "", "error": ""}
@@ -320,7 +323,8 @@ class ClaudeCodeBackend(AgentBackend):
                 self._stream_cli_output(
                     process, parser, usage, state,
                     context.cancel_event, context.progress_callback,
-                    context.event_callback,
+                    context.event_callback, context.activity_detector,
+                    stderr_tail,
                 ),
                 timeout=self._get_cli_timeout(),
             )
@@ -333,10 +337,13 @@ class ClaudeCodeBackend(AgentBackend):
                 timeout=self._get_cli_timeout(),
             )
 
-        stderr = ""
         if process.stderr is not None:
             stderr_bytes = await process.stderr.read()
-            stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+            for line in stderr_text.splitlines():
+                stderr_tail.write(line + "\n")
+
+        stderr = stderr_tail.tail().strip()
 
         if process.returncode == 127:
             return BackendResult(
@@ -346,9 +353,10 @@ class ClaudeCodeBackend(AgentBackend):
 
         if process.returncode is not None and process.returncode != 0:
             self._raise_if_classifiable(stderr, context)
+            error_detail = stderr or f"claude CLI exited with code {process.returncode}"
             return BackendResult(
                 status=BackendStatus.FAILED,
-                error=stderr or f"claude CLI exited with code {process.returncode}",
+                error=error_detail,
                 messages=[m.model_dump() for m in parser.messages],
             )
 
@@ -366,112 +374,139 @@ class ClaudeCodeBackend(AgentBackend):
         cancel_event: Any | None,
         progress_callback: Any | None,
         event_callback: Any | None,
+        activity_detector: Any | None = None,
+        stderr_tail: StderrTail | None = None,
     ) -> None:
         """Stream NDJSON output from Claude CLI process."""
         if process.stdout is None:
             return
 
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                process.terminate()
-                try:
-                    await asyncio.wait_for(process.wait(), timeout=5)
-                except asyncio.TimeoutError:
-                    process.kill()
-                return
+        # Spawn stderr reader task to capture stderr in real-time.
+        stderr_task: asyncio.Task | None = None
+        if process.stderr is not None and stderr_tail is not None:
+            async def _read_stderr() -> None:
+                while True:
+                    line_bytes = await process.stderr.readline()
+                    if not line_bytes:
+                        break
+                    stderr_tail.write(
+                        line_bytes.decode("utf-8", errors="replace"),
+                    )
+            stderr_task = asyncio.create_task(_read_stderr())
 
-            line_bytes = await process.stdout.readline()
-            if not line_bytes:
-                break
+        try:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    process.terminate()
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=5)
+                    except asyncio.TimeoutError:
+                        process.kill()
+                    return
 
-            line = line_bytes.decode("utf-8", errors="replace").strip()
-            msg = parser.feed_line(line)
-            if msg is None:
-                continue
+                line_bytes = await process.stdout.readline()
+                if not line_bytes:
+                    break
 
-            # Notify event_callback for every valid message.
-            if event_callback is not None:
-                try:
-                    event_callback(msg.raw_type, msg.data)
-                except Exception:
-                    logger.debug("event_callback raised, ignoring", exc_info=True)
+                line = line_bytes.decode("utf-8", errors="replace").strip()
+                msg = parser.feed_line(line)
+                if msg is None:
+                    continue
 
-            # Notify progress_callback for every valid message.
-            if progress_callback is not None:
-                try:
-                    progress_callback()
-                except Exception:
-                    logger.debug("progress_callback raised, ignoring", exc_info=True)
+                # M6.6: Record meaningful stream events for semantic timeout.
+                if activity_detector is not None and is_meaningful_event(msg.raw_type):
+                    activity_detector.record_activity(msg.raw_type)
 
-            if msg.raw_type == "assistant":
-                # Accumulate usage from intermediate assistant events.
-                msg_usage = msg.data.get("message", {}).get("usage", {}) or {}
-                usage["input_tokens"] += msg_usage.get("input_tokens") or 0
-                usage["output_tokens"] += msg_usage.get("output_tokens") or 0
-                # Extract tool_use content blocks and emit as separate events.
+                # Notify event_callback for every valid message.
                 if event_callback is not None:
-                    content_blocks = (
-                        msg.data.get("message", {}).get("content", [])
-                    )
-                    if isinstance(content_blocks, list):
-                        for block in content_blocks:
-                            if (
-                                isinstance(block, dict)
-                                and block.get("type") == "tool_use"
-                            ):
-                                try:
-                                    event_callback("tool_use", block)
-                                except Exception:
-                                    logger.debug(
-                                        "tool_use event_callback raised",
-                                        exc_info=True,
-                                    )
-                # Capture session_id from assistant events.
-                sid = msg.data.get("message", {}).get("session_id", "")
-                if sid:
-                    state["session_id"] = sid
+                    try:
+                        event_callback(msg.raw_type, msg.data)
+                    except Exception:
+                        logger.debug("event_callback raised, ignoring", exc_info=True)
 
-            elif msg.raw_type == "result":
-                # Result event provides final output + usage (overrides).
-                result_text = msg.data.get("result", "")
-                if result_text:
-                    state["result"] = result_text
-                result_usage = msg.data.get("usage", {}) or {}
-                if result_usage:
-                    usage["input_tokens"] = (
-                        result_usage.get("input_tokens") or 0
-                    )
-                    usage["output_tokens"] = (
-                        result_usage.get("output_tokens") or 0
-                    )
-                sid = msg.data.get("session_id", "")
-                if sid:
-                    state["session_id"] = sid
-                if msg.data.get("is_error"):
-                    state["error"] = result_text
+                # Notify progress_callback for every valid message.
+                if progress_callback is not None:
+                    try:
+                        progress_callback()
+                    except Exception:
+                        logger.debug("progress_callback raised, ignoring", exc_info=True)
 
-            elif msg.raw_type == "user":
-                # Extract tool_result content blocks and emit as events.
-                if event_callback is not None:
-                    content_blocks = (
-                        msg.data.get("message", {}).get("content", [])
-                    )
-                    if isinstance(content_blocks, list):
-                        for block in content_blocks:
-                            if (
-                                isinstance(block, dict)
-                                and block.get("type") == "tool_result"
-                            ):
-                                try:
-                                    event_callback("tool_result", block)
-                                except Exception:
-                                    logger.debug(
-                                        "tool_result event_callback raised",
-                                        exc_info=True,
-                                    )
-                sid = msg.data.get("session_id", "")
-                if sid:
-                    state["session_id"] = sid
+                if msg.raw_type == "assistant":
+                    # Accumulate usage from intermediate assistant events.
+                    msg_usage = msg.data.get("message", {}).get("usage", {}) or {}
+                    usage["input_tokens"] += msg_usage.get("input_tokens") or 0
+                    usage["output_tokens"] += msg_usage.get("output_tokens") or 0
+                    # Extract tool_use content blocks and emit as separate events.
+                    if event_callback is not None:
+                        content_blocks = (
+                            msg.data.get("message", {}).get("content", [])
+                        )
+                        if isinstance(content_blocks, list):
+                            for block in content_blocks:
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "tool_use"
+                                ):
+                                    try:
+                                        event_callback("tool_use", block)
+                                    except Exception:
+                                        logger.debug(
+                                            "tool_use event_callback raised",
+                                            exc_info=True,
+                                        )
+                    # Capture session_id from assistant events.
+                    sid = msg.data.get("message", {}).get("session_id", "")
+                    if sid:
+                        state["session_id"] = sid
+
+                elif msg.raw_type == "result":
+                    # Result event provides final output + usage (overrides).
+                    result_text = msg.data.get("result", "")
+                    if result_text:
+                        state["result"] = result_text
+                    result_usage = msg.data.get("usage", {}) or {}
+                    if result_usage:
+                        usage["input_tokens"] = (
+                            result_usage.get("input_tokens") or 0
+                        )
+                        usage["output_tokens"] = (
+                            result_usage.get("output_tokens") or 0
+                        )
+                    sid = msg.data.get("session_id", "")
+                    if sid:
+                        state["session_id"] = sid
+                    if msg.data.get("is_error"):
+                        state["error"] = result_text
+
+                elif msg.raw_type == "user":
+                    # Extract tool_result content blocks and emit as events.
+                    if event_callback is not None:
+                        content_blocks = (
+                            msg.data.get("message", {}).get("content", [])
+                        )
+                        if isinstance(content_blocks, list):
+                            for block in content_blocks:
+                                if (
+                                    isinstance(block, dict)
+                                    and block.get("type") == "tool_result"
+                                ):
+                                    try:
+                                        event_callback("tool_result", block)
+                                    except Exception:
+                                        logger.debug(
+                                            "tool_result event_callback raised",
+                                            exc_info=True,
+                                        )
+                    sid = msg.data.get("session_id", "")
+                    if sid:
+                        state["session_id"] = sid
+        finally:
+            if stderr_task is not None:
+                stderr_task.cancel()
+                try:
+                    await stderr_task
+                except (asyncio.CancelledError, Exception):
+                    pass
 
     def _build_stream_result(
         self,

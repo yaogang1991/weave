@@ -59,6 +59,12 @@ class GuardrailsConfig(BaseModel):
 
     denied_commands: list[str] = Field(default_factory=list)
     approval_policy: str = "accept_edits"  # plan/default/accept_edits/auto/dont_ask
+    protected_paths: list[str] = Field(
+        default_factory=lambda: [
+            ".env", ".env.*", "credentials*", "id_rsa", "id_ed25519",
+            ".ssh/*", ".gnupg/*", ".git/config",
+        ],
+    )
 
 
 class ProjectContext(BaseModel):

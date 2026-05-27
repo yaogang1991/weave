@@ -36,6 +36,7 @@ from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError
 from core.exceptions import NodeTimeoutError
 from core.exceptions import BudgetExhaustedError
+from core.exceptions import GuardrailBlockedException
 from core.backend_models import BackendContext
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
@@ -43,6 +44,7 @@ from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
 from core.budget_manager import BudgetManager
 from core.evaluation_pipeline import EvaluationPipeline, EvalOutcome
+from core.activity_detector import ActivityDetector
 
 EventHandler = Callable[[ExecutionEvent], Coroutine[Any, Any, None]]
 
@@ -93,6 +95,7 @@ class NodeExecutor:
         project_config: Any | None = None,
         default_agent_backend: str = "claude_code",
         session_store: Any | None = None,
+        node_guardrails: Any | None = None,
     ) -> None:
         self.agent_executor = agent_executor
         self._emit = emit_func
@@ -115,6 +118,7 @@ class NodeExecutor:
         self._project_config = project_config
         self._default_agent_backend = default_agent_backend
         self._session_store = session_store
+        self._node_guardrails = node_guardrails
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._eval_pipeline = EvaluationPipeline(
@@ -166,6 +170,21 @@ class NodeExecutor:
                         prep.input_artifacts,
                         workspace_path=prep.workspace_path,
                     )
+                    # M6.2: Post-check guardrail for external backends
+                    if (
+                        result
+                        and self._node_guardrails
+                        and result.get("artifacts")
+                        and dag.nodes[node_id].backend not in ("builtin", "")
+                    ):
+                        post_result = self._node_guardrails.post_check(
+                            result.get("artifacts", []),
+                            workspace_path=prep.workspace_path,
+                        )
+                        if post_result.is_blocked:
+                            raise GuardrailBlockedException(
+                                post_result.reason, phase="post",
+                            )
                     # M5.1: Trace LLM turn and tool calls (isolated from
                     # execution retry logic — trace failures must not trigger
                     # node retry).
@@ -210,6 +229,7 @@ class NodeExecutor:
                     RateLimitError,
                     NodeTimeoutError,
                     BudgetExhaustedError,
+                    GuardrailBlockedException,
                 ):
                     # _HardTimeoutError (TimeoutError subclass) is NOT caught
                     # here — it propagates as a hard node failure.
@@ -313,6 +333,26 @@ class NodeExecutor:
                 },
             ))
             raise
+
+        except GuardrailBlockedException as e:
+            dag.update_node(
+                node_id,
+                status=NodeStatus.FAILED,
+                error=str(e),
+                completed_at=datetime.now(timezone.utc),
+                auto_eval_result=None,
+            )
+            await self._emit(ExecutionEvent(
+                node_id=node_id,
+                event_type="guardrail_blocked",
+                details={
+                    "error": str(e),
+                    "reason": e.reason,
+                    "phase": e.phase,
+                    "retry_budget_preserved": True,
+                    "retry_count": dag.nodes[node_id].retry_count,
+                },
+            ))
 
         finally:
             node = dag.nodes[node_id]
@@ -594,11 +634,16 @@ class NodeExecutor:
         tracker = ProgressTracker(stall_timeout=stall_timeout)
         cancel_event = threading.Event()
 
+        activity_detector = ActivityDetector(
+            timeout_seconds=self._get_activity_timeout(node.agent_type),
+        )
+
         loop = asyncio.get_running_loop()
 
         def _on_progress() -> None:
             try:
                 loop.call_soon_threadsafe(node.record_heartbeat)
+                activity_detector.record_activity()
             except RuntimeError:
                 pass
 
@@ -607,6 +652,16 @@ class NodeExecutor:
             # BuiltinBackend has its own memory injection via agent_pool/worker;
             # only inject into BackendContext for external backends.
             backend_name = node.backend or self._default_agent_backend
+
+            # M6.2: Pre-check guardrail for external backends
+            if self._node_guardrails and backend_name not in ("builtin", ""):
+                pre_result = self._node_guardrails.pre_check(
+                    node, workspace_path,
+                )
+                if pre_result.is_blocked:
+                    raise GuardrailBlockedException(
+                        pre_result.reason, phase="pre",
+                    )
             use_external = backend_name != "builtin"
 
             memory_prompt = ""
@@ -661,6 +716,7 @@ class NodeExecutor:
                 cancel_event=cancel_event,
                 progress_callback=_on_progress,
                 progress_tracker=tracker,
+                activity_detector=activity_detector,
                 memory_prompt=memory_prompt,
                 project_context=project_context,
                 event_callback=event_callback,
@@ -724,6 +780,28 @@ class NodeExecutor:
                         agent_type=node.agent_type,
                         timeout=stall_timeout,
                     )
+                # M6.6: Semantic inactivity timeout — kill if no meaningful
+                # stream events arrived for activity_timeout seconds.
+                semantic_timeout, semantic_reason = activity_detector.check_timeout()
+                if semantic_timeout:
+                    cancel_event.set()
+                    if not task.done():
+                        task.cancel()
+                    logger.warning(
+                        "Node %s (%s) killed: semantic inactivity "
+                        "(%s, elapsed %.0fs)",
+                        node.id, node.agent_type, semantic_reason,
+                        tracker.elapsed,
+                    )
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    raise NodeTimeoutError(
+                        node_id=node.id,
+                        agent_type=node.agent_type,
+                        timeout=int(activity_detector.timeout_seconds),
+                    )
                 if tracker.has_recent_progress():
                     node.record_heartbeat()
                 try:
@@ -786,6 +864,18 @@ class NodeExecutor:
                 feature_count=feature_count,
             )
         return self._get_node_timeout(agent_type)
+
+    def _get_activity_timeout(self, agent_type: str) -> float:
+        """Get semantic inactivity timeout in seconds (M6.6).
+
+        Defaults to 600s (10 min).  Override via
+        ``NodeTimeoutConfig.activity_timeout`` if configured.
+        """
+        if self._node_timeout_config is not None:
+            return getattr(
+                self._node_timeout_config, "activity_timeout", 600.0,
+            )
+        return 600.0
 
     def _collect_input_artifacts(
         self,
