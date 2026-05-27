@@ -146,6 +146,7 @@ class DAGExecutionEngine:
         session_id: str | None = None,
         job_id: str = "",
         run_id: str = "",
+        session_store: Any | None = None,
     ):
         cfg = config or DAGEngineConfig()
         # Note: agent_executor is stored in NodeExecutor (created below).
@@ -217,6 +218,7 @@ class DAGExecutionEngine:
             memory_manager=memory_manager,
             project_config=project_config,
             default_agent_backend=cfg.default_agent_backend,
+            session_store=session_store,
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager

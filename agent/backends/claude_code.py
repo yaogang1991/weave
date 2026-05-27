@@ -13,7 +13,6 @@ BuiltinBackend always remains available as the safe fallback.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import shutil
 from typing import Any
@@ -22,6 +21,7 @@ from core.backend_models import BackendContext, BackendResult, BackendStatus
 from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
 from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
+from agent.backends.stream_parser import StreamParser
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +246,10 @@ class ClaudeCodeBackend(AgentBackend):
         artifacts = self._discover_artifacts(context)
         tool_calls = self._extract_tool_calls(data)
 
+        messages: list[dict[str, Any]] = []
+        if result_text:
+            messages.append({"raw_type": "result", "data": {"result": result_text}})
+
         if is_error:
             errors = data.get("errors", [])
             error_msg = (
@@ -259,6 +263,7 @@ class ClaudeCodeBackend(AgentBackend):
                 error=error_msg,
                 artifacts=artifacts,
                 metadata={"token_usage": token_usage},
+                messages=messages,
             )
 
         return BackendResult(
@@ -273,6 +278,7 @@ class ClaudeCodeBackend(AgentBackend):
                 "backend": self.BACKEND_NAME,
                 "tool_calls": tool_calls,
             },
+            messages=messages,
         )
 
     # -- CLI fallback path ---------------------------------------------------
@@ -286,44 +292,184 @@ class ClaudeCodeBackend(AgentBackend):
     async def _execute_via_cli(
         self, context: BackendContext, prompt: str,
     ) -> BackendResult:
-        """Execute via claude CLI subprocess."""
+        """Execute via claude CLI subprocess with stream-json output."""
         cmd = self._build_cli_command(context, prompt)
         cwd = context.workspace_path or "."
 
-        loop = asyncio.get_running_loop()
-        proc = await loop.run_in_executor(
-            None,
-            lambda: run_with_progress(
-                cmd,
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
                 cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=self._get_cli_timeout(),
-            ),
-        )
+            )
+        except FileNotFoundError:
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=f"Claude CLI not found at: {self._config.cli_path}",
+            )
 
-        if proc.timed_out:
+        parser = StreamParser()
+        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        # Mutable containers for streaming output.
+        state: dict[str, str] = {"session_id": "", "result": "", "error": ""}
+
+        try:
+            await asyncio.wait_for(
+                self._stream_cli_output(
+                    process, parser, usage, state,
+                    context.cancel_event, context.progress_callback,
+                    context.event_callback,
+                ),
+                timeout=self._get_cli_timeout(),
+            )
+        except asyncio.TimeoutError:
+            if process.returncode is None:
+                process.kill()
             raise NodeTimeoutError(
                 node_id=context.node.id,
                 agent_type=context.node.agent_type,
                 timeout=self._get_cli_timeout(),
             )
 
-        if proc.returncode == 127:
+        stderr = ""
+        if process.stderr is not None:
+            stderr_bytes = await process.stderr.read()
+            stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+
+        if process.returncode == 127:
             return BackendResult(
                 status=BackendStatus.FAILED,
                 error=f"Claude CLI not found at: {self._config.cli_path}",
             )
 
-        if proc.returncode != 0:
-            stderr = proc.stderr.strip()
+        if process.returncode is not None and process.returncode != 0:
             self._raise_if_classifiable(stderr, context)
             return BackendResult(
                 status=BackendStatus.FAILED,
-                error=stderr or f"claude CLI exited with code {proc.returncode}",
+                error=stderr or f"claude CLI exited with code {process.returncode}",
+                messages=[m.model_dump() for m in parser.messages],
             )
 
-        return self._parse_cli_output(proc.stdout, context)
+        artifacts = self._discover_artifacts(context)
+        return self._build_stream_result(
+            parser, usage, state, artifacts,
+        )
+
+    async def _stream_cli_output(
+        self,
+        process: asyncio.subprocess.Process,
+        parser: StreamParser,
+        usage: dict[str, int],
+        state: dict[str, str],
+        cancel_event: Any | None,
+        progress_callback: Any | None,
+        event_callback: Any | None,
+    ) -> None:
+        """Stream NDJSON output from Claude CLI process."""
+        if process.stdout is None:
+            return
+
+        while True:
+            if cancel_event is not None and cancel_event.is_set():
+                process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    process.kill()
+                return
+
+            line_bytes = await process.stdout.readline()
+            if not line_bytes:
+                break
+
+            line = line_bytes.decode("utf-8", errors="replace").strip()
+            msg = parser.feed_line(line)
+            if msg is None:
+                continue
+
+            # Notify event_callback for every valid message.
+            if event_callback is not None:
+                try:
+                    event_callback(msg.raw_type, msg.data)
+                except Exception:
+                    logger.debug("event_callback raised, ignoring", exc_info=True)
+
+            # Notify progress_callback for every valid message.
+            if progress_callback is not None:
+                try:
+                    progress_callback()
+                except Exception:
+                    logger.debug("progress_callback raised, ignoring", exc_info=True)
+
+            if msg.raw_type == "assistant":
+                # Accumulate usage from intermediate assistant events.
+                msg_usage = msg.data.get("message", {}).get("usage", {})
+                usage["input_tokens"] += msg_usage.get("input_tokens", 0)
+                usage["output_tokens"] += msg_usage.get("output_tokens", 0)
+                # Capture session_id from assistant events.
+                sid = msg.data.get("message", {}).get("session_id", "")
+                if sid:
+                    state["session_id"] = sid
+
+            elif msg.raw_type == "result":
+                # Result event provides final output + usage (overrides).
+                result_text = msg.data.get("result", "")
+                if result_text:
+                    state["result"] = result_text
+                result_usage = msg.data.get("usage", {})
+                if result_usage:
+                    usage["input_tokens"] = result_usage.get(
+                        "input_tokens", usage["input_tokens"],
+                    )
+                    usage["output_tokens"] = result_usage.get(
+                        "output_tokens", usage["output_tokens"],
+                    )
+                sid = msg.data.get("session_id", "")
+                if sid:
+                    state["session_id"] = sid
+                if msg.data.get("is_error"):
+                    state["error"] = result_text
+
+            elif msg.raw_type == "system":
+                sid = msg.data.get("session_id", "")
+                if sid:
+                    state["session_id"] = sid
+
+    def _build_stream_result(
+        self,
+        parser: StreamParser,
+        usage: dict[str, int],
+        state: dict[str, str],
+        artifacts: list[str],
+    ) -> BackendResult:
+        """Build BackendResult from accumulated stream state."""
+        result_text = state.get("result", "")
+        session_id = state.get("session_id", "")
+        error_text = state.get("error", "")
+
+        if error_text:
+            return BackendResult(
+                status=BackendStatus.FAILED,
+                error=error_text,
+                artifacts=artifacts,
+                metadata={"token_usage": usage, "session_id": session_id},
+                messages=[m.model_dump() for m in parser.messages],
+            )
+
+        return BackendResult(
+            status=BackendStatus.COMPLETED,
+            summary=result_text[:SUMMARY_LIMIT],
+            artifacts=artifacts,
+            output=result_text,
+            metadata={
+                "token_usage": usage,
+                "session_id": session_id,
+                "backend": self.BACKEND_NAME,
+            },
+            messages=[m.model_dump() for m in parser.messages],
+        )
 
     def _build_cli_command(
         self, context: BackendContext, prompt: str,
@@ -331,7 +477,7 @@ class ClaudeCodeBackend(AgentBackend):
         cmd = [
             self._config.cli_path,
             "-p",
-            "--output-format", "json",
+            "--output-format", "stream-json",
             "--permission-mode", self._config.permission_mode,
         ]
 
@@ -350,58 +496,6 @@ class ClaudeCodeBackend(AgentBackend):
 
         cmd.append(prompt)
         return cmd
-
-    def _parse_cli_output(
-        self, stdout: str, context: BackendContext,
-    ) -> BackendResult:
-        try:
-            data = json.loads(stdout.strip())
-        except json.JSONDecodeError as exc:
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=f"Failed to parse Claude CLI JSON output: {exc}",
-                output=stdout[:OUTPUT_PREVIEW_LIMIT],
-            )
-
-        is_error = data.get("is_error", False)
-        result_text = data.get("result", "")
-        usage = data.get("usage", {})
-        errors = data.get("errors", [])
-
-        token_usage = self._extract_token_usage(usage)
-        artifacts = self._discover_artifacts(context)
-        tool_calls = self._extract_tool_calls(data)
-
-        if is_error:
-            error_msg = (
-                "; ".join(str(e) for e in errors)
-                if errors
-                else "CLI execution failed"
-            )
-            subtype = data.get("subtype", "")
-            self._raise_if_classifiable(
-                error_msg, context, subtype=subtype,
-            )
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=error_msg,
-                artifacts=artifacts,
-                metadata={"token_usage": token_usage},
-            )
-
-        return BackendResult(
-            status=BackendStatus.COMPLETED,
-            summary=result_text[:SUMMARY_LIMIT],
-            artifacts=artifacts,
-            output=result_text,
-            metadata={
-                "token_usage": token_usage,
-                "session_id": data.get("session_id", ""),
-                "cost_usd": data.get("total_cost_usd", 0.0),
-                "backend": self.BACKEND_NAME,
-                "tool_calls": tool_calls,
-            },
-        )
 
     # -- Prompt construction -------------------------------------------------
 

@@ -237,6 +237,7 @@ class ExecutionFactory:
             backend_registry=backend_registry,
             budget_manager=self._budget_manager,
             project_config=ProjectConfig.load(work_dir),
+            session_store=store,
         )
 
         async def _session_event_handler(event):
