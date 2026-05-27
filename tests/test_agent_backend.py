@@ -85,7 +85,7 @@ class TestDAGNodeBackend:
             agent_type="generator",
             task_description="test",
         )
-        assert node.backend == "builtin"
+        assert node.backend is None
 
     def test_custom_backend(self):
         node = DAGNode(
@@ -96,6 +96,15 @@ class TestDAGNodeBackend:
         )
         assert node.backend == "external"
 
+    def test_explicit_builtin(self):
+        node = DAGNode(
+            id="n1",
+            agent_type="generator",
+            task_description="test",
+            backend="builtin",
+        )
+        assert node.backend == "builtin"
+
 
 class TestDAGNodeModelBackend:
     def test_default_backend(self):
@@ -104,7 +113,7 @@ class TestDAGNodeModelBackend:
             agent_type="generator",
             task_description="test",
         )
-        assert m.backend == "builtin"
+        assert m.backend is None
 
     def test_custom_backend(self):
         m = DAGNodeModel(

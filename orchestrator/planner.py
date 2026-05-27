@@ -359,7 +359,7 @@ class Planner:
                 task_description=task_desc,
                 success_criteria=node_def.get("success_criteria", []),
                 owned_files=node_def.get("owned_files", []),
-                backend=node_def.get("backend", "builtin"),
+                backend=node_def.get("backend"),
             )
             dag.add_node(node)
 

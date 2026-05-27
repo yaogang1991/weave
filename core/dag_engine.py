@@ -97,7 +97,7 @@ class DAGEngineConfig:
         enable_watchdog: bool = True,
         watchdog_overrides: dict[str, tuple[float, int]] | None = None,
         alert_thresholds: dict[str, int] | None = None,
-        default_agent_backend: str = "claude_code",
+        default_agent_backend: str = "",
     ) -> None:
         self.max_parallel = max_parallel
         self.max_replans = max_replans

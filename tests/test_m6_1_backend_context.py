@@ -110,8 +110,13 @@ class TestDefaultAgentBackend:
         cfg = WeaveConfig()
         assert cfg.default_agent_backend == "claude_code"
 
-    def test_engine_config_default(self):
+    def test_engine_config_no_hardcoded_default(self):
         cfg = DAGEngineConfig()
+        assert cfg.default_agent_backend == ""
+
+    def test_engine_config_gets_value_from_weave_config(self):
+        wc = WeaveConfig()
+        cfg = DAGEngineConfig(default_agent_backend=wc.default_agent_backend)
         assert cfg.default_agent_backend == "claude_code"
 
     @patch.dict(os.environ, {"WEAVE_DEFAULT_AGENT_BACKEND": "builtin"})
@@ -175,16 +180,15 @@ class TestNodeExecutorInjection:
         )
         assert executor._default_agent_backend == "codex"
 
-    def test_backend_selection_uses_default_when_builtin(self):
-        """When node.backend is "builtin" (the default), use default_agent_backend."""
+    def test_backend_selection_uses_default_when_none(self):
+        """When node.backend is None (the default), use default_agent_backend."""
         from core.node_executor import NodeExecutor
         from core.watchdog import WatchdogService
 
         node = DAGNode(
             id="n1", agent_type="generator", task_description="test",
         )
-        # DAGNode.backend defaults to "builtin"
-        assert node.backend == "builtin"
+        assert node.backend is None
 
         executor = NodeExecutor(
             agent_executor=AsyncMock(return_value={}),
@@ -192,12 +196,11 @@ class TestNodeExecutorInjection:
             watchdog=WatchdogService(),
             default_agent_backend="claude_code",
         )
-        # "builtin" is treated as "not explicitly set"
-        backend_name = node.backend if node.backend and node.backend != "builtin" else executor._default_agent_backend
+        backend_name = node.backend or executor._default_agent_backend
         assert backend_name == "claude_code"
 
-    def test_backend_selection_respects_explicit_non_builtin(self):
-        """When node.backend is explicitly set to non-builtin, use it."""
+    def test_backend_selection_respects_explicit_backend(self):
+        """When node.backend is explicitly set, use it."""
         from core.node_executor import NodeExecutor
         from core.watchdog import WatchdogService
 
@@ -211,8 +214,26 @@ class TestNodeExecutorInjection:
             watchdog=WatchdogService(),
             default_agent_backend="claude_code",
         )
-        backend_name = node.backend if node.backend and node.backend != "builtin" else executor._default_agent_backend
+        backend_name = node.backend or executor._default_agent_backend
         assert backend_name == "codex"
+
+    def test_backend_selection_explicit_builtin(self):
+        """When node.backend is explicitly "builtin", use builtin."""
+        from core.node_executor import NodeExecutor
+        from core.watchdog import WatchdogService
+
+        node = DAGNode(
+            id="n1", agent_type="generator", task_description="test",
+            backend="builtin",
+        )
+        executor = NodeExecutor(
+            agent_executor=AsyncMock(return_value={}),
+            emit_func=AsyncMock(),
+            watchdog=WatchdogService(),
+            default_agent_backend="claude_code",
+        )
+        backend_name = node.backend or executor._default_agent_backend
+        assert backend_name == "builtin"
 
 
 # ---------------------------------------------------------------------------
@@ -220,37 +241,36 @@ class TestNodeExecutorInjection:
 # ---------------------------------------------------------------------------
 
 class TestClaudeCodePromptExtension:
-    def test_prompt_includes_memory(self):
-        from agent.backends.claude_code import ClaudeCodeBackend
+    def _make_backend(self):
+        from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
+        config = ClaudeCodeRuntimeConfig()
+        return ClaudeCodeBackend(config=config)
 
+    def test_prompt_includes_memory(self):
         ctx = BackendContext(
             node=DAGNode(id="n1", agent_type="generator", task_description="test"),
             memory_prompt="Relevant Memory:\n- Use async/await",
         )
-        backend = ClaudeCodeBackend.__new__(ClaudeCodeBackend)
+        backend = self._make_backend()
         prompt = backend._build_prompt(ctx)
         assert "Relevant Memory" in prompt
         assert "Use async/await" in prompt
 
     def test_prompt_includes_project_context(self):
-        from agent.backends.claude_code import ClaudeCodeBackend
-
         ctx = BackendContext(
             node=DAGNode(id="n1", agent_type="generator", task_description="test"),
             project_context="Language: python\nFramework: fastapi",
         )
-        backend = ClaudeCodeBackend.__new__(ClaudeCodeBackend)
+        backend = self._make_backend()
         prompt = backend._build_prompt(ctx)
         assert "Project Context" in prompt
         assert "Language: python" in prompt
 
     def test_prompt_no_extra_sections_when_empty(self):
-        from agent.backends.claude_code import ClaudeCodeBackend
-
         ctx = BackendContext(
             node=DAGNode(id="n1", agent_type="generator", task_description="test"),
         )
-        backend = ClaudeCodeBackend.__new__(ClaudeCodeBackend)
+        backend = self._make_backend()
         prompt = backend._build_prompt(ctx)
         assert "Relevant Memory" not in prompt
         assert "Project Context" not in prompt
@@ -261,36 +281,34 @@ class TestClaudeCodePromptExtension:
 # ---------------------------------------------------------------------------
 
 class TestCodexPromptExtension:
-    def test_prompt_includes_memory(self):
+    def _make_backend(self):
         from agent.backends.codex import CodexBackend
+        return CodexBackend()
 
+    def test_prompt_includes_memory(self):
         ctx = BackendContext(
             node=DAGNode(id="n1", agent_type="generator", task_description="test"),
             memory_prompt="Relevant Memory:\n- Pattern X",
         )
-        backend = CodexBackend.__new__(CodexBackend)
+        backend = self._make_backend()
         prompt = backend._build_prompt(ctx)
         assert "Relevant Memory" in prompt
 
     def test_prompt_includes_project_context(self):
-        from agent.backends.codex import CodexBackend
-
         ctx = BackendContext(
             node=DAGNode(id="n1", agent_type="generator", task_description="test"),
             project_context="Language: rust",
         )
-        backend = CodexBackend.__new__(CodexBackend)
+        backend = self._make_backend()
         prompt = backend._build_prompt(ctx)
         assert "PROJECT CONTEXT" in prompt
         assert "Language: rust" in prompt
 
     def test_prompt_no_extra_sections_when_empty(self):
-        from agent.backends.codex import CodexBackend
-
         ctx = BackendContext(
             node=DAGNode(id="n1", agent_type="generator", task_description="test"),
         )
-        backend = CodexBackend.__new__(CodexBackend)
+        backend = self._make_backend()
         prompt = backend._build_prompt(ctx)
         assert "Relevant Memory" not in prompt
         assert "PROJECT CONTEXT" not in prompt

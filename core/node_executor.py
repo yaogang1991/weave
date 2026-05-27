@@ -601,11 +601,14 @@ class NodeExecutor:
                 pass
 
         if self._backend_registry is not None:
-            # Memory + project context injection for external backends.
-            # BuiltinBackend has its own injection via agent_pool/worker;
-            # unification deferred to M6.3.
+            # Resolve backend name first to avoid double injection.
+            # BuiltinBackend has its own memory injection via agent_pool/worker;
+            # only inject into BackendContext for external backends.
+            backend_name = node.backend or self._default_agent_backend
+            use_external = backend_name != "builtin"
+
             memory_prompt = ""
-            if self._memory_manager and self._memory_manager.config.enabled:
+            if use_external and self._memory_manager and self._memory_manager.config.enabled:
                 try:
                     entries = self._memory_manager.get_context_for_agent(
                         agent_type=node.agent_type,
@@ -620,7 +623,7 @@ class NodeExecutor:
                     )
 
             project_context = ""
-            if self._project_config:
+            if use_external and self._project_config:
                 project_context = self._project_config.to_summary()
 
             context = BackendContext(
@@ -636,7 +639,6 @@ class NodeExecutor:
                 memory_prompt=memory_prompt,
                 project_context=project_context,
             )
-            backend_name = node.backend if node.backend and node.backend != "builtin" else self._default_agent_backend
 
             async def _run_via_registry() -> dict:
                 result = await self._backend_registry.execute_for_node(

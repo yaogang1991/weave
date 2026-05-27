@@ -102,7 +102,7 @@ class ProjectConfig(BaseModel):
     def to_summary(self) -> str:
         """Format project_context fields as a text summary for LLM injection."""
         ctx = self.project_context
-        if not ctx.language and not ctx.framework and not ctx.test_runner and not ctx.conventions:
+        if not any([ctx.language, ctx.framework, ctx.test_runner, ctx.conventions]):
             return ""
         lines: list[str] = []
         if ctx.language:
