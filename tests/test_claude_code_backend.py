@@ -1,7 +1,7 @@
 """Tests for M4.1 ClaudeCodeBackend implementation."""
 import asyncio
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -131,20 +131,46 @@ class TestClaudeCodeBackendBuildPrompt:
 
 
 class TestClaudeCodeBackendExecuteCLI:
-    def _make_cli_output(
-        self,
-        result: str = "Done",
-        is_error: bool = False,
-        usage: dict | None = None,
-        errors: list | None = None,
-    ) -> str:
-        return json.dumps({
+    def _make_stream_lines(self, result="Done", is_error=False,
+                           usage=None, session_id="sess_abc"):
+        """Build NDJSON lines for stream-json output."""
+        lines = []
+        if session_id:
+            lines.append(json.dumps({
+                "type": "system", "session_id": session_id,
+            }).encode() + b"\n")
+        lines.append(json.dumps({
+            "type": "result",
             "result": result,
             "is_error": is_error,
             "usage": usage or {"input_tokens": 100, "output_tokens": 50},
-            "errors": errors or [],
-            "session_id": "sess_abc",
-        })
+            "session_id": session_id,
+        }).encode() + b"\n")
+        return lines
+
+    def _mock_process(self, lines, returncode=0, stderr=b""):
+        """Create a mock asyncio subprocess."""
+        process = MagicMock()
+        process.returncode = returncode
+        line_iter = iter(lines)
+
+        async def readline():
+            return next(line_iter, b"")
+
+        stdout_mock = MagicMock()
+        stdout_mock.readline = readline
+        process.stdout = stdout_mock
+
+        stderr_mock = MagicMock()
+
+        async def read_stderr():
+            return stderr
+
+        stderr_mock.read = read_stderr
+        process.stderr = stderr_mock
+        process.terminate = MagicMock()
+        process.kill = MagicMock()
+        return process
 
     def test_cli_success(self):
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
@@ -152,13 +178,10 @@ class TestClaudeCodeBackendExecuteCLI:
         backend._sdk_available = False
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = self._make_cli_output()
-        mock_result.timed_out = False
+        lines = self._make_stream_lines()
+        mock_proc = self._mock_process(lines, returncode=0)
 
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
@@ -173,13 +196,11 @@ class TestClaudeCodeBackendExecuteCLI:
         backend._sdk_available = False
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "Something went wrong"
-        mock_result.timed_out = False
+        mock_proc = self._mock_process(
+            [], returncode=1, stderr=b"Something went wrong",
+        )
 
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
@@ -188,35 +209,44 @@ class TestClaudeCodeBackendExecuteCLI:
         assert "Something went wrong" in result.error
 
     def test_cli_json_parse_error(self):
+        """Non-JSON lines are skipped; if no result event, output is empty."""
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
         backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = "not valid json {{{"
-        mock_result.timed_out = False
+        lines = [b"not valid json {{{\n"]
+        mock_proc = self._mock_process(lines, returncode=0)
 
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
 
-        assert result.status == BackendStatus.FAILED
-        assert "parse" in result.error.lower()
+        assert result.status == BackendStatus.COMPLETED
+        assert result.output == ""
 
     def test_cli_timeout_raises_node_timeout_error(self):
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
-        backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
+        cfg = ClaudeCodeRuntimeConfig(timeout_override=1)
+        backend = ClaudeCodeBackend(config=cfg)
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.timed_out = True
-        mock_result.returncode = -1
+        # Mock process that hangs forever.
+        process = MagicMock()
+        process.returncode = None
 
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        async def readline_hang():
+            await asyncio.sleep(100)
+            return b""
+
+        stdout_mock = MagicMock()
+        stdout_mock.readline = readline_hang
+        process.stdout = stdout_mock
+        process.stderr = MagicMock()
+        process.stderr.read = AsyncMock(return_value=b"")
+        process.kill = MagicMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=process):
             with pytest.raises(NodeTimeoutError):
                 asyncio.run(
                     backend._execute_via_cli(ctx, "test prompt"),
@@ -225,15 +255,15 @@ class TestClaudeCodeBackendExecuteCLI:
     def test_cli_rate_limit_error(self):
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
         backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
+        backend._sdk_available = False
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "Error: rate limit exceeded"
-        mock_result.timed_out = False
+        mock_proc = self._mock_process(
+            [], returncode=1,
+            stderr=b"Error: rate limit exceeded",
+        )
 
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             with pytest.raises(RateLimitError):
                 asyncio.run(
                     backend._execute_via_cli(ctx, "test prompt"),
@@ -242,15 +272,15 @@ class TestClaudeCodeBackendExecuteCLI:
     def test_cli_budget_error(self):
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
         backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
+        backend._sdk_available = False
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 1
-        mock_result.stderr = "Budget exhausted"
-        mock_result.timed_out = False
+        mock_proc = self._mock_process(
+            [], returncode=1,
+            stderr=b"Budget exhausted",
+        )
 
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             with pytest.raises(BudgetExhaustedError):
                 asyncio.run(
                     backend._execute_via_cli(ctx, "test prompt"),
@@ -262,12 +292,10 @@ class TestClaudeCodeBackendExecuteCLI:
         backend = ClaudeCodeBackend(config=cfg)
         ctx = _make_context()
 
-        mock_result = MagicMock()
-        mock_result.returncode = 127
-        mock_result.timed_out = False
-
-        with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
-            
+        with patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=FileNotFoundError,
+        ):
             result = asyncio.run(
                 backend._execute_via_cli(ctx, "test prompt"),
             )
@@ -283,22 +311,36 @@ class TestClaudeCodeBackendExecuteDispatch:
         backend._sdk_available = True
         ctx = _make_context()
 
-        mock_cli_result = MagicMock()
-        mock_cli_result.returncode = 0
-        mock_cli_result.timed_out = False
-        mock_cli_result.stdout = json.dumps({
-            "result": "CLI fallback worked",
-            "is_error": False,
-            "usage": {"input_tokens": 50, "output_tokens": 25},
-        })
+        lines = [
+            json.dumps({
+                "type": "result",
+                "result": "CLI fallback worked",
+                "is_error": False,
+                "usage": {"input_tokens": 50, "output_tokens": 25},
+            }).encode() + b"\n",
+        ]
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        line_iter = iter(lines)
+
+        async def readline():
+            return next(line_iter, b"")
+
+        stdout_mock = MagicMock()
+        stdout_mock.readline = readline
+        mock_proc.stdout = stdout_mock
+        stderr_mock = MagicMock()
+        stderr_mock.read = AsyncMock(return_value=b"")
+        mock_proc.stderr = stderr_mock
+        mock_proc.terminate = MagicMock()
+        mock_proc.kill = MagicMock()
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agent.backends.claude_code.run_with_progress", return_value=mock_cli_result):
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
                 with patch.object(
                     backend, "_execute_via_sdk",
                     side_effect=RuntimeError("SDK crashed"),
                 ):
-                    
                     result = asyncio.run(
                         backend.execute(ctx),
                     )
@@ -333,7 +375,7 @@ class TestClaudeCodeBackendBuildCLICommand:
         assert cmd[0] == "claude"
         assert "-p" in cmd
         assert "--output-format" in cmd
-        assert "json" in cmd
+        assert "stream-json" in cmd
         assert cmd[-1] == "test prompt"
 
     def test_includes_model(self):

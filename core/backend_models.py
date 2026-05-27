@@ -29,6 +29,7 @@ class BackendResult(BaseModel):
     output: str = ""
     error: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
+    messages: list[dict[str, Any]] = Field(default_factory=list)  # M6.5: stream event messages
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to the dict format expected by NodeExecutor.
@@ -75,3 +76,5 @@ class BackendContext(BaseModel):
     cancel_event: threading.Event | None = None
     progress_callback: Callable[[], None] | None = None
     progress_tracker: Any | None = None  # M4.5: ProgressTracker for progress-driven timeout
+    # M6.5: bridge stream events to SessionStore
+    event_callback: Callable[[str, dict[str, Any]], None] | None = None

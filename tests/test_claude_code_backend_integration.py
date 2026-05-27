@@ -45,20 +45,35 @@ class TestClaudeCodeBackendRegistryIntegration:
         registry.register("claude_code", backend)
 
         node = _make_node()
-        ctx = BackendContext(node=node, session_id="s1", workspace_path="/tmp")
+        ctx = BackendContext(node=node, session_id="s1", workspace_path=".")
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.timed_out = False
-        mock_result.stdout = json.dumps({
-            "result": "API built successfully",
-            "is_error": False,
-            "usage": {"input_tokens": 500, "output_tokens": 200},
-            "session_id": "cc_sess_1",
-        })
+        lines = [
+            json.dumps({
+                "type": "result",
+                "result": "API built successfully",
+                "is_error": False,
+                "usage": {"input_tokens": 500, "output_tokens": 200},
+                "session_id": "cc_sess_1",
+            }).encode() + b"\n",
+        ]
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        line_iter = iter(lines)
+
+        async def readline():
+            return next(line_iter, b"")
+
+        stdout_mock = MagicMock()
+        stdout_mock.readline = readline
+        mock_proc.stdout = stdout_mock
+        stderr_mock = MagicMock()
+        stderr_mock.read = AsyncMock(return_value=b"")
+        mock_proc.stderr = stderr_mock
+        mock_proc.terminate = MagicMock()
+        mock_proc.kill = MagicMock()
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agent.backends.claude_code.run_with_progress", return_value=mock_result):
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
                 result = await registry.execute_for_node("claude_code", ctx)
 
         assert result.status == BackendStatus.COMPLETED
@@ -116,30 +131,46 @@ class TestClaudeCodeBackendEndToEnd:
         ctx = BackendContext(
             node=node,
             session_id="integration_test",
-            workspace_path="/tmp/test_project",
+            workspace_path=".",
         )
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.timed_out = False
-        mock_result.stdout = json.dumps({
-            "result": "Created hello.py with basic Flask app",
-            "is_error": False,
-            "usage": {
-                "input_tokens": 1000,
-                "output_tokens": 500,
-                "cache_read_input_tokens": 200,
-            },
-            "session_id": "cc_integration",
-        })
+        lines = [
+            json.dumps({
+                "type": "result",
+                "result": "Created hello.py with basic Flask app",
+                "is_error": False,
+                "usage": {
+                    "input_tokens": 1000,
+                    "output_tokens": 500,
+                    "cache_read_input_tokens": 200,
+                },
+                "session_id": "cc_integration",
+            }).encode() + b"\n",
+        ]
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        line_iter = iter(lines)
+
+        async def readline():
+            return next(line_iter, b"")
+
+        stdout_mock = MagicMock()
+        stdout_mock.readline = readline
+        mock_proc.stdout = stdout_mock
+        stderr_mock = MagicMock()
+        stderr_mock.read = AsyncMock(return_value=b"")
+        mock_proc.stderr = stderr_mock
+        mock_proc.terminate = MagicMock()
+        mock_proc.kill = MagicMock()
 
         git_result = MagicMock()
         git_result.returncode = 0
         git_result.stdout = "hello.py\nrequirements.txt\n"
 
         with patch("shutil.which", return_value="/usr/bin/claude"):
-            with patch("agent.backends.claude_code.run_with_progress", side_effect=[mock_result, git_result]):
-                result = await backend.execute(ctx)
+            with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+                with patch("agent.backends.claude_code.run_with_progress", return_value=git_result):
+                    result = await backend.execute(ctx)
 
         assert result.status == BackendStatus.COMPLETED
         assert result.artifacts == ["hello.py", "requirements.txt"]

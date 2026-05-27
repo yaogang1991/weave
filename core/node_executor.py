@@ -92,6 +92,7 @@ class NodeExecutor:
         memory_manager: Any | None = None,
         project_config: Any | None = None,
         default_agent_backend: str = "claude_code",
+        session_store: Any | None = None,
     ) -> None:
         self.agent_executor = agent_executor
         self._emit = emit_func
@@ -113,6 +114,7 @@ class NodeExecutor:
         self._memory_manager = memory_manager
         self._project_config = project_config
         self._default_agent_backend = default_agent_backend
+        self._session_store = session_store
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._eval_pipeline = EvaluationPipeline(
@@ -626,6 +628,29 @@ class NodeExecutor:
             if use_external and self._project_config:
                 project_context = self._project_config.to_summary()
 
+            # M6.5: event_callback bridges stream events to SessionStore.
+            event_callback = None
+            if self._session_store is not None and self._session_id:
+                def _make_event_cb(sid: str, store: Any):
+                    _type_map = {
+                        "assistant": "agent.message",
+                        "user": "user.message",
+                        "result": "workflow.stage_end",
+                        "system": "session.status_running",
+                        "tool_use": "agent.tool_use",
+                        "tool_result": "agent.tool_result",
+                    }
+
+                    def _cb(event_type_str: str, payload: dict) -> None:
+                        try:
+                            from core.event_models import EventType
+                            mapped = _type_map.get(event_type_str, event_type_str)
+                            store.emit_event(sid, EventType(mapped), payload)
+                        except Exception:
+                            logger.debug("event_callback failed", exc_info=True)
+                    return _cb
+                event_callback = _make_event_cb(self._session_id, self._session_store)
+
             context = BackendContext(
                 node=node,
                 artifacts=input_artifacts,
@@ -638,6 +663,7 @@ class NodeExecutor:
                 progress_tracker=tracker,
                 memory_prompt=memory_prompt,
                 project_context=project_context,
+                event_callback=event_callback,
             )
 
             async def _run_via_registry() -> dict:
