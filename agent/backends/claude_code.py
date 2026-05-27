@@ -405,9 +405,27 @@ class ClaudeCodeBackend(AgentBackend):
 
             if msg.raw_type == "assistant":
                 # Accumulate usage from intermediate assistant events.
-                msg_usage = msg.data.get("message", {}).get("usage", {})
-                usage["input_tokens"] += msg_usage.get("input_tokens", 0)
-                usage["output_tokens"] += msg_usage.get("output_tokens", 0)
+                msg_usage = msg.data.get("message", {}).get("usage", {}) or {}
+                usage["input_tokens"] += msg_usage.get("input_tokens") or 0
+                usage["output_tokens"] += msg_usage.get("output_tokens") or 0
+                # Extract tool_use content blocks and emit as separate events.
+                if event_callback is not None:
+                    content_blocks = (
+                        msg.data.get("message", {}).get("content", [])
+                    )
+                    if isinstance(content_blocks, list):
+                        for block in content_blocks:
+                            if (
+                                isinstance(block, dict)
+                                and block.get("type") == "tool_use"
+                            ):
+                                try:
+                                    event_callback("tool_use", block)
+                                except Exception:
+                                    logger.debug(
+                                        "tool_use event_callback raised",
+                                        exc_info=True,
+                                    )
                 # Capture session_id from assistant events.
                 sid = msg.data.get("message", {}).get("session_id", "")
                 if sid:
@@ -418,13 +436,13 @@ class ClaudeCodeBackend(AgentBackend):
                 result_text = msg.data.get("result", "")
                 if result_text:
                     state["result"] = result_text
-                result_usage = msg.data.get("usage", {})
+                result_usage = msg.data.get("usage", {}) or {}
                 if result_usage:
-                    usage["input_tokens"] = result_usage.get(
-                        "input_tokens", usage["input_tokens"],
+                    usage["input_tokens"] = (
+                        result_usage.get("input_tokens") or 0
                     )
-                    usage["output_tokens"] = result_usage.get(
-                        "output_tokens", usage["output_tokens"],
+                    usage["output_tokens"] = (
+                        result_usage.get("output_tokens") or 0
                     )
                 sid = msg.data.get("session_id", "")
                 if sid:
@@ -432,7 +450,25 @@ class ClaudeCodeBackend(AgentBackend):
                 if msg.data.get("is_error"):
                     state["error"] = result_text
 
-            elif msg.raw_type == "system":
+            elif msg.raw_type == "user":
+                # Extract tool_result content blocks and emit as events.
+                if event_callback is not None:
+                    content_blocks = (
+                        msg.data.get("message", {}).get("content", [])
+                    )
+                    if isinstance(content_blocks, list):
+                        for block in content_blocks:
+                            if (
+                                isinstance(block, dict)
+                                and block.get("type") == "tool_result"
+                            ):
+                                try:
+                                    event_callback("tool_result", block)
+                                except Exception:
+                                    logger.debug(
+                                        "tool_result event_callback raised",
+                                        exc_info=True,
+                                    )
                 sid = msg.data.get("session_id", "")
                 if sid:
                     state["session_id"] = sid

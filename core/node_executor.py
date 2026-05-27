@@ -637,6 +637,8 @@ class NodeExecutor:
                         "user": "user.message",
                         "result": "workflow.stage_end",
                         "system": "session.status_running",
+                        "tool_use": "agent.tool_use",
+                        "tool_result": "agent.tool_result",
                     }
 
                     def _cb(event_type_str: str, payload: dict) -> None:
@@ -644,7 +646,7 @@ class NodeExecutor:
                             from core.event_models import EventType
                             mapped = _type_map.get(event_type_str, event_type_str)
                             store.emit_event(sid, EventType(mapped), payload)
-                        except (ValueError, Exception):
+                        except Exception:
                             logger.debug("event_callback failed", exc_info=True)
                     return _cb
                 event_callback = _make_event_cb(self._session_id, self._session_store)
