@@ -99,6 +99,22 @@ class ProjectConfig(BaseModel):
 
         return cls(**data)
 
+    def to_summary(self) -> str:
+        """Format project_context fields as a text summary for LLM injection."""
+        ctx = self.project_context
+        if not any([ctx.language, ctx.framework, ctx.test_runner, ctx.conventions]):
+            return ""
+        lines: list[str] = []
+        if ctx.language:
+            lines.append(f"Language: {ctx.language}")
+        if ctx.framework:
+            lines.append(f"Framework: {ctx.framework}")
+        if ctx.test_runner:
+            lines.append(f"Test runner: {ctx.test_runner}")
+        if ctx.conventions:
+            lines.append(f"Conventions: {', '.join(ctx.conventions)}")
+        return "\n".join(lines)
+
     def effective_runtime(self, overrides: dict[str, Any] | None = None) -> RuntimeConfig:
         """Return runtime config with optional overrides applied.
 

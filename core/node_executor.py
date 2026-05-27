@@ -67,6 +67,7 @@ class NodeExecutor:
     Retry is a while loop (not recursion).
     """
 
+    # TODO(M6.3): Extract into NodeExecutorConfig dataclass (20 params)
     def __init__(
         self,
         agent_executor: Callable[
@@ -88,6 +89,9 @@ class NodeExecutor:
         backend_registry: Any | None = None,
         session_id: str = "",
         budget_manager: BudgetManager | None = None,
+        memory_manager: Any | None = None,
+        project_config: Any | None = None,
+        default_agent_backend: str = "claude_code",
     ) -> None:
         self.agent_executor = agent_executor
         self._emit = emit_func
@@ -106,6 +110,9 @@ class NodeExecutor:
         self._backend_registry = backend_registry
         self._session_id = session_id
         self._budget_manager = budget_manager
+        self._memory_manager = memory_manager
+        self._project_config = project_config
+        self._default_agent_backend = default_agent_backend
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._eval_pipeline = EvaluationPipeline(
@@ -594,6 +601,31 @@ class NodeExecutor:
                 pass
 
         if self._backend_registry is not None:
+            # Resolve backend name first to avoid double injection.
+            # BuiltinBackend has its own memory injection via agent_pool/worker;
+            # only inject into BackendContext for external backends.
+            backend_name = node.backend or self._default_agent_backend
+            use_external = backend_name != "builtin"
+
+            memory_prompt = ""
+            if use_external and self._memory_manager and self._memory_manager.config.enabled:
+                try:
+                    entries = self._memory_manager.get_context_for_agent(
+                        agent_type=node.agent_type,
+                        task_description=node.task_description,
+                        session_id=self._session_id,
+                    )
+                    memory_prompt = self._memory_manager.format_memory_prompt(entries)
+                except Exception:
+                    logger.warning(
+                        "Memory retrieval failed for node %s",
+                        node.id, exc_info=True,
+                    )
+
+            project_context = ""
+            if use_external and self._project_config:
+                project_context = self._project_config.to_summary()
+
             context = BackendContext(
                 node=node,
                 artifacts=input_artifacts,
@@ -604,8 +636,9 @@ class NodeExecutor:
                 cancel_event=cancel_event,
                 progress_callback=_on_progress,
                 progress_tracker=tracker,
+                memory_prompt=memory_prompt,
+                project_context=project_context,
             )
-            backend_name = getattr(node, 'backend', 'builtin')
 
             async def _run_via_registry() -> dict:
                 result = await self._backend_registry.execute_for_node(

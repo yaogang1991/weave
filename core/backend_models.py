@@ -67,6 +67,8 @@ class BackendContext(BaseModel):
     workspace_path: str | None = None
     job_id: str = ""
     run_id: str | None = None
+    memory_prompt: str = ""
+    project_context: str = ""
 
     model_config = {"arbitrary_types_allowed": True}
 

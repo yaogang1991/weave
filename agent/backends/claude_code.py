@@ -449,6 +449,11 @@ class ClaudeCodeBackend(AgentBackend):
             if sections:
                 parts.append(f"\n## Input Context\n{''.join(sections)}")
 
+        if context.memory_prompt:
+            parts.append(f"\n{context.memory_prompt}")
+        if context.project_context:
+            parts.append(f"\n## Project Context\n{context.project_context}")
+
         return "\n".join(parts)
 
     # -- Artifact discovery --------------------------------------------------

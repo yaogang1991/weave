@@ -12,6 +12,7 @@ from typing import Any
 
 from core.config import WeaveConfig, LLMConfig, WatchdogConfig
 from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
+from core.project_config import ProjectConfig
 from core.agent_registry import AgentRegistry
 from core.models import EventType, PersonalGuardrailPolicy
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
@@ -224,6 +225,7 @@ class ExecutionFactory:
                     for agent_type in self._watchdog_config.agent_overrides
                 },
                 node_timeout_config=_cfg.node_timeout,
+                default_agent_backend=_cfg.default_agent_backend,
             ),
             evaluator=evaluator,
             work_dir=str(work_dir) if work_dir else None,
@@ -234,6 +236,7 @@ class ExecutionFactory:
             run_id=run_id or "",
             backend_registry=backend_registry,
             budget_manager=self._budget_manager,
+            project_config=ProjectConfig.load(work_dir),
         )
 
         async def _session_event_handler(event):

@@ -130,6 +130,11 @@ class CodexBackend(AgentBackend):
                     f"\n=== RELEVANT FILES ===\n{', '.join(art.file_paths)}"
                 )
 
+        if context.memory_prompt:
+            parts.append(f"\n{context.memory_prompt}")
+        if context.project_context:
+            parts.append(f"\n=== PROJECT CONTEXT ===\n{context.project_context}")
+
         return "\n".join(parts)
 
     async def _stream_output(

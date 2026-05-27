@@ -748,6 +748,11 @@ class WeaveConfig(BaseModel):
             os.getenv("WEAVE_WORKSPACE_ISOLATION", "local"),
         )
     )
+    default_agent_backend: str = Field(
+        default_factory=lambda: os.getenv(
+            "WEAVE_DEFAULT_AGENT_BACKEND", "claude_code"
+        )
+    )
     backend_base_path: str = Field(
         default_factory=lambda: os.getenv(
             "WEAVE_BACKEND_BASE_PATH", "./data/backends"

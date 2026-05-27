@@ -136,7 +136,7 @@ class DAGNode(BaseModel):
     max_retries: int = 3
     retry_count: int = 0
     workspace_strategy: NodeWorkspaceStrategy = NodeWorkspaceStrategy.SHARED
-    backend: str = "builtin"  # M4.0: AgentBackend name ("builtin", "external", etc.)
+    backend: str | None = None  # M4.0: AgentBackend name; None = use default_agent_backend
     owned_files: list[str] = Field(
         default_factory=list,
     )  # Files this node exclusively creates (#272)
@@ -490,9 +490,9 @@ class DAGNodeModel(BaseModel):
         default_factory=list,
         description="IDs of nodes this depends on",
     )
-    backend: str = Field(
-        default="builtin",
-        description="Backend name: builtin (default), external, etc.",
+    backend: str | None = Field(
+        default=None,
+        description="Backend name; None = use default_agent_backend",
     )
 
 
