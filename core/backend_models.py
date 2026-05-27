@@ -78,3 +78,5 @@ class BackendContext(BaseModel):
     progress_tracker: Any | None = None  # M4.5: ProgressTracker for progress-driven timeout
     # M6.5: bridge stream events to SessionStore
     event_callback: Callable[[str, dict[str, Any]], None] | None = None
+    # M6.6: semantic inactivity timeout detector
+    activity_detector: Any | None = None

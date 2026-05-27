@@ -643,7 +643,7 @@ class NodeExecutor:
         def _on_progress() -> None:
             try:
                 loop.call_soon_threadsafe(node.record_heartbeat)
-                activity_detector.record_activity("progress_callback")
+                activity_detector.record_activity()
             except RuntimeError:
                 pass
 

@@ -14,6 +14,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 from fnmatch import fnmatch
 
 from core.dag_models import DAGNode
@@ -27,8 +28,8 @@ _TRUSTED_AGENT_TYPES = frozenset({"planner", "evaluator"})
 
 
 def _normalize_path(path: str) -> str:
-    """Normalize path to forward-slash for cross-platform fnmatch."""
-    return path.replace("\\", "/")
+    """Normalize path: resolve '..' segments then convert to forward-slash."""
+    return os.path.normpath(path).replace("\\", "/")
 
 
 class NodeGuardrails:
@@ -99,6 +100,8 @@ class NodeGuardrails:
             return GuardrailResult(decision="allowed", reason="No artifacts to check")
 
         for artifact_path in artifacts:
+            if not isinstance(artifact_path, str):
+                continue
             norm_artifact = _normalize_path(artifact_path)
             # Extract relative portion for matching
             rel = norm_artifact.split("/")[-1] if "/" in norm_artifact else norm_artifact

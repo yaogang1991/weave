@@ -97,6 +97,20 @@ class TestPreCheck:
         assert result.is_blocked
         assert "outside" in result.reason
 
+    def test_workspace_path_traversal_blocked(self, default_config, node_generator):
+        guard = NodeGuardrails(default_config, project_dir="/project")
+        result = guard.pre_check(
+            node_generator, workspace_path="/project/../etc/passwd",
+        )
+        assert result.is_blocked
+
+    def test_workspace_deep_traversal_blocked(self, default_config, node_generator):
+        guard = NodeGuardrails(default_config, project_dir="/project/src")
+        result = guard.pre_check(
+            node_generator, workspace_path="/project/src/../../etc",
+        )
+        assert result.is_blocked
+
     def test_workspace_none_allowed(self, default_config, node_generator):
         guard = NodeGuardrails(default_config, project_dir="/project")
         result = guard.pre_check(node_generator, workspace_path=None)
