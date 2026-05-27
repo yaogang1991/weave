@@ -204,6 +204,17 @@ class ExecutionFactory:
                 "claude_code", ClaudeCodeBackend(config=cc_config),
             )
 
+        # M6.2: Create NodeGuardrails for external backend execution safety
+        node_guardrails = None
+        if work_dir:
+            _guardrails_cfg = ProjectConfig.load(work_dir)
+            if _guardrails_cfg.guardrails:
+                from guardrails.node_guardrails import NodeGuardrails
+                node_guardrails = NodeGuardrails(
+                    config=_guardrails_cfg.guardrails,
+                    project_dir=str(work_dir),
+                )
+
         engine = DAGExecutionEngine(
             agent_executor=pool.get_executor(session_id),
             failure_handler=orchestrator.adapt_to_failure,
@@ -238,6 +249,7 @@ class ExecutionFactory:
             budget_manager=self._budget_manager,
             project_config=ProjectConfig.load(work_dir),
             session_store=store,
+            node_guardrails=node_guardrails,
         )
 
         async def _session_event_handler(event):
