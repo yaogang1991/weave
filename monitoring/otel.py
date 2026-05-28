@@ -162,6 +162,17 @@ def start_tool_call_span(node_id: str, tool_name: str) -> SpanLike:
     })
 
 
+def start_backend_call_span(
+    run_id: str, node_id: str, backend_name: str,
+) -> SpanLike:
+    """Create a Backend Call-level OTel span for CLI subprocess execution (#964)."""
+    return start_span(f"backend_call {backend_name}", {
+        "weave.run.id": run_id,
+        "weave.node.id": node_id,
+        "weave.backend.name": backend_name,
+    })
+
+
 def set_llm_usage_attributes(
     span: SpanLike,
     *,
@@ -200,7 +211,7 @@ def get_trace_context() -> dict[str, str]:
             return {}
         sampled = "01" if (sc.trace_flags & 0x01) else "00"
         return {
-            "traceparent": f"00-{sc.trace_id:032x}-{sc.span_id:016x}-{sampled}",
+            "TRACEPARENT": f"00-{sc.trace_id:032x}-{sc.span_id:016x}-{sampled}",
         }
     except ImportError:
         return {}

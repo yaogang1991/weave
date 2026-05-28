@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 from typing import Any
 
@@ -12,6 +13,7 @@ from core.config import CodexBackendConfig
 from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
 from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
+from monitoring.otel import inject_trace_context, start_backend_call_span
 
 logger = logging.getLogger(__name__)
 
@@ -62,59 +64,65 @@ class CodexBackend(AgentBackend):
         cwd = context.workspace_path or "."
         sandbox = self._sandbox_mode
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                self._resolved_path, "exec", "--json",
-                f"--sandbox={sandbox}",
-                f"--model={self._model}",
-                "--",
-                prompt,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+        with start_backend_call_span(
+            context.run_id or "", context.node.id, self.name,
+        ):
+            env = inject_trace_context(dict(os.environ))
+
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    self._resolved_path, "exec", "--json",
+                    f"--sandbox={sandbox}",
+                    f"--model={self._model}",
+                    "--",
+                    prompt,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                )
+            except FileNotFoundError:
+                return BackendResult(
+                    status=BackendStatus.FAILED,
+                    error=f"codex binary not found: {self._resolved_path}",
+                )
+
+            # Mutable containers for streaming output (#619 #9 — documented).
+            output_lines: list[str] = []
+            usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+
+            try:
+                await asyncio.wait_for(
+                    self._stream_output(
+                        process, output_lines, usage,
+                        context.cancel_event, context.progress_callback,
+                    ),
+                    timeout=self._timeout,
+                )
+            except asyncio.TimeoutError:
+                if process.returncode is None:
+                    process.kill()
+                raise NodeTimeoutError(
+                    node_id=context.node.id,
+                    agent_type=context.node.agent_type,
+                    timeout=self._timeout,
+                )
+
+            stderr = ""
+            if process.stderr is not None:
+                stderr_bytes = await process.stderr.read()
+                stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
+
+            # Error classification (#619 #5).
+            self._raise_if_classifiable(stderr, context)
+
+            # Artifact discovery (#619 #2).
+            artifacts = self._discover_artifacts(context)
+
+            return self._parse_result(
+                process.returncode, output_lines, usage, stderr, artifacts,
             )
-        except FileNotFoundError:
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=f"codex binary not found: {self._resolved_path}",
-            )
-
-        # Mutable containers for streaming output (#619 #9 — documented).
-        output_lines: list[str] = []
-        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
-
-        try:
-            await asyncio.wait_for(
-                self._stream_output(
-                    process, output_lines, usage,
-                    context.cancel_event, context.progress_callback,
-                ),
-                timeout=self._timeout,
-            )
-        except asyncio.TimeoutError:
-            if process.returncode is None:
-                process.kill()
-            raise NodeTimeoutError(
-                node_id=context.node.id,
-                agent_type=context.node.agent_type,
-                timeout=self._timeout,
-            )
-
-        stderr = ""
-        if process.stderr is not None:
-            stderr_bytes = await process.stderr.read()
-            stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
-
-        # Error classification (#619 #5).
-        self._raise_if_classifiable(stderr, context)
-
-        # Artifact discovery (#619 #2).
-        artifacts = self._discover_artifacts(context)
-
-        return self._parse_result(
-            process.returncode, output_lines, usage, stderr, artifacts,
-        )
 
     def _build_prompt(self, context: BackendContext) -> str:
         parts: list[str] = []
