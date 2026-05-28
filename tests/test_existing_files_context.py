@@ -214,6 +214,6 @@ def test_plan_no_existing_files_section_when_empty():
 # ---------------------------------------------------------------------------
 
 def test_planning_prompt_has_reconcile_rule():
-    prompt = Path("orchestrator/prompts/planning.md").read_text()
+    prompt = Path("orchestrator/prompts/planning.md").read_text(encoding="utf-8")
     assert "existing_files" in prompt
     assert "reconcile" in prompt.lower() or "Reconcile" in prompt
