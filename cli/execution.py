@@ -389,6 +389,8 @@ def _build_runtime(
                 for agent_type in wd_cfg.agent_overrides
             },
             node_timeout_config=config.node_timeout,
+            provider=config.llm.provider,
+            model=config.llm.model,
         ),
         evaluator=evaluator,
         work_dir=project_work_dir,

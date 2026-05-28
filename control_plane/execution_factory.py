@@ -254,6 +254,8 @@ class ExecutionFactory:
                 },
                 node_timeout_config=_cfg.node_timeout,
                 default_agent_backend=_cfg.default_agent_backend,
+                provider=_cfg.llm.provider,
+                model=_cfg.llm.model,
             ),
             evaluator=evaluator,
             work_dir=str(work_dir) if work_dir else None,

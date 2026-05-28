@@ -98,6 +98,8 @@ class DAGEngineConfig:
         watchdog_overrides: dict[str, tuple[float, int]] | None = None,
         alert_thresholds: dict[str, int] | None = None,
         default_agent_backend: str = "",
+        provider: str = "anthropic",
+        model: str = "",
     ) -> None:
         self.max_parallel = max_parallel
         self.max_replans = max_replans
@@ -114,6 +116,8 @@ class DAGEngineConfig:
         self.watchdog_overrides = watchdog_overrides or {}
         self.alert_thresholds = alert_thresholds or {}
         self.default_agent_backend = default_agent_backend
+        self.provider = provider
+        self.model = model
 
 
 class DAGExecutionEngine:
@@ -159,6 +163,9 @@ class DAGExecutionEngine:
         self.max_dag_nodes = cfg.max_dag_nodes
         # #900: Provider health tracker
         self._provider_health = provider_health or ProviderHealthTracker()
+        # #910: Provider/model for health tracking (from LLMConfig, not NodeTimeoutConfig)
+        self._provider = cfg.provider
+        self._model = cfg.model
         # Note: evaluator is stored in NodeExecutor (created below).
         # The .evaluator property proxies to it.
         self.artifact_path = cfg.artifact_path
@@ -237,20 +244,8 @@ class DAGExecutionEngine:
         self._PLANNER_CIRCUIT_BREAKER_THRESHOLD = 3
 
     def _get_provider_model(self) -> tuple[str, str]:
-        """Return the (provider, model) pair used for health tracking.
-
-        TODO(#911-followup): NodeTimeoutConfig doesn't carry provider/model,
-        so this always returns ("anthropic", ""). Should thread LLMConfig or
-        explicit provider/model through the constructor instead.
-        """
-        llm_cfg = getattr(
-            self._node_executor, "_node_timeout_config", None,
-        )
-        provider = (
-            getattr(llm_cfg, "provider", "anthropic") if llm_cfg else "anthropic"
-        )
-        model = getattr(llm_cfg, "model", "") if llm_cfg else ""
-        return provider, model
+        """Return the (provider, model) pair used for health tracking (#910)."""
+        return self._provider, self._model
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
