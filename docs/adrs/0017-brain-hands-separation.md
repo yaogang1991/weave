@@ -1,7 +1,8 @@
 # ADR 0017: Brain/Hands Separation — Weave as Pure Orchestrator
 
-**Status:** Accepted
+**Status:** Accepted — Phase 1 (M6.1), Phase 2 (M6.2), Phase 3 (M6.3), Phase 4 (M6.4), M6.5–M6.8 complete.
 **Date:** 2026-05-26
+**Updated:** 2026-05-29
 **Deciders:** Project Lead
 
 ## Context

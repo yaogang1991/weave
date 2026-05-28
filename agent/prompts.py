@@ -1,6 +1,10 @@
 """Agent system prompts and tool allowlists.
 
 Extracted from agent/agent_pool.py for maintainability (#446).
+
+Note (M6.4): External backends (ClaudeCodeBackend) manage their own prompts.
+These prompts are retained for BuiltinBackend backward compat and will be
+simplified in a future cleanup phase. See ADR-0017 Phase 4.
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ Rules:
 Always consider the project context and existing conventions.
 """,
 
+    # DEPRECATED (M6.4): Retained for BuiltinBackend backward compat only.
+    # External backends (ClaudeCodeBackend) manage their own prompts internally.
     "generator": """You are the Generator Agent in a software development team.
 
 Your role: Implement code according to specifications.

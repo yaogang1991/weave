@@ -1,6 +1,10 @@
 """
 Tool Registry: built-in tools + MCP integration.
 All tools share a unified interface: execute(name, input) -> ToolResult
+
+Note (M6.4): The write, edit, bash tools are retained for BuiltinBackend
+backward compat and impact analysis. External backends (ClaudeCodeBackend)
+manage their own tool execution internally. See ADR-0017 Phase 4.
 """
 
 from __future__ import annotations

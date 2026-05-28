@@ -2,8 +2,8 @@
 
 ---
 
-**最后更新:** 2026-05-18
-**当前版本:** M3.6 + 架构重构（M4 规划中）
+**最后更新:** 2026-05-29
+**当前版本:** M6.4 (cleanup + documentation update)
 
 ---
 
@@ -29,6 +29,14 @@
 | **M4.1** | 项目理解 — 增强依赖图（tree-sitter 多语言 + 7 种边类型） | 🔲 规划中 | — |
 | **M4.2** | 项目理解 — 上下文路由（BM25 + 图距离融合 + Token 预算） | 🔲 规划中 | — |
 | **M4.3** | 项目理解 — 项目感知代理（Viewer/Editor 分离 + 约定感知 Prompt） | 🔲 规划中 | — |
+| **M6.1** | BackendContext 扩展 + 默认 backend 切换到 claude_code | ✅ 已完成 | 2026-05-27 |
+| **M6.2** | Node Guardrails + stderr tail + semantic timeout | ✅ 已完成 | 2026-05-28 |
+| **M6.3** | LightweightLLMCaller + BuiltinBackend/BackendRegistry 重构 | ✅ 已完成 | 2026-05-28 |
+| **M6.4** | 清理 + 文档更新 | ✅ 已完成 | 2026-05-29 |
+| **M6.5** | Stream-JSON event parsing for ClaudeCodeBackend CLI path | ✅ 已完成 | 2026-05-28 |
+| **M6.6** | Node timeout semantic (progress-driven) | ✅ 已完成 | 2026-05-28 |
+| **M6.7** | Session Resume + BackendResult 扩展 + bidirectional comms | ✅ 已完成 | 2026-05-29 |
+| **M6.8** | MCP Config 传递到外部 Backend | ✅ 已完成 | 2026-05-29 |
 
 ---
 

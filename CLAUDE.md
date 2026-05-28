@@ -8,7 +8,7 @@ Self-hosted unattended software development system based on [Anthropic Managed A
 
 Python 3.11+, Pydantic models, async/await throughout.
 
-**Current version:** M4.5 (progress-driven timeout + universal subprocess reporting). See `docs/roadmap.md` for milestone history.
+**Current version:** M6.4 (cleanup + documentation update). See `docs/roadmap.md` for milestone history.
 
 ## Commands
 
@@ -117,6 +117,9 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `core/retry_policy.py` — Retry/backoff logic (extracted from dag_engine)
 - `core/progress.py` — ProgressReport, ProgressTracker (Filter/Observer pub/sub), StallDetector, AnomalyDetector, AuditLogger (M4.5)
 - `core/subprocess_runner.py` — SubprocessResult, run_with_progress: universal subprocess execution with progress reporting (M4.5)
+- `core/backend_models.py` — BackendContext, BackendResult, BackendStatus: models for Brain/Hands separation (M6.1)
+- `core/node_guardrails.py` — Node-level guardrail checks (M6.2)
+- `core/activity_detector.py` — Detect meaningful events in backend output (M6.5)
 - `core/watchdog.py` — Watchdog coroutine for heartbeat monitoring (M2)
 - `core/llm_client.py` — Unified LLM client (Anthropic/OpenAI)
 - `core/llm_router.py` — M3.1: Multi-model routing per agent type
@@ -155,9 +158,17 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `orchestrator/prompts/` — Prompt templates (planning.md, adaptation.md, replan.md)
 
 ### agent/ — LLM agent layer
-- `agent/agent_pool.py` — Worker instance pool with independent contexts, memory injection
-- `agent/worker.py` — Single agent LLM call loop
-- `agent/prompts.py` — Agent system prompts
+- `agent/agent_pool.py` — Worker instance pool with independent contexts, memory injection (deprecated M6.3, retained for BuiltinBackend)
+- `agent/worker.py` — Single agent LLM call loop (deprecated M6.3, retained for BuiltinBackend)
+- `agent/prompts.py` — Agent system prompts (retained for BuiltinBackend backward compat)
+- `agent/backends/base.py` — AgentBackend abstract interface (M6.3)
+- `agent/backends/builtin.py` — BuiltinBackend: wraps LightweightLLMCaller or AgentPool for node execution (M6.3)
+- `agent/backends/claude_code.py` — ClaudeCodeBackend: delegates node execution to Claude Code (M6.1, M6.5)
+- `agent/backends/codex.py` — CodexBackend: delegates node execution to Codex CLI (M6.1)
+- `agent/backends/registry.py` — BackendRegistry: manages AgentBackend instances with fallback (M6.3)
+- `agent/backends/stderr_tail.py` — StderrTail: tails stderr for progress events (M6.6)
+- `agent/backends/stream_parser.py` — StreamParser: parses streaming JSON events from CLI backends (M6.5)
+- `agent/backends/bidirectional.py` — Bidirectional comms protocol for session resume (M6.7)
 
 ### evaluator/ — Automated evaluation
 - `evaluator/engine.py` — Evaluation orchestration
@@ -168,8 +179,8 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `evaluator/checkers/` — Criterion checkers (base, file_exists, bugfix_patterns)
 - `evaluator/lint/` — Lint result parsing
 
-### tools/ — Built-in tools
-- `tools/registry.py` — Tool registration (read/write/edit/bash/glob/grep/git) + MCP extension point
+### tools/ — Built-in tools (retained for BuiltinBackend and impact analysis)
+- `tools/registry.py` — Tool registration (read/write/edit/bash/glob/grep/git) + MCP extension point (M6.4: write/edit/bash retained for BuiltinBackend compat)
 - `tools/command_runner.py` — Shell command execution with sandbox support
 
 ### backend/ — Execution environment abstraction
@@ -185,6 +196,7 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `mcp/server.py` — Lightweight MCP Server framework (JSON-RPC over stdio)
 - `mcp/analysis_tools.py` — M4.3: Analysis tools (dependency_graph, impact_predict, impact_graph) for external workers
 - `mcp/weave_tools_server.py` — M4.3: Standalone MCP server entry point for analysis tools only
+- `mcp/config_export.py` — M6.8: MCP config exporter for passing server config to external backends
 
 ### skills/ — YAML skill definitions
 - `skills/registry.py` — SkillRegistry: discover, load, instantiate YAML skills with variable substitution

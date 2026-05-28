@@ -1,6 +1,10 @@
 """
 Agent output injection monitor (#511 output layer).
 
+DEPRECATED (M6.4): Only used by AgentWorker (deprecated in favor of BackendRegistry).
+Guardrails have been lifted from tool-call level to node level (M6.2).
+Retained until AgentWorker is fully removed. See ADR-0017.
+
 Detects injection instructions embedded in tool execution results
 (read file content, bash output, etc.). This is the second defense layer:
 an attacker may hide injection payloads in files or external data that
