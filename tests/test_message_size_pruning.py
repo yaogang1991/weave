@@ -153,6 +153,7 @@ class TestPlanIntegration:
 
         orch.llm = MagicMock()
         orch.llm.call = mock_call
+        orch._planner.llm = orch.llm
 
         await orch.plan("Build API")  # noqa: F841
 

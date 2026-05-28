@@ -17,7 +17,9 @@ from core.agent_registry import AgentRegistry
 from core.models import EventType, PersonalGuardrailPolicy
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 from agent.agent_pool import AgentPool
+from agent.backends.builtin import BuiltinBackend
 from agent.backends.registry import BackendRegistry
+from agent.lightweight_llm_caller import LightweightLLMCaller
 from session.store import SessionStore
 from tools.registry import ToolRegistry
 from guardrails.policy import (
@@ -185,8 +187,23 @@ class ExecutionFactory:
             auto_format_before_eval=_cfg.auto_format_before_eval,
         )
 
-        # M4.0: Create BackendRegistry wrapping the AgentPool
-        backend_registry = BackendRegistry(pool=pool, session_id=session_id)
+        # M6.3: Create LightweightLLMCaller for planner/evaluator single-shot calls
+        lightweight_caller = LightweightLLMCaller(
+            config=self._llm_config,
+            session_store=store,
+            llm_router=getattr(self, "_llm_router", None),
+        )
+
+        # M6.3: Create BuiltinBackend with both lightweight caller and pool
+        # Lightweight path handles planner/evaluator nodes; pool path handles
+        # generator nodes (which need the full tool loop).
+        builtin_backend = BuiltinBackend(
+            lightweight_caller=lightweight_caller,
+            session_store=store,
+            session_id=session_id,
+            pool=pool,
+        )
+        backend_registry = BackendRegistry(builtin=builtin_backend)
 
         # M4.4: Register external backends (codex, etc.)
         self._register_external_backends(backend_registry, _cfg)

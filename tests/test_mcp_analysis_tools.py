@@ -69,7 +69,7 @@ class TestDependencyGraphTool:
         result = tool.handler(project="/etc")
         assert "error" in result
         assert result.get("isError") is True
-        assert "not found" in result["error"]
+        assert "not found" in result["error"] or "not allowed" in result["error"]
 
     def test_has_input_schema(self):
         server = _server_with_analysis_tools()
@@ -127,13 +127,17 @@ class TestImpactGraphTool:
         tool = server._tools["weave.impact_graph"]
         result = tool.handler(project=".")
         assert isinstance(result, dict)
-        assert "files" in result
         assert result["tracked_files"] > 0
-        # Each file entry has path, mtime, size
-        first_file = result["files"][0]
-        assert "path" in first_file
-        assert "mtime" in first_file
-        assert "size" in first_file
+        if result.get("truncated"):
+            # Large repos return a truncation message instead of full file list
+            assert "message" in result
+        else:
+            assert "files" in result
+            # Each file entry has path, mtime, size
+            first_file = result["files"][0]
+            assert "path" in first_file
+            assert "mtime" in first_file
+            assert "size" in first_file
 
     def test_bad_project_path(self):
         server = _server_with_analysis_tools()

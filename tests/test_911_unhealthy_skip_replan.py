@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from core.models import DAG, DAGNode, NodeStatus, FailureDecision
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.provider_health import ProviderHealthTracker, ProviderHealthConfig
 
 
@@ -30,7 +30,7 @@ def _make_engine(
         )),
         replan_handler=replan_handler,
         provider_health=provider_health,
-        enable_watchdog=False,
+        config=DAGEngineConfig(enable_watchdog=False),
     )
     return engine
 

@@ -51,6 +51,10 @@ class WorkerAgent:
     """
     A single Worker Agent instance with isolated context.
 
+    DEPRECATED: For planner/evaluator nodes, use LightweightLLMCaller via
+    BuiltinBackend. For generator nodes, use external backends
+    (claude_code/codex). Will be removed in M7.
+
     This wraps AgentWorker with:
     - Agent-type-specific system prompt
     - Context isolation (reset between tasks)
@@ -501,6 +505,9 @@ class AgentPool:
         approval_repo: ApprovalRepository | None = None,
         run_id: str | None = None,
     ):
+        import warnings
+        warnings.warn("AgentPool is deprecated in favor of BackendRegistry. See M6.3 (#951).", DeprecationWarning, stacklevel=2)
+
         self.llm_config = llm_config
         self.session_store = session_store
         self.agent_registry = agent_registry
@@ -573,6 +580,8 @@ class AgentPool:
     def get_executor(self, session_id: str):
         """
         Return a callable that the DAG engine can use to execute nodes.
+
+        DEPRECATED: Use BackendRegistry + LightweightLLMCaller instead. Will be removed in M7.
 
         Signature: async def executor(node, artifacts) -> result_dict
 

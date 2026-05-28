@@ -344,7 +344,7 @@ def _build_runtime(
     wd_cfg = config.watchdog
     from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
     from agent.backends.registry import BackendRegistry
-    backend_registry = BackendRegistry(pool=pool, session_id=session_id)
+    backend_registry = BackendRegistry.from_pool(pool=pool, session_id=session_id)
 
     # M4.1: Register ClaudeCodeBackend if enabled or requested
     backend_name = getattr(args, "backend", None)

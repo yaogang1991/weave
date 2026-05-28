@@ -174,6 +174,15 @@ class TestRetryContextInPrompt:
         orchestrator._token_estimator = None
         orchestrator._prompt_registry = MagicMock()
         orchestrator._prompt_registry.load.return_value = "System prompt: {agent_descriptions}"
+        from orchestrator.planner import Planner as _Planner
+        orchestrator._planner = _Planner(
+            llm=orchestrator.llm,
+            llm_config=orchestrator.llm_config,
+            agent_registry=registry,
+            prompt_registry=orchestrator._prompt_registry,
+            learning_optimizer=None,
+            skill_registry=None,
+        )
 
         import asyncio
         asyncio.run(
@@ -221,6 +230,15 @@ class TestRetryContextInPrompt:
         orchestrator._token_estimator = None
         orchestrator._prompt_registry = MagicMock()
         orchestrator._prompt_registry.load.return_value = "System prompt: {agent_descriptions}"
+        from orchestrator.planner import Planner as _Planner
+        orchestrator._planner = _Planner(
+            llm=orchestrator.llm,
+            llm_config=orchestrator.llm_config,
+            agent_registry=registry,
+            prompt_registry=orchestrator._prompt_registry,
+            learning_optimizer=None,
+            skill_registry=None,
+        )
 
         import asyncio
         asyncio.run(

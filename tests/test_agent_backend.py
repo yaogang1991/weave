@@ -234,17 +234,17 @@ class TestBackendRegistry:
         return pool
 
     def test_builtin_always_registered(self):
-        registry = BackendRegistry(pool=self._make_pool(), session_id="s1")
+        registry = BackendRegistry.from_pool(pool=self._make_pool(), session_id="s1")
         backend = registry.get_backend("builtin")
         assert isinstance(backend, BuiltinBackend)
 
     def test_fallback_on_missing_backend(self):
-        registry = BackendRegistry(pool=self._make_pool(), session_id="s1")
+        registry = BackendRegistry.from_pool(pool=self._make_pool(), session_id="s1")
         backend = registry.get_backend("nonexistent")
         assert isinstance(backend, BuiltinBackend)
 
     def test_register_and_get_backend(self):
-        registry = BackendRegistry(pool=self._make_pool(), session_id="s1")
+        registry = BackendRegistry.from_pool(pool=self._make_pool(), session_id="s1")
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(return_value=True)
         registry.register("external", mock_backend)
@@ -253,7 +253,7 @@ class TestBackendRegistry:
     @pytest.mark.asyncio
     async def test_execute_for_node_builtin(self):
         pool = self._make_pool()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
         node = DAGNode(id="n1", agent_type="generator", task_description="test")
         ctx = BackendContext(node=node, artifacts=[])
 
@@ -263,7 +263,7 @@ class TestBackendRegistry:
     @pytest.mark.asyncio
     async def test_execute_for_node_external_healthy(self):
         pool = self._make_pool()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
 
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(return_value=True)
@@ -283,7 +283,7 @@ class TestBackendRegistry:
     @pytest.mark.asyncio
     async def test_execute_for_node_external_unhealthy(self):
         pool = self._make_pool()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
 
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(return_value=False)
@@ -299,7 +299,7 @@ class TestBackendRegistry:
     @pytest.mark.asyncio
     async def test_execute_for_node_health_check_exception(self):
         pool = self._make_pool()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
 
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(side_effect=ConnectionError("unreachable"))

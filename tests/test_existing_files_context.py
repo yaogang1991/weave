@@ -86,13 +86,42 @@ def test_scan_handles_missing_dir(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Helper to build a partially-mocked IntelligentOrchestrator
+# ---------------------------------------------------------------------------
+
+def _make_orchestrator(llm, mock_registry, prompt_template):
+    """Build an IntelligentOrchestrator with _planner wired to the given LLM."""
+    from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
+    from orchestrator.planner import Planner as _Planner
+
+    orchestrator = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
+    orchestrator.agent_registry = mock_registry
+    orchestrator.llm = llm
+    orchestrator.learning_optimizer = None
+    orchestrator.llm_config = MagicMock()
+    orchestrator.llm_config.model = "claude-sonnet-4-6"
+    orchestrator.skill_registry = None
+    orchestrator._token_estimator = None
+    orchestrator._prompt_registry = MagicMock()
+    orchestrator._prompt_registry.load.return_value = prompt_template
+    orchestrator._planner = _Planner(
+        llm=orchestrator.llm,
+        llm_config=orchestrator.llm_config,
+        agent_registry=mock_registry,
+        prompt_registry=orchestrator._prompt_registry,
+        learning_optimizer=None,
+        skill_registry=None,
+    )
+    return orchestrator
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator plan() receives existing_files in project_context
 # ---------------------------------------------------------------------------
 
 def test_plan_receives_existing_files_in_prompt(tmp_path):
     """Verify the planner prompt includes an 'Existing Workspace Files' section
     when existing_files are present in project_context."""
-    from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 
     # Minimal mocks
     mock_registry = MagicMock()
@@ -117,17 +146,9 @@ def test_plan_receives_existing_files_in_prompt(tmp_path):
                 }),
             }
 
-    orchestrator = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
-    orchestrator.agent_registry = mock_registry
-    orchestrator.llm = FakeLLM()
-    orchestrator.learning_optimizer = None
-    orchestrator.llm_config = MagicMock()
-    orchestrator.llm_config.model = "claude-sonnet-4-6"
-    orchestrator.skill_registry = None
-    orchestrator._token_estimator = None
-    orchestrator._prompt_registry = MagicMock()
-    orchestrator._prompt_registry.load.return_value = (
-        "Template with {agent_descriptions}"
+    orchestrator = _make_orchestrator(
+        FakeLLM(), mock_registry,
+        "Template with {agent_descriptions}",
     )
 
     import asyncio
@@ -151,7 +172,6 @@ def test_plan_receives_existing_files_in_prompt(tmp_path):
 
 def test_plan_no_existing_files_section_when_empty():
     """When project_context has no existing_files, no section is added."""
-    from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
 
     mock_registry = MagicMock()
     mock_registry.to_prompt_description.return_value = "Agents"
@@ -174,16 +194,10 @@ def test_plan_no_existing_files_section_when_empty():
                 }),
             }
 
-    orchestrator = IntelligentOrchestrator.__new__(IntelligentOrchestrator)
-    orchestrator.agent_registry = mock_registry
-    orchestrator.llm = FakeLLM()
-    orchestrator.learning_optimizer = None
-    orchestrator.llm_config = MagicMock()
-    orchestrator.llm_config.model = "claude-sonnet-4-6"
-    orchestrator.skill_registry = None
-    orchestrator._token_estimator = None
-    orchestrator._prompt_registry = MagicMock()
-    orchestrator._prompt_registry.load.return_value = "Template {agent_descriptions}"
+    orchestrator = _make_orchestrator(
+        FakeLLM(), mock_registry,
+        "Template {agent_descriptions}",
+    )
 
     import asyncio
     asyncio.run(

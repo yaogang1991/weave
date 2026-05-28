@@ -760,6 +760,7 @@ class TestOrchestratorReplanMethod:
                 ']}'
             ),
         })
+        orchestrator._adapter.llm = orchestrator.llm
 
         # Setup DAG with some successful and one failed node
         dag = _make_three_node_dag()
@@ -801,6 +802,7 @@ class TestOrchestratorReplanMethod:
                 '], "edges": []}'
             ),
         })
+        orchestrator._adapter.llm = orchestrator.llm
 
         dag = _make_linear_dag()
         dag.nodes["a"].status = NodeStatus.FAILED
