@@ -2,14 +2,11 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 from core.backend_models import BackendContext, BackendResult
 from agent.backends.base import AgentBackend
 from agent.backends.builtin import BuiltinBackend
-
-if TYPE_CHECKING:
-    from agent.agent_pool import AgentPool
 
 logger = logging.getLogger(__name__)
 

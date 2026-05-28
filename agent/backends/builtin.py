@@ -1,7 +1,11 @@
 """BuiltinBackend -- wraps AgentPool or LightweightLLMCaller for node execution."""
 from __future__ import annotations
 
+import json
 import logging
+import platform
+import sys
+from pathlib import Path
 from typing import Any, Callable
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
@@ -88,6 +92,16 @@ class BuiltinBackend(AgentBackend):
         if context.project_context:
             parts.append(f"\n## Project Context\n{context.project_context}")
 
+        # Runtime environment context
+        project_root = context.workspace_path or str(Path.cwd())
+        parts.append(
+            "\n## Runtime Environment\n"
+            f"- OS: {platform.system()} {platform.release()}\n"
+            f"- CWD: {Path.cwd().resolve()}\n"
+            f"- PROJECT_ROOT: {Path(project_root).resolve()}\n"
+            f"- PYTHON: {sys.executable}\n"
+        )
+
         # Eval feedback (for retries)
         node = context.node
         if hasattr(node, "eval_feedback") and node.eval_feedback:
@@ -98,7 +112,6 @@ class BuiltinBackend(AgentBackend):
 
         # Auto-eval result (for downstream agents)
         if hasattr(node, "auto_eval_result") and node.auto_eval_result:
-            import json
             parts.append(
                 f"\n## Automated Evaluation Results\n"
                 f"```json\n{json.dumps(node.auto_eval_result, indent=2)}\n```"
@@ -116,12 +129,20 @@ class BuiltinBackend(AgentBackend):
             user_message=user_message,
             session_id=self._session_id or context.session_id,
             cancel_event=context.cancel_event,
+            agent_type=context.node.agent_type,
         )
+
+        if not response_text:
+            logger.warning(
+                "LightweightLLMCaller returned empty response for node %s (agent_type=%s)",
+                context.node.id, context.node.agent_type,
+            )
 
         return BackendResult(
             status=BackendStatus.COMPLETED,
             summary=response_text[:200] if response_text else "",
             output=response_text or "",
+            metadata={"token_usage": self._lightweight_caller.token_usage},
         )
 
     async def _execute_pool(self, context: BackendContext) -> BackendResult:

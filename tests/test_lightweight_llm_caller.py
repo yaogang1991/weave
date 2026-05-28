@@ -63,7 +63,8 @@ def caller(config, mock_session_store):
         c = LightweightLLMCaller.__new__(LightweightLLMCaller)
     c.session_store = mock_session_store
     c.token_usage = {"input_tokens": 0, "output_tokens": 0}
-    c.llm = MagicMock()
+    c._default_llm = MagicMock()
+    c._llm_router = None
     return c
 
 
@@ -77,7 +78,7 @@ class TestBasicCall:
 
     @pytest.mark.asyncio
     async def test_returns_response_content(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "Hello from LLM",
             "usage": {"input_tokens": 10, "output_tokens": 5},
@@ -93,7 +94,7 @@ class TestBasicCall:
     @pytest.mark.asyncio
     async def test_returns_multiline_content(self, caller, mock_session_store):
         long_text = "Step 1: Define models.\nStep 2: Create routes.\nStep 3: Add tests."
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": long_text,
         }
@@ -118,7 +119,7 @@ class TestTokenUsageTracking:
 
     @pytest.mark.asyncio
     async def test_single_call_usage(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "result",
             "usage": {"input_tokens": 100, "output_tokens": 50},
@@ -131,7 +132,7 @@ class TestTokenUsageTracking:
 
     @pytest.mark.asyncio
     async def test_multiple_calls_accumulate(self, caller, mock_session_store):
-        caller.llm.call.side_effect = [
+        caller._default_llm.call.side_effect = [
             {
                 "role": "assistant",
                 "content": "first",
@@ -152,7 +153,7 @@ class TestTokenUsageTracking:
 
     @pytest.mark.asyncio
     async def test_missing_usage_defaults_to_zero(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "no usage info",
         }
@@ -164,7 +165,7 @@ class TestTokenUsageTracking:
 
     @pytest.mark.asyncio
     async def test_partial_usage_only_input(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "partial",
             "usage": {"input_tokens": 42},
@@ -186,7 +187,7 @@ class TestCooperativeCancellation:
 
     @pytest.mark.asyncio
     async def test_cancel_event_forwarded(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "ok",
         }
@@ -195,20 +196,20 @@ class TestCooperativeCancellation:
         await caller.call("sys", "user", "sess-200", cancel_event=cancel)
 
         # Verify cancel_event was passed to llm.call
-        caller.llm.call.assert_called_once()
-        call_kwargs = caller.llm.call.call_args
+        caller._default_llm.call.assert_called_once()
+        call_kwargs = caller._default_llm.call.call_args
         assert call_kwargs.kwargs.get("cancel_event") is cancel
 
     @pytest.mark.asyncio
     async def test_no_cancel_event_passes_none(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "ok",
         }
 
         await caller.call("sys", "user", "sess-201")
 
-        call_kwargs = caller.llm.call.call_args
+        call_kwargs = caller._default_llm.call.call_args
         assert call_kwargs.kwargs.get("cancel_event") is None
 
 
@@ -227,7 +228,7 @@ class TestSessionStoreEventEmission:
             "content": "planned",
             "usage": {"input_tokens": 10, "output_tokens": 5},
         }
-        caller.llm.call.return_value = response
+        caller._default_llm.call.return_value = response
 
         await caller.call("sys", "user", "sess-300")
 
@@ -245,7 +246,7 @@ class TestSessionStoreEventEmission:
             "usage": {"input_tokens": 20, "output_tokens": 10},
             "finish_reason": "end_turn",
         }
-        caller.llm.call.return_value = response
+        caller._default_llm.call.return_value = response
 
         await caller.call("sys", "user", "sess-301")
 
@@ -265,7 +266,7 @@ class TestEmptyResponseHandling:
 
     @pytest.mark.asyncio
     async def test_empty_content_returns_empty_string(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "",
         }
@@ -275,7 +276,7 @@ class TestEmptyResponseHandling:
 
     @pytest.mark.asyncio
     async def test_missing_content_key_returns_empty_string(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
         }
 
@@ -284,7 +285,7 @@ class TestEmptyResponseHandling:
 
     @pytest.mark.asyncio
     async def test_none_content_returns_empty_string(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": None,
         }
@@ -305,7 +306,7 @@ class TestLLMErrorHandling:
     async def test_rate_limit_error_propagates(self, caller, mock_session_store):
         from core.exceptions import RateLimitError
 
-        caller.llm.call.side_effect = RateLimitError(
+        caller._default_llm.call.side_effect = RateLimitError(
             provider="anthropic", model="claude-sonnet-4-6", retries=3,
         )
 
@@ -314,21 +315,21 @@ class TestLLMErrorHandling:
 
     @pytest.mark.asyncio
     async def test_timeout_error_propagates(self, caller, mock_session_store):
-        caller.llm.call.side_effect = TimeoutError("LLM call timed out")
+        caller._default_llm.call.side_effect = TimeoutError("LLM call timed out")
 
         with pytest.raises(TimeoutError, match="timed out"):
             await caller.call("sys", "user", "sess-501")
 
     @pytest.mark.asyncio
     async def test_generic_error_propagates(self, caller, mock_session_store):
-        caller.llm.call.side_effect = RuntimeError("API unavailable")
+        caller._default_llm.call.side_effect = RuntimeError("API unavailable")
 
         with pytest.raises(RuntimeError, match="API unavailable"):
             await caller.call("sys", "user", "sess-502")
 
     @pytest.mark.asyncio
     async def test_error_does_not_emit_event(self, caller, mock_session_store):
-        caller.llm.call.side_effect = RuntimeError("boom")
+        caller._default_llm.call.side_effect = RuntimeError("boom")
 
         with pytest.raises(RuntimeError):
             await caller.call("sys", "user", "sess-503")
@@ -338,7 +339,7 @@ class TestLLMErrorHandling:
 
     @pytest.mark.asyncio
     async def test_error_does_not_update_token_usage(self, caller, mock_session_store):
-        caller.llm.call.side_effect = RuntimeError("fail")
+        caller._default_llm.call.side_effect = RuntimeError("fail")
 
         with pytest.raises(RuntimeError):
             await caller.call("sys", "user", "sess-504")
@@ -357,7 +358,7 @@ class TestMessageConstruction:
 
     @pytest.mark.asyncio
     async def test_system_and_user_messages(self, caller, mock_session_store):
-        caller.llm.call.return_value = {
+        caller._default_llm.call.return_value = {
             "role": "assistant",
             "content": "done",
         }
@@ -368,8 +369,8 @@ class TestMessageConstruction:
             session_id="sess-600",
         )
 
-        caller.llm.call.assert_called_once()
-        messages = caller.llm.call.call_args[0][0]
+        caller._default_llm.call.assert_called_once()
+        messages = caller._default_llm.call.call_args[0][0]
         assert len(messages) == 2
         assert messages[0] == {"role": "system", "content": "You are an evaluator."}
         assert messages[1] == {
@@ -379,22 +380,22 @@ class TestMessageConstruction:
 
     @pytest.mark.asyncio
     async def test_long_system_prompt(self, caller, mock_session_store):
-        caller.llm.call.return_value = {"role": "assistant", "content": "ok"}
+        caller._default_llm.call.return_value = {"role": "assistant", "content": "ok"}
         long_prompt = "You are a planner. " * 200
 
         await caller.call(system_prompt=long_prompt, user_message="task", session_id="s")
 
-        messages = caller.llm.call.call_args[0][0]
+        messages = caller._default_llm.call.call_args[0][0]
         assert messages[0]["role"] == "system"
         assert messages[0]["content"] == long_prompt
 
     @pytest.mark.asyncio
     async def test_empty_prompts(self, caller, mock_session_store):
-        caller.llm.call.return_value = {"role": "assistant", "content": "ok"}
+        caller._default_llm.call.return_value = {"role": "assistant", "content": "ok"}
 
         await caller.call(system_prompt="", user_message="", session_id="s")
 
-        messages = caller.llm.call.call_args[0][0]
+        messages = caller._default_llm.call.call_args[0][0]
         assert messages[0]["content"] == ""
         assert messages[1]["content"] == ""
 
@@ -427,6 +428,88 @@ class TestInitialization:
         with patch("agent.lightweight_llm_caller.LLMClient") as MockLLM:
             config = _make_config()
             store = MagicMock()
-            LightweightLLMCaller(config, store)
+            caller = LightweightLLMCaller(config, store)
 
             MockLLM.assert_called_once_with(config)
+            assert caller._llm_router is None
+
+    def test_llm_router_stored(self):
+        with patch("agent.lightweight_llm_caller.LLMClient"):
+            config = _make_config()
+            store = MagicMock()
+            router = MagicMock()
+            caller = LightweightLLMCaller(config, store, llm_router=router)
+
+            assert caller._llm_router is router
+
+
+# ---------------------------------------------------------------------------
+# LLM Router integration
+# ---------------------------------------------------------------------------
+
+
+class TestLLMRouterIntegration:
+    """Test that LLMRouter is used for agent_type-based model selection."""
+
+    @pytest.mark.asyncio
+    async def test_router_selects_client_by_agent_type(self, mock_session_store):
+        with patch.object(LightweightLLMCaller, "__init__", lambda self, *a, **kw: None):
+            c = LightweightLLMCaller.__new__(LightweightLLMCaller)
+        c.session_store = mock_session_store
+        c.token_usage = {"input_tokens": 0, "output_tokens": 0}
+        c._default_llm = MagicMock()
+
+        router_client = MagicMock()
+        router_client.call.return_value = {
+            "role": "assistant",
+            "content": "routed response",
+            "usage": {"input_tokens": 5, "output_tokens": 3},
+        }
+        mock_router = MagicMock()
+        mock_router.get_client.return_value = router_client
+        c._llm_router = mock_router
+
+        result = await c.call(
+            system_prompt="sys", user_message="task",
+            session_id="sess-router-1", agent_type="planner",
+        )
+
+        mock_router.get_client.assert_called_once_with("planner")
+        assert result == "routed response"
+
+    @pytest.mark.asyncio
+    async def test_no_agent_type_uses_default(self, caller, mock_session_store):
+        caller._default_llm.call.return_value = {
+            "role": "assistant",
+            "content": "default",
+        }
+
+        result = await caller.call(
+            system_prompt="sys", user_message="task",
+            session_id="sess-router-2",
+        )
+
+        # Should NOT call router
+        assert caller._llm_router is None
+        assert result == "default"
+
+    @pytest.mark.asyncio
+    async def test_no_router_uses_default_for_agent_type(self, mock_session_store):
+        with patch.object(LightweightLLMCaller, "__init__", lambda self, *a, **kw: None):
+            c = LightweightLLMCaller.__new__(LightweightLLMCaller)
+        c.session_store = mock_session_store
+        c.token_usage = {"input_tokens": 0, "output_tokens": 0}
+        c._default_llm = MagicMock()
+        c._default_llm.call.return_value = {
+            "role": "assistant",
+            "content": "fallback",
+        }
+        c._llm_router = None
+
+        result = await c.call(
+            system_prompt="sys", user_message="task",
+            session_id="sess-router-3", agent_type="evaluator",
+        )
+
+        # With agent_type but no router, _get_client falls back to default
+        assert result == "fallback"

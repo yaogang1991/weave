@@ -191,6 +191,7 @@ class ExecutionFactory:
         lightweight_caller = LightweightLLMCaller(
             config=self._llm_config,
             session_store=store,
+            llm_router=getattr(self, "_llm_router", None),
         )
 
         # M6.3: Create BuiltinBackend with both lightweight caller and pool
