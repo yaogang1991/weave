@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+from pathlib import Path
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
@@ -36,10 +37,8 @@ class CodexBackend(AgentBackend):
         self._model = cfg.model
         self._sandbox_mode = cfg.sandbox_mode
         self._timeout = cfg.timeout
+        self._mcp_config = cfg.mcp_config
         self._resolved_path: str | None = None
-        # M6.8: MCP config passing via config.toml not yet implemented
-        # for CodexBackend. Codex uses a different config format (TOML).
-        # Future: convert MCPConfig to codex config.toml [mcp_servers] section.
 
     @property
     def name(self) -> str:
@@ -69,13 +68,25 @@ class CodexBackend(AgentBackend):
         ):
             env = inject_trace_context(dict(os.environ))
 
+            # Write MCP config for codex subprocess (M6.8).
+            mcp_config_path: Path | None = None
+            if self._mcp_config:
+                mcp_config_path = self._write_codex_mcp_config(
+                    self._mcp_config, cwd,
+                )
+
             try:
-                process = await asyncio.create_subprocess_exec(
+                cmd = [
                     self._resolved_path, "exec", "--json",
                     f"--sandbox={sandbox}",
                     f"--model={self._model}",
-                    "--",
-                    prompt,
+                ]
+                if mcp_config_path:
+                    cmd.extend(["--mcp-config", str(mcp_config_path)])
+                cmd.extend(["--", prompt])
+
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
@@ -108,6 +119,12 @@ class CodexBackend(AgentBackend):
                     agent_type=context.node.agent_type,
                     timeout=self._timeout,
                 )
+            finally:
+                if mcp_config_path:
+                    try:
+                        mcp_config_path.unlink()
+                    except Exception:
+                        logger.debug("Failed to cleanup MCP config: %s", mcp_config_path)
 
             stderr = ""
             if process.stderr is not None:
@@ -307,3 +324,19 @@ class CodexBackend(AgentBackend):
                 agent_type=context.node.agent_type,
                 timeout=self._timeout,
             )
+
+    @staticmethod
+    def _write_codex_mcp_config(
+        mcp_config: Any, cwd: str,
+    ) -> Path | None:
+        """Write MCP config in .mcp.json format for Codex subprocess (M6.8).
+
+        Codex CLI accepts the same --mcp-config flag as Claude Code.
+        Falls back to writing .mcp.json if MCPConfigExporter is available.
+        """
+        try:
+            from mcp.config_export import MCPConfigExporter
+            return MCPConfigExporter.write_config(mcp_config, cwd, suffix="codex")
+        except Exception:
+            logger.debug("MCP config export for Codex failed", exc_info=True)
+            return None
