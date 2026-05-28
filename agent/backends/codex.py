@@ -120,11 +120,8 @@ class CodexBackend(AgentBackend):
                     timeout=self._timeout,
                 )
             finally:
-                if mcp_config_path:
-                    try:
-                        mcp_config_path.unlink()
-                    except Exception:
-                        logger.debug("Failed to cleanup MCP config: %s", mcp_config_path)
+                from mcp.config_export import MCPConfigExporter
+                MCPConfigExporter.cleanup_config(mcp_config_path)
 
             stderr = ""
             if process.stderr is not None:
