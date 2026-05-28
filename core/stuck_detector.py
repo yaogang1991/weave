@@ -1,5 +1,9 @@
 """M4.2: Stuck pattern detection for agent loops.
 
+DEPRECATED (M6.4): Only used by AgentWorker (deprecated in favor of BackendRegistry).
+External backends (ClaudeCodeBackend) manage their own stuck detection internally.
+Retained until AgentWorker is fully removed. See ADR-0017.
+
 Extracts and extends the inline stuck detection from agent/worker.py
 (empty args, degenerate args) into a composable, testable class.
 """
