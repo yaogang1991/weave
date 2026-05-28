@@ -35,6 +35,9 @@ class CodexBackend(AgentBackend):
         self._sandbox_mode = cfg.sandbox_mode
         self._timeout = cfg.timeout
         self._resolved_path: str | None = None
+        # M6.8: MCP config passing via config.toml not yet implemented
+        # for CodexBackend. Codex uses a different config format (TOML).
+        # Future: convert MCPConfig to codex config.toml [mcp_servers] section.
 
     @property
     def name(self) -> str:

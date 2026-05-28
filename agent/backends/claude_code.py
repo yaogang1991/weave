@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+from pathlib import Path
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
@@ -49,7 +50,7 @@ class ClaudeCodeRuntimeConfig:
     __slots__ = (
         "_cli_path", "_model", "_max_turns", "_permission_mode",
         "_allowed_tools", "_system_prompt_append", "_max_budget_usd",
-        "_timeout_override",
+        "_timeout_override", "_mcp_config",
     )
 
     def __init__(
@@ -62,6 +63,7 @@ class ClaudeCodeRuntimeConfig:
         system_prompt_append: str = "",
         max_budget_usd: float = 0.0,
         timeout_override: int = 0,
+        mcp_config: Any = None,
     ) -> None:
         self._cli_path = cli_path
         self._model = model
@@ -76,6 +78,7 @@ class ClaudeCodeRuntimeConfig:
         self._system_prompt_append = system_prompt_append
         self._max_budget_usd = max_budget_usd
         self._timeout_override = timeout_override
+        self._mcp_config = mcp_config
 
     @classmethod
     def from_core_config(cls, config: Any) -> ClaudeCodeRuntimeConfig:
@@ -89,6 +92,7 @@ class ClaudeCodeRuntimeConfig:
             system_prompt_append=config.system_prompt_append,
             max_budget_usd=config.max_budget_usd,
             timeout_override=config.timeout_override,
+            mcp_config=getattr(config, 'mcp_config', None),
         )
 
     @property
@@ -122,6 +126,10 @@ class ClaudeCodeRuntimeConfig:
     @property
     def timeout_override(self) -> int:
         return self._timeout_override
+
+    @property
+    def mcp_config(self) -> Any:
+        return self._mcp_config
 
 
 class ClaudeCodeBackend(AgentBackend):
@@ -301,8 +309,17 @@ class ClaudeCodeBackend(AgentBackend):
         self, context: BackendContext, prompt: str,
     ) -> BackendResult:
         """Execute via claude CLI subprocess with stream-json output."""
-        cmd = self._build_cli_command(context, prompt)
         cwd = context.workspace_path or "."
+
+        # Write MCP config for --mcp-config support (M6.8).
+        mcp_config_path: Path | None = None
+        if self._config.mcp_config:
+            from mcp.config_export import MCPConfigExporter
+            mcp_config_path = MCPConfigExporter.write_config(
+                self._config.mcp_config, cwd,
+            )
+
+        cmd = self._build_cli_command(context, prompt, mcp_config_path)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -342,6 +359,11 @@ class ClaudeCodeBackend(AgentBackend):
                 agent_type=context.node.agent_type,
                 timeout=self._get_cli_timeout(),
             )
+        finally:
+            # Cleanup MCP config file after execution (M6.8).
+            if mcp_config_path:
+                from mcp.config_export import MCPConfigExporter
+                MCPConfigExporter.cleanup_config(mcp_config_path)
 
         if process.stderr is not None:
             stderr_bytes = await process.stderr.read()
@@ -554,6 +576,7 @@ class ClaudeCodeBackend(AgentBackend):
 
     def _build_cli_command(
         self, context: BackendContext, prompt: str,
+        mcp_config_path: str | None = None,
     ) -> list[str]:
         cmd = [
             self._config.cli_path,
@@ -579,6 +602,8 @@ class ClaudeCodeBackend(AgentBackend):
             cmd.append("--resume")
             if "--session-id" not in cmd:
                 cmd.extend(["--session-id", context.resume_session_id])
+        if mcp_config_path:
+            cmd.extend(["--mcp-config", str(mcp_config_path)])
 
         cmd.append(prompt)
         return cmd
