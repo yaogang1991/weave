@@ -19,6 +19,7 @@ from core.models import (
 from core.dag_models import DAGOutputModel
 from core.agent_registry import AgentRegistry
 from core.llm_client import LLMClient
+from core.provider_health import ProviderHealthTracker, FailureCategory
 from orchestrator.llm_utils import (
     truncate_requirement_if_needed,
     prune_messages_for_size,
@@ -54,6 +55,7 @@ class Planner:
         self.learning_optimizer = learning_optimizer
         self.skill_registry = skill_registry
         self._token_estimator = token_estimator
+        self._plan_health = ProviderHealthTracker()
 
     def _prune_messages(self, messages: list[dict]) -> list[dict]:
         pruned = prune_messages_for_size(messages)
@@ -128,14 +130,30 @@ class Planner:
 
         plan_data = None
         last_timeout_exc = None
+        provider = getattr(self.llm_config, "provider", "anthropic")
+        model = getattr(self.llm_config, "model", "")
         for plan_attempt in range(self._PLAN_TIMEOUT_RETRIES + 1):
+            if plan_attempt > 0 and not self._plan_health.is_healthy(
+                provider, model,
+            ):
+                logger.warning(
+                    "Provider %s/%s unhealthy after timeout, "
+                    "skipping plan retry %d/%d (#934)",
+                    provider, model,
+                    plan_attempt + 1, self._PLAN_TIMEOUT_RETRIES + 1,
+                )
+                break
             try:
                 plan_data = self._plan_structured_output(messages)
                 if plan_data is None:
                     plan_data = self._plan_free_text(messages)
+                self._plan_health.record_success(provider, model)
                 break
             except TimeoutError as exc:
                 last_timeout_exc = exc
+                self._plan_health.record_failure(
+                    provider, model, FailureCategory.UNKNOWN,
+                )
                 if plan_attempt < self._PLAN_TIMEOUT_RETRIES:
                     logger.warning(
                         "Plan LLM timeout (attempt %d/%d), retrying (#735): %s",
