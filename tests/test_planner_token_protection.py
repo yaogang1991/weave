@@ -165,6 +165,7 @@ class TestRetryContextTruncation:
 
         orch.llm = MagicMock()
         orch.llm.call = mock_call
+        orch._planner.llm = orch.llm
 
         dag = await orch.plan("Build a simple API")
 
@@ -207,6 +208,7 @@ class TestRetryContextTruncation:
 
         orch.llm = MagicMock()
         orch.llm.call = mock_call
+        orch._planner.llm = orch.llm
 
         await orch.plan("Build API")
 

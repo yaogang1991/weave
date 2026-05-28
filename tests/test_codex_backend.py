@@ -313,7 +313,7 @@ class TestCodexRegistryIntegration:
     @pytest.mark.asyncio
     async def test_register_and_execute(self):
         pool = MagicMock()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
 
         backend = CodexBackend()
         registry.register("codex", backend)
@@ -335,7 +335,7 @@ class TestCodexRegistryIntegration:
     @pytest.mark.asyncio
     async def test_fallback_when_unhealthy(self):
         pool = MagicMock()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
 
         with patch("agent.backends.codex.shutil.which", return_value=None):
             backend = CodexBackend()

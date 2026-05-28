@@ -755,6 +755,7 @@ class TestAdaptToFailureSoftFallback:
             agent_registry=registry,
         )
         orch.llm = mock_llm
+        orch._adapter.llm = mock_llm
 
         decision = await orch.adapt_to_failure(dag, "a", "boom")
         assert decision.action == "skip"
@@ -789,6 +790,7 @@ class TestAdaptToFailureSoftFallback:
             agent_registry=registry,
         )
         orch.llm = mock_llm
+        orch._adapter.llm = mock_llm
 
         decision = await orch.adapt_to_failure(dag, "a", "boom")
         assert decision.action == "abort"
@@ -821,6 +823,7 @@ class TestAdaptToFailureSoftFallback:
             agent_registry=registry,
         )
         orch.llm = mock_llm
+        orch._adapter.llm = mock_llm
 
         decision = await orch.adapt_to_failure(dag, "a", "boom")
         assert decision.action == "abort"

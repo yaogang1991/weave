@@ -39,7 +39,7 @@ class TestClaudeCodeBackendRegistryIntegration:
         )
 
         pool = _make_pool_mock()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
         config = ClaudeCodeRuntimeConfig()
         backend = ClaudeCodeBackend(config=config)
         registry.register("claude_code", backend)
@@ -88,7 +88,7 @@ class TestClaudeCodeBackendRegistryIntegration:
         )
 
         pool = _make_pool_mock()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
         config = ClaudeCodeRuntimeConfig(cli_path="/nonexistent/claude")
         backend = ClaudeCodeBackend(config=config)
         backend._sdk_available = False
@@ -106,7 +106,7 @@ class TestClaudeCodeBackendRegistryIntegration:
     @pytest.mark.asyncio
     async def test_unknown_backend_falls_back_to_builtin(self):
         pool = _make_pool_mock()
-        registry = BackendRegistry(pool=pool, session_id="s1")
+        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
 
         node = _make_node()
         ctx = BackendContext(node=node, session_id="s1")

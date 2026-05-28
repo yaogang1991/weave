@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 from core.backend_models import BackendContext, BackendResult
 from agent.backends.base import AgentBackend
 from agent.backends.builtin import BuiltinBackend
+
+if TYPE_CHECKING:
+    from agent.agent_pool import AgentPool
 
 logger = logging.getLogger(__name__)
 
@@ -20,12 +23,32 @@ class BackendRegistry:
     otherwise degrades to BuiltinBackend.
     """
 
-    def __init__(self, pool: Any, session_id: str = "") -> None:
-        self._pool = pool
-        self._session_id = session_id
+    def __init__(self, builtin: AgentBackend) -> None:
         self._backends: dict[str, AgentBackend] = {}
-        self._builtin = BuiltinBackend(pool=pool, session_id=session_id)
+        self._builtin = builtin
         self._backends["builtin"] = self._builtin
+
+    @classmethod
+    def from_pool(
+        cls,
+        pool: Any,
+        session_id: str = "",
+        lightweight_caller: Any = None,
+        session_store: Any = None,
+    ) -> BackendRegistry:
+        """Backward-compatible factory: create a BackendRegistry with a BuiltinBackend.
+
+        Use this during gradual migration from the old (pool, session_id) constructor.
+        New code should prefer constructing a BuiltinBackend explicitly and passing
+        it to ``BackendRegistry(builtin=...)`` directly.
+        """
+        builtin = BuiltinBackend(
+            lightweight_caller=lightweight_caller,
+            session_store=session_store,
+            session_id=session_id,
+            pool=pool,
+        )
+        return cls(builtin=builtin)
 
     def register(self, name: str, backend: AgentBackend) -> None:
         """Register a backend instance by name."""

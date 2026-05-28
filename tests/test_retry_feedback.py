@@ -111,6 +111,17 @@ class TestOrchestratorErrorVisibility:
         orchestrator.llm.call = MagicMock(return_value={
             "content": '{"action": "retry", "reasoning": "fix lint"}',
         })
+        orchestrator.llm_config = MagicMock()
+        orchestrator.llm_config.model = "test-model"
+        orchestrator.agent_registry = MagicMock()
+        from orchestrator.adapter import Adapter
+        orchestrator._adapter = Adapter(
+            llm=orchestrator.llm,
+            llm_config=orchestrator.llm_config,
+            agent_registry=orchestrator.agent_registry,
+            prompt_registry=orchestrator._prompt_registry,
+            plan_to_dag_fn=MagicMock(),
+        )
         dag = _make_dag_with_failed_generator()
 
         with patch.object(

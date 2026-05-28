@@ -10,7 +10,7 @@ from argparse import Namespace
 import pytest
 
 from core.models import DAG, DAGNode, FailureDecision
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from unittest.mock import AsyncMock
 
 
@@ -23,7 +23,7 @@ def _make_engine(replan_handler):
             action="skip", reasoning="test",
         )),
         replan_handler=replan_handler,
-        enable_watchdog=False,
+        config=DAGEngineConfig(enable_watchdog=False),
     )
 
 

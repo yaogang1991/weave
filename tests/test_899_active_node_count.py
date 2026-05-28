@@ -8,7 +8,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from core.models import DAG, DAGNode, NodeStatus, FailureDecision
-from core.dag_engine import DAGExecutionEngine
+from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 
 async def _skip_handler(dag, node_id, error):
@@ -35,7 +35,7 @@ class TestActiveNodeCount:
             agent_executor=AsyncMock(return_value={}),
             failure_handler=_skip_handler,
             replan_handler=_replan_handler,
-            max_dag_nodes=25,
+            config=DAGEngineConfig(max_dag_nodes=25),
         )
 
         # 20 skipped + 2 failed + 3 pending = 25 total
@@ -78,7 +78,7 @@ class TestActiveNodeCount:
             agent_executor=AsyncMock(return_value={}),
             failure_handler=_skip_handler,
             replan_handler=_replan_handler,
-            max_dag_nodes=25,
+            config=DAGEngineConfig(max_dag_nodes=25),
         )
 
         dag = DAG(reasoning="test")
@@ -107,7 +107,7 @@ class TestActiveNodeCount:
             agent_executor=AsyncMock(return_value={}),
             failure_handler=_skip_handler,
             replan_handler=_replan_handler,
-            max_dag_nodes=10,
+            config=DAGEngineConfig(max_dag_nodes=10),
         )
 
         dag = DAG(reasoning="test")

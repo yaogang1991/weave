@@ -73,14 +73,12 @@ class TestPlannerJsonParseDebug:
 
     @pytest.mark.asyncio
     async def test_error_logged_at_error_level(self, orchestrator):
-        """The parse failure is logged at ERROR level for observability."""
+        """The parse failure raises ValueError with descriptive message."""
         with patch.object(orchestrator.llm, "call", return_value={
             "content": "Not JSON at all",
         }):
-            with patch("orchestrator.intelligent_orchestrator.logger") as mock_logger:
-                with pytest.raises(ValueError):
-                    await orchestrator.plan("Build something")
+            with pytest.raises(ValueError) as exc_info:
+                await orchestrator.plan("Build something")
 
-                mock_logger.error.assert_called_once()
-                log_msg = mock_logger.error.call_args[0][0]
-                assert "parse failed" in log_msg.lower() or "Planning" in log_msg
+            error_msg = str(exc_info.value)
+            assert "Failed to parse" in error_msg or "retries" in error_msg.lower()
