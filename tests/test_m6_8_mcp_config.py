@@ -71,6 +71,16 @@ class TestMCPConfigExporterToMcpJson:
         assert "env" not in entry
         assert entry["command"] == "run"
 
+    def test_disabled_servers_are_excluded(self):
+        servers = [
+            MCPServerConfig(name="active", command="cmd1"),
+            MCPServerConfig(name="disabled", command="cmd2", enabled=False),
+        ]
+        config = MCPConfig(servers=servers)
+        result = MCPConfigExporter.to_mcp_json(config)
+        assert "active" in result["mcpServers"]
+        assert "disabled" not in result["mcpServers"]
+
 
 class TestMCPConfigExporterWriteConfig:
     """Tests for MCPConfigExporter.write_config."""
@@ -87,7 +97,7 @@ class TestMCPConfigExporterWriteConfig:
             path = MCPConfigExporter.write_config(config, tmpdir)
             assert path is not None
             assert path.exists()
-            assert path.name == ".mcp.json"
+            assert path.name.startswith(".mcp-weave-")
 
             data = json.loads(path.read_text(encoding="utf-8"))
             assert "mcpServers" in data
