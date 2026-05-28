@@ -162,6 +162,9 @@ class PlanValidator:
         # Foundation node dependency enforcement (#740)
         edges = self._check_foundation_dependencies(nodes, edges)
         plan_data["edges"] = edges
+        # Evaluator-to-evaluator dependency softening (#958)
+        edges = self._soften_evaluator_dependencies(nodes, edges)
+        plan_data["edges"] = edges
         # #754: Re-run cycle detection after foundation auto-fix may
         # have added edges that create a cycle.
         self._detect_cycle(node_ids, edges)
@@ -591,6 +594,44 @@ class PlanValidator:
 
         if new_edges:
             edges = list(edges) + new_edges
+
+        return edges
+
+    def _soften_evaluator_dependencies(
+        self,
+        nodes: list[dict],
+        edges: list[dict],
+    ) -> list[dict]:
+        """Convert hard edges between evaluator nodes to soft (#958).
+
+        When an evaluator produces zero output artifacts, it is marked FAILED.
+        If a downstream evaluator has a hard dependency on it, the downstream
+        node is also SKIPPED — cascading the failure even though the
+        implementation was successful. Soft dependencies allow downstream
+        evaluators to continue with a warning when an upstream evaluator fails.
+        """
+        evaluator_ids = {
+            n.get("id") for n in nodes
+            if n.get("agent_type") == "evaluator" and n.get("id")
+        }
+        if not evaluator_ids:
+            return edges
+
+        softened = 0
+        for edge in edges:
+            from_id = edge.get("from", "")
+            to_id = edge.get("to", "")
+            if (from_id in evaluator_ids and to_id in evaluator_ids
+                    and edge.get("dependency_type", "hard") == "hard"):
+                edge["dependency_type"] = "soft"
+                softened += 1
+
+        if softened:
+            self.warnings.append(
+                f"Softened {softened} evaluator-to-evaluator hard "
+                f"dependencies to soft — prevents cascade skip when "
+                f"upstream evaluator produces zero artifacts (#958)."
+            )
 
         return edges
 
