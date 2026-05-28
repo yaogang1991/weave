@@ -3,7 +3,10 @@
 Defines the message format for stdin/stdout communication with
 CLI agents that support --input-format stream-json mode.
 
-Status: Protocol definition only. Implementation deferred to future milestone.
+M6.7: Protocol definition complete. Full stdin/stdout bidirectional
+communication (initialize request, tool result relay) is deferred to a
+future milestone. Session resume (--resume) is implemented in
+ClaudeCodeBackend._build_cli_command().
 """
 from __future__ import annotations
 

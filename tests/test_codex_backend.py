@@ -2,6 +2,7 @@
 import asyncio
 import json
 import threading
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -358,3 +359,77 @@ class TestCodexName:
     def test_capabilities(self):
         backend = CodexBackend()
         assert backend.get_capabilities() == ["generator"]
+
+
+class TestCodexMCPConfig:
+    def test_write_mcp_config_produces_file(self, tmp_path):
+        mcp_config = MagicMock()
+        mcp_config.servers = [MagicMock(
+            name="test_server", enabled=True,
+            command="node", args=["server.js"], env={"KEY": "val"},
+        )]
+
+        with patch("mcp.config_export.MCPConfigExporter.write_config") as mock_write:
+            mock_write.return_value = Path(str(tmp_path / ".mcp-weave-codex.json"))
+            result = CodexBackend._write_codex_mcp_config(mcp_config, str(tmp_path))
+
+        mock_write.assert_called_once_with(mcp_config, str(tmp_path), suffix="codex")
+        assert result is not None
+
+    def test_write_mcp_config_returns_none_on_failure(self, tmp_path):
+        mcp_config = MagicMock()
+
+        with patch("mcp.config_export.MCPConfigExporter.write_config", side_effect=Exception("boom")):
+            result = CodexBackend._write_codex_mcp_config(mcp_config, str(tmp_path))
+
+        assert result is None
+
+    def test_execute_passes_mcp_config_flag(self):
+        from core.config import CodexBackendConfig
+
+        mcp_config = MagicMock()
+        config = CodexBackendConfig(mcp_config=mcp_config)
+        backend = CodexBackend(config=config)
+        backend._resolved_path = "/usr/local/bin/codex"
+
+        ctx = _make_context()
+        config_path = Path("/tmp/.mcp-weave-codex.json")
+
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(return_value=b"")
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+
+        with (
+            patch("agent.backends.codex.CodexBackend._write_codex_mcp_config", return_value=config_path),
+            patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec,
+            patch("mcp.config_export.MCPConfigExporter.cleanup_config"),
+        ):
+            result = backend.execute(ctx)
+            _ = asyncio.get_event_loop().run_until_complete(result)
+
+        cmd_args = mock_exec.call_args[0]
+        assert "--mcp-config" in cmd_args
+        assert str(config_path) in cmd_args
+
+    def test_execute_skips_mcp_config_when_none(self):
+        backend = CodexBackend()
+        backend._resolved_path = "/usr/local/bin/codex"
+
+        ctx = _make_context()
+
+        mock_process = MagicMock()
+        mock_process.returncode = 0
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(return_value=b"")
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec:
+            result = backend.execute(ctx)
+            _ = asyncio.get_event_loop().run_until_complete(result)
+
+        cmd_args = mock_exec.call_args[0]
+        assert "--mcp-config" not in cmd_args

@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -630,6 +630,7 @@ class CodexBackendConfig(BaseModel):
         default_factory=lambda: os.getenv("WEAVE_CODEX_SANDBOX", "workspace-write"),
     )
     timeout: int = Field(default=600, description="Per-invocation timeout in seconds.")
+    mcp_config: Any = Field(default=None, description="MCPConfig for tool passing to Codex subprocess (M6.8)")
 
     # Allowed sandbox modes — single source of truth (#619 #4).
     VALID_SANDBOX_MODES: ClassVar[frozenset[str]] = frozenset({
