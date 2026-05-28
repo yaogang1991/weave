@@ -268,6 +268,8 @@ class ClaudeCodeBackend(AgentBackend):
                 messages=messages,
             )
 
+        sdk_session_id = data.get("session_id", "")
+
         return BackendResult(
             status=BackendStatus.COMPLETED,
             summary=result_text[:SUMMARY_LIMIT],
@@ -275,12 +277,14 @@ class ClaudeCodeBackend(AgentBackend):
             output=result_text,
             metadata={
                 "token_usage": token_usage,
-                "session_id": data.get("session_id", ""),
+                "session_id": sdk_session_id,
                 "cost_usd": data.get("total_cost_usd", 0.0),
                 "backend": self.BACKEND_NAME,
                 "tool_calls": tool_calls,
             },
             messages=messages,
+            session_id=sdk_session_id,
+            can_resume=bool(sdk_session_id),
         )
 
     # -- CLI fallback path ---------------------------------------------------
@@ -527,6 +531,8 @@ class ClaudeCodeBackend(AgentBackend):
                 artifacts=artifacts,
                 metadata={"token_usage": usage, "session_id": session_id},
                 messages=[m.model_dump() for m in parser.messages],
+                session_id=session_id,
+                can_resume=bool(session_id),
             )
 
         return BackendResult(
@@ -540,6 +546,8 @@ class ClaudeCodeBackend(AgentBackend):
                 "backend": self.BACKEND_NAME,
             },
             messages=[m.model_dump() for m in parser.messages],
+            session_id=session_id,
+            can_resume=bool(session_id),
         )
 
     def _build_cli_command(
@@ -564,6 +572,11 @@ class ClaudeCodeBackend(AgentBackend):
             cmd.extend(["--allowed-tools", tool])
         if context.session_id:
             cmd.extend(["--session-id", context.session_id])
+        # M6.7: Resume previous session when resume_session_id is provided.
+        if getattr(context, "resume_session_id", ""):
+            cmd.append("--resume")
+            if "--session-id" not in cmd:
+                cmd.extend(["--session-id", context.resume_session_id])
 
         cmd.append(prompt)
         return cmd
