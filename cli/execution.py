@@ -351,7 +351,7 @@ def _build_runtime(
     if backend_name == "claude_code" or config.claude_code.enabled:
         from agent.backends.claude_code import (
             ClaudeCodeBackend,
-            ClaudeCodeConfig as RuntimeConfig,
+            ClaudeCodeRuntimeConfig as RuntimeConfig,
         )
         cc_config = RuntimeConfig.from_core_config(config.claude_code)
         cc_backend = ClaudeCodeBackend(config=cc_config)
@@ -389,6 +389,7 @@ def _build_runtime(
                 for agent_type in wd_cfg.agent_overrides
             },
             node_timeout_config=config.node_timeout,
+            default_agent_backend=backend_name or config.default_agent_backend,
         ),
         evaluator=evaluator,
         work_dir=project_work_dir,
