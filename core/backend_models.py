@@ -30,6 +30,8 @@ class BackendResult(BaseModel):
     error: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     messages: list[dict[str, Any]] = Field(default_factory=list)  # M6.5: stream event messages
+    session_id: str = ""  # M6.7: Session ID from backend execution (for resume)
+    can_resume: bool = False  # M6.7: Whether this result can be resumed
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to the dict format expected by NodeExecutor.
@@ -47,10 +49,23 @@ class BackendResult(BaseModel):
             "token_usage", "cost_usd", "session_id",
             "tool_calls", "model", "backend",
         )
+        _first_class_defaults = {
+            "session_id": "",
+            "can_resume": False,
+        }
         for key in _promote:
-            val = self.metadata.get(key)
-            if val is not None and val != "" and val != []:
+            if key in _first_class_defaults:
+                val = getattr(self, key)
+                default = _first_class_defaults[key]
+                if val == default:
+                    val = self.metadata.get(key)
+            else:
+                val = self.metadata.get(key)
+            if val is not None and val != "" and val != [] and val is not False:
                 result[key] = val
+        # can_resume: only include when True
+        if self.can_resume:
+            result["can_resume"] = True
         return result
 
 
@@ -70,6 +85,7 @@ class BackendContext(BaseModel):
     run_id: str | None = None
     memory_prompt: str = ""
     project_context: str = ""
+    resume_session_id: str = ""  # M6.7: Previous session ID to resume from
 
     model_config = {"arbitrary_types_allowed": True}
 
