@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ from agent.backends.base import AgentBackend
 from agent.backends.stderr_tail import StderrTail
 from agent.backends.stream_parser import StreamParser
 from core.activity_detector import is_meaningful_event
+from monitoring.otel import inject_trace_context, start_backend_call_span
 
 logger = logging.getLogger(__name__)
 
@@ -311,87 +313,93 @@ class ClaudeCodeBackend(AgentBackend):
         """Execute via claude CLI subprocess with stream-json output."""
         cwd = context.workspace_path or "."
 
-        # Write MCP config for --mcp-config support (M6.8).
-        mcp_config_path: Path | None = None
-        if self._config.mcp_config:
-            from mcp.config_export import MCPConfigExporter
-            mcp_config_path = MCPConfigExporter.write_config(
-                self._config.mcp_config, cwd,
-            )
+        with start_backend_call_span(
+            context.run_id or "", context.node.id, self.BACKEND_NAME,
+        ):
+            env = inject_trace_context(dict(os.environ))
 
-        cmd = self._build_cli_command(context, prompt, mcp_config_path)
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-            )
-        except FileNotFoundError:
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=f"Claude CLI not found at: {self._config.cli_path}",
-            )
-
-        parser = StreamParser()
-        stderr_tail = StderrTail()
-        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
-        # Mutable containers for streaming output.
-        state: dict[str, str] = {"session_id": "", "result": "", "error": ""}
-
-        try:
-            await asyncio.wait_for(
-                self._stream_cli_output(
-                    process, parser, usage, state,
-                    context.cancel_event, context.progress_callback,
-                    context.event_callback, context.activity_detector,
-                    stderr_tail,
-                ),
-                timeout=self._get_cli_timeout(),
-            )
-        except asyncio.TimeoutError:
-            if process.returncode is None:
-                process.kill()
-            raise NodeTimeoutError(
-                node_id=context.node.id,
-                agent_type=context.node.agent_type,
-                timeout=self._get_cli_timeout(),
-            )
-        finally:
-            # Cleanup MCP config file after execution (M6.8).
-            if mcp_config_path:
+            # Write MCP config for --mcp-config support (M6.8).
+            mcp_config_path: Path | None = None
+            if self._config.mcp_config:
                 from mcp.config_export import MCPConfigExporter
-                MCPConfigExporter.cleanup_config(mcp_config_path)
+                mcp_config_path = MCPConfigExporter.write_config(
+                    self._config.mcp_config, cwd,
+                )
 
-        if process.stderr is not None:
-            stderr_bytes = await process.stderr.read()
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-            for line in stderr_text.splitlines():
-                stderr_tail.write(line + "\n")
+            cmd = self._build_cli_command(context, prompt, mcp_config_path)
 
-        stderr = stderr_tail.tail().strip()
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.DEVNULL,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=cwd,
+                    env=env,
+                )
+            except FileNotFoundError:
+                return BackendResult(
+                    status=BackendStatus.FAILED,
+                    error=f"Claude CLI not found at: {self._config.cli_path}",
+                )
 
-        if process.returncode == 127:
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=f"Claude CLI not found at: {self._config.cli_path}",
+            parser = StreamParser()
+            stderr_tail = StderrTail()
+            usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+            # Mutable containers for streaming output.
+            state: dict[str, str] = {"session_id": "", "result": "", "error": ""}
+
+            try:
+                await asyncio.wait_for(
+                    self._stream_cli_output(
+                        process, parser, usage, state,
+                        context.cancel_event, context.progress_callback,
+                        context.event_callback, context.activity_detector,
+                        stderr_tail,
+                    ),
+                    timeout=self._get_cli_timeout(),
+                )
+            except asyncio.TimeoutError:
+                if process.returncode is None:
+                    process.kill()
+                raise NodeTimeoutError(
+                    node_id=context.node.id,
+                    agent_type=context.node.agent_type,
+                    timeout=self._get_cli_timeout(),
+                )
+            finally:
+                # Cleanup MCP config file after execution (M6.8).
+                if mcp_config_path:
+                    from mcp.config_export import MCPConfigExporter
+                    MCPConfigExporter.cleanup_config(mcp_config_path)
+
+            if process.stderr is not None:
+                stderr_bytes = await process.stderr.read()
+                stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+                for line in stderr_text.splitlines():
+                    stderr_tail.write(line + "\n")
+
+            stderr = stderr_tail.tail().strip()
+
+            if process.returncode == 127:
+                return BackendResult(
+                    status=BackendStatus.FAILED,
+                    error=f"Claude CLI not found at: {self._config.cli_path}",
+                )
+
+            if process.returncode is not None and process.returncode != 0:
+                self._raise_if_classifiable(stderr, context)
+                error_detail = stderr or f"claude CLI exited with code {process.returncode}"
+                return BackendResult(
+                    status=BackendStatus.FAILED,
+                    error=error_detail,
+                    messages=[m.model_dump() for m in parser.messages],
+                )
+
+            artifacts = self._discover_artifacts(context)
+            return self._build_stream_result(
+                parser, usage, state, artifacts,
             )
-
-        if process.returncode is not None and process.returncode != 0:
-            self._raise_if_classifiable(stderr, context)
-            error_detail = stderr or f"claude CLI exited with code {process.returncode}"
-            return BackendResult(
-                status=BackendStatus.FAILED,
-                error=error_detail,
-                messages=[m.model_dump() for m in parser.messages],
-            )
-
-        artifacts = self._discover_artifacts(context)
-        return self._build_stream_result(
-            parser, usage, state, artifacts,
-        )
 
     async def _stream_cli_output(
         self,
