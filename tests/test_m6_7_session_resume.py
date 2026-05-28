@@ -1,11 +1,6 @@
 """Tests for M6.7: Session Resume + BackendResult extension + bidirectional comms protocol."""
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
 from core.backend_models import BackendContext, BackendResult, BackendStatus
-from core.dag_models import DAGNode, HandoffArtifact
+from core.dag_models import DAGNode
 
 
 # -- Helpers --
@@ -78,9 +73,26 @@ class TestBackendResultSessionFields:
             summary="done",
         )
         d = r.to_dict()
-        # can_resume=False is included in output since it's a first-class field
-        # that is explicitly set (not None/empty)
-        assert d.get("can_resume") is False
+        assert "can_resume" not in d
+
+    def test_to_dict_prefers_first_class_over_metadata(self):
+        r = BackendResult(
+            status=BackendStatus.COMPLETED,
+            summary="done",
+            session_id="first_class_id",
+            metadata={"session_id": "metadata_id"},
+        )
+        d = r.to_dict()
+        assert d["session_id"] == "first_class_id"
+
+    def test_to_dict_falls_back_to_metadata_when_default(self):
+        r = BackendResult(
+            status=BackendStatus.COMPLETED,
+            summary="done",
+            metadata={"session_id": "from_metadata"},
+        )
+        d = r.to_dict()
+        assert d["session_id"] == "from_metadata"
 
 
 # -- BackendContext field tests --
@@ -170,7 +182,6 @@ class TestBuildCLICommandResume:
         assert "--resume" not in cmd
 
     def test_resume_adds_session_id_if_not_present(self):
-        """When resume_session_id is set but session_id is empty, --session-id should be added."""
         backend = self._backend()
         ctx = BackendContext(
             node=_make_node(),
@@ -184,15 +195,12 @@ class TestBuildCLICommandResume:
         assert cmd[idx + 1] == "sess_old"
 
     def test_resume_keeps_existing_session_id(self):
-        """When both session_id and resume_session_id are set, existing --session-id is kept."""
         backend = self._backend()
         ctx = _make_context(session_id="sess_new", resume_session_id="sess_old")
         cmd = backend._build_cli_command(ctx, "test")
         assert "--resume" in cmd
-        # session_id was already added by the first block, so it should be sess_new
         idx = cmd.index("--session-id")
         assert cmd[idx + 1] == "sess_new"
-        # Should not have a second --session-id
         assert cmd.count("--session-id") == 1
 
 
@@ -279,7 +287,25 @@ class TestParseSDKResult:
         assert result.session_id == ""
         assert result.can_resume is False
 
-    def test_sdk_error_result_no_session(self):
+    def test_sdk_error_with_session_id_still_resumable(self):
+        from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
+
+        backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
+        ctx = _make_context()
+
+        raw_result = {
+            "result": "bad output",
+            "is_error": True,
+            "errors": ["something broke"],
+            "session_id": "sdk_err_sess",
+        }
+
+        result = backend._parse_sdk_result(raw_result, ctx)
+        assert result.status == BackendStatus.FAILED
+        assert result.session_id == "sdk_err_sess"
+        assert result.can_resume is True
+
+    def test_sdk_error_no_session(self):
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
 
         backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())

@@ -252,6 +252,8 @@ class ClaudeCodeBackend(AgentBackend):
         if result_text:
             messages.append({"raw_type": "result", "data": {"result": result_text}})
 
+        sdk_session_id = data.get("session_id", "")
+
         if is_error:
             errors = data.get("errors", [])
             error_msg = (
@@ -266,9 +268,9 @@ class ClaudeCodeBackend(AgentBackend):
                 artifacts=artifacts,
                 metadata={"token_usage": token_usage},
                 messages=messages,
+                session_id=sdk_session_id,
+                can_resume=bool(sdk_session_id),
             )
-
-        sdk_session_id = data.get("session_id", "")
 
         return BackendResult(
             status=BackendStatus.COMPLETED,
@@ -573,7 +575,7 @@ class ClaudeCodeBackend(AgentBackend):
         if context.session_id:
             cmd.extend(["--session-id", context.session_id])
         # M6.7: Resume previous session when resume_session_id is provided.
-        if getattr(context, "resume_session_id", ""):
+        if context.resume_session_id:
             cmd.append("--resume")
             if "--session-id" not in cmd:
                 cmd.extend(["--session-id", context.resume_session_id])

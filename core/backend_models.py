@@ -47,16 +47,25 @@ class BackendResult(BaseModel):
         }
         _promote = (
             "token_usage", "cost_usd", "session_id",
-            "tool_calls", "model", "backend", "can_resume",
+            "tool_calls", "model", "backend",
         )
+        _first_class_defaults = {
+            "session_id": "",
+            "can_resume": False,
+        }
         for key in _promote:
-            # Check first-class fields first, then fall back to metadata.
-            if hasattr(self, key):
+            if key in _first_class_defaults:
                 val = getattr(self, key)
+                default = _first_class_defaults[key]
+                if val == default:
+                    val = self.metadata.get(key)
             else:
                 val = self.metadata.get(key)
-            if val is not None and val != "" and val != []:
+            if val is not None and val != "" and val != [] and val is not False:
                 result[key] = val
+        # can_resume: only include when True
+        if self.can_resume:
+            result["can_resume"] = True
         return result
 
 
