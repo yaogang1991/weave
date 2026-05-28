@@ -644,6 +644,9 @@ class NodeExecutor:
             try:
                 loop.call_soon_threadsafe(node.record_heartbeat)
                 activity_detector.record_activity()
+                # Reset stall timer so progress from any backend
+                # (builtin, claude_code, codex) keeps the node alive (#978).
+                tracker.report("progress_callback")
             except RuntimeError:
                 pass
 

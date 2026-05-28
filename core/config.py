@@ -410,15 +410,15 @@ class GeneratorStallScaleConfig(BaseModel):
     """
 
     base: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_BASE", "120")),
+        default=int(os.getenv("WEAVE_GEN_STALL_BASE", "180")),
         ge=1,
     )
     per_dep: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_PER_DEP", "30")),
+        default=int(os.getenv("WEAVE_GEN_STALL_PER_DEP", "60")),
         ge=0,
     )
     per_feature: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_PER_FEATURE", "40")),
+        default=int(os.getenv("WEAVE_GEN_STALL_PER_FEATURE", "60")),
         ge=0,
         description=(
             "Extra seconds per estimated feature in task description "
@@ -426,7 +426,7 @@ class GeneratorStallScaleConfig(BaseModel):
         ),
     )
     cap: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "600")),
+        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "900")),
         ge=1,
     )
 
@@ -467,7 +467,11 @@ class NodeTimeoutConfig(BaseModel):
         description="Kill node if no progress reported for this many seconds",
     )
     stall_overrides: dict[str, int] = Field(
-        default_factory=dict,
+        default_factory=lambda: {
+            "generator": int(os.getenv(
+                "WEAVE_STALL_TIMEOUT_GENERATOR", "240",
+            )),
+        },
         description="Per-agent-type stall timeout overrides",
     )
     eval_stall_scale: EvaluatorStallScaleConfig = Field(
