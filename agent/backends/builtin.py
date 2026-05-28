@@ -104,14 +104,14 @@ class BuiltinBackend(AgentBackend):
 
         # Eval feedback (for retries)
         node = context.node
-        if hasattr(node, "eval_feedback") and node.eval_feedback:
+        if node.eval_feedback:
             parts.append(
                 f"\n## Evaluation Feedback (from previous attempt)\n"
                 f"{node.eval_feedback}"
             )
 
         # Auto-eval result (for downstream agents)
-        if hasattr(node, "auto_eval_result") and node.auto_eval_result:
+        if node.auto_eval_result:
             parts.append(
                 f"\n## Automated Evaluation Results\n"
                 f"```json\n{json.dumps(node.auto_eval_result, indent=2)}\n```"
@@ -142,7 +142,7 @@ class BuiltinBackend(AgentBackend):
             status=BackendStatus.COMPLETED,
             summary=response_text[:200] if response_text else "",
             output=response_text or "",
-            metadata={"token_usage": self._lightweight_caller.token_usage},
+            metadata={"token_usage": dict(self._lightweight_caller.token_usage)},
         )
 
     async def _execute_pool(self, context: BackendContext) -> BackendResult:
