@@ -7,6 +7,8 @@ AgentWorker internals.
 
 Includes built-in retry with exponential backoff for transient errors
 (rate limits, timeouts, connection issues) — transparent to all callers.
+SDK-level retries are disabled (max_retries=0) so the harness has sole
+control over retry behavior (#967).
 
 For parallel DAG nodes sharing one process, a global semaphore limits
 concurrent API calls to prevent rate-limiting (#300).
@@ -159,17 +161,23 @@ class LLMClient:
             write=30.0,
             pool=30.0,
         )
+        # Disable SDK-level retries — harness manages its own retry logic in
+        # call(). SDK retries (default max_retries=2) conflict with the hard
+        # wall-clock timeout, amplifying a single 150s timeout into ~60min per
+        # attempt (SDK retries × hard timeout × harness retries) (#967).
         if self.config.provider == "anthropic":
             return anthropic.Anthropic(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url or None,
                 timeout=timeout,
+                max_retries=0,
             )
         else:
             return OpenAI(
                 api_key=self.config.api_key,
                 base_url=self.config.base_url or None,
                 timeout=timeout,
+                max_retries=0,
             )
 
     def call(
