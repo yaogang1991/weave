@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
-
 from core.models import (
     DAG,
     FailureDecision,
@@ -42,7 +40,7 @@ from orchestrator.planner import (
     _infer_fallback_edges,
     _apply_rename_map,
 )
-from orchestrator.adapter import (
+from orchestrator.adapter import (  # noqa: F401 — backward-compat re-exports
     Adapter as _Adapter,
     _is_infrastructure_error,
     INFRASTRUCTURE_ERROR_PATTERNS,

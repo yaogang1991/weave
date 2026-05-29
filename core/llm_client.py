@@ -35,8 +35,12 @@ from openai import OpenAI
 from core.config import LLMConfig
 from core.progress import ProgressReport
 from core.exceptions import RateLimitError
-from monitoring.otel import start_llm_turn_span, set_llm_usage_attributes  # noqa: E402 — optional OTel (#509)
-from monitoring.otel_metrics import record_token_usage, LLMDurationTracker  # noqa: E402 — optional metrics (#938)
+from monitoring.otel import (  # noqa: E402 — optional OTel (#509)
+    start_llm_turn_span, set_llm_usage_attributes,
+)
+from monitoring.otel_metrics import (  # noqa: E402 — optional metrics (#938)
+    record_token_usage, LLMDurationTracker,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -388,13 +392,16 @@ class LLMClient:
             node_id="", model=self.config.model, provider=self.config.provider,
         ) as span, LLMDurationTracker(
             model=self.config.model, provider=self.config.provider,
-        ) as _tracker:
+        ):
             try:
                 if self.config.provider == "anthropic":
                     result = self._call_anthropic(messages, tools or [], tool_choice)
                 else:
                     result = self._call_openai(messages, tools or [], tool_choice)
-                finish_reason = result.get("finish_reason", "completed") if isinstance(result, dict) else "completed"
+                finish_reason = (
+                    result.get("finish_reason", "completed")
+                    if isinstance(result, dict) else "completed"
+                )
                 set_llm_usage_attributes(span, finish_reasons=[finish_reason])
                 usage = result.get("usage") if isinstance(result, dict) else None
                 if usage:
