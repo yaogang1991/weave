@@ -229,14 +229,15 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - **Error handling**: Tools return `ToolResult` wrapper (success/failure), never throw exceptions that break the main loop. DAG engine catches exceptions via `traceback.format_exc()` and writes to node `error` field.
 - **No circular imports**: Modules layered by responsibility (`core/` → `agent/` → `orchestrator/` → `tools/`).
 - **Immutability**: All state mutations create new objects. Never mutate shared state in-place.
+- **Abstract interfaces**: Prefer `typing.Protocol` for new abstract interfaces. Existing `abc.ABC` classes are retained for backward compat and replaced only when the module is otherwise being modified. Protocol supports structural subtyping (no explicit inheritance needed) and avoids `abc` import coupling (#920).
 
 ## When Modifying Code
 
 - **Adding a tool**: Register in `tools/registry.py`, add risk level in `guardrails/policy.py` `RISK_MAP`.
 - **Adding a default agent type**: Add to `core/agent_registry.py` `_register_defaults()`, update prompt in `agent/prompts.py`, update orchestrator prompt in `orchestrator/prompts/planning.md`.
 - **Data model changes**: Add to the appropriate `core/*_models.py` file. Re-export from `core/models.py` for backward compatibility.
-- **Adding an execution backend**: Extend `backend/base.py` `ExecutionBackend`, register in `backend/lifecycle.py` `BackendManager`.
-- **Adding an execution hook**: Extend `ExecutionHook` in `control_plane/hooks.py`, register in `control_plane/service.py` `_register_hooks()`.
+- **Adding an execution backend**: Extend `backend/base.py` `ExecutionBackend` (ABC, retained for compat), register in `backend/lifecycle.py` `BackendManager`.
+- **Adding an execution hook**: Extend `ExecutionHook` in `control_plane/hooks.py` (ABC, retained for compat), register in `control_plane/service.py` `_register_hooks()`.
 - **Adding a CLI command**: Add handler in `cli/` subdirectory, register subparser in `main.py`.
 - **State is externalized**: All runtime state lives in `./data/events/` (JSONL) and `./data/artifacts/`. Agent context windows are just cache.
 - **Memory system**: `memory/store.py` handles persistence (atomic writes), `memory/manager.py` is the primary API. Memory is injected into agent system prompts via `memory_manager.get_context_for_agent()` + `format_memory_prompt()` in `agent/agent_pool.py`.
