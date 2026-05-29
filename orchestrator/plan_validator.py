@@ -18,8 +18,7 @@ import re
 import sys
 
 
-class PlanValidationError(Exception):
-    """Raised when a plan has structural errors."""
+from core.exceptions import PlanValidationError  # noqa: F401 — re-export (#918)
 
 
 def check_stdlib_conflict(name: str) -> str | None:
