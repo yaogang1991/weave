@@ -410,7 +410,7 @@ class GeneratorStallScaleConfig(BaseModel):
     """
 
     base: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_BASE", "120")),
+        default=int(os.getenv("WEAVE_GEN_STALL_BASE", "300")),
         ge=1,
     )
     per_dep: int = Field(
@@ -426,7 +426,7 @@ class GeneratorStallScaleConfig(BaseModel):
         ),
     )
     cap: int = Field(
-        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "600")),
+        default=int(os.getenv("WEAVE_GEN_STALL_CAP", "900")),
         ge=1,
     )
 
