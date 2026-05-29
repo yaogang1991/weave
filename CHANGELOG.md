@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-29
+
+### Added
+
+- **M6.1: Brain/Hands Separation** — Weave becomes a pure orchestrator (meta-harness), execution delegated to external coding agents (ADR-0017)
+- **M6.1: BackendContext extension** — `memory_prompt` and `project_context` fields for unified memory injection across all backends (#953)
+- **M6.2: Node-level Guardrails** — Pre-check and post-check mechanisms elevated from tool-call level to node level (#968)
+- **M6.2: StderrTail** — Tail stderr for progress events from CLI backends (#968)
+- **M6.2: Semantic timeout** — Progress-driven node timeout with dynamic complexity scaling (#968)
+- **M6.3: LightweightLLMCaller** — Lightweight LLM call wrapper for planner/evaluator nodes (no tool loop) (#969)
+- **M6.3: BackendRegistry** — Multi-backend management with automatic fallback (#969)
+- **M6.3: AgentBackend interface** — Abstract interface for all execution backends (#969)
+- **M6.5: StreamParser** — Streaming JSON event parser for CLI backends (#966)
+- **M6.5: ActivityDetector** — Detect meaningful events in backend output (#966)
+- **M6.7: Session Resume** — Bidirectional communication protocol for session resume (#970)
+- **M6.7: BackendResult extension** — Extended result model with session state (#970)
+- **M6.8: MCP Config Export** — Pass MCP server configuration to external backends (#971)
+- **M6.9: OTEL Trace Propagation** — OpenTelemetry trace context propagation to CLI subprocess (#973)
+- `core/backend_models.py` — BackendContext, BackendResult, BackendStatus models
+- `core/evaluation_pipeline.py` — Post-execution evaluation pipeline (ADR-0015)
+- `core/activity_detector.py` — Backend output event detection
+- `core/subprocess_runner.py` — Universal subprocess execution with progress reporting
+- `agent/backends/` — Full backend abstraction layer (base, builtin, claude_code, codex, registry, stderr_tail, stream_parser, bidirectional)
+- `mcp/config_export.py` — MCP configuration exporter for external backends
+- Default backend switched from `builtin` to `claude_code`
+- Structured logging with trace correlation
+- OTel GenAI metrics for token usage, latency, and tool calls
+- OTel spans aligned with GenAI Semantic Conventions
+- LLM prompt/completion content captured as OTel span events
+- Cross-node provider health detection
+- Provider health check in Plan stage
+- Post-execution pipeline (commit + push + PR) — M5.3
+
+### Changed
+
+- **Default backend: `claude_code`** (was `builtin`) — Weave now delegates coding to Claude Code by default
+- `agent/agent_pool.py` and `agent/worker.py` deprecated (M6.3), retained for BuiltinBackend backward compat
+- Guardrails elevated from tool-call level to node level (M6.2)
+- `orchestrator/intelligent_orchestrator.py` split into planner + adapter modules
+- DAGExecutionEngine tunable params grouped into DAGEngineConfig
+- Exception hierarchy unified under `core/exceptions.py`
+- Protocol-first interface convention documented (#920)
+
+### Fixed
+
+- Evaluator-to-evaluator dependencies softened to prevent cascade skip (#980)
+- Hub-and-spoke dependencies softened to prevent replan cascade skip (#984)
+- Claude CLI subprocess invocations serialized to prevent Windows hangs (#997)
+- Provider health key uses correct config object (#996)
+- UnicodeDecodeError on Windows with Chinese content (#995)
+- Evaluator stall timeout too aggressive for complex test suites (#994)
+- Stall timeout falsely kills active generator nodes (#993)
+- --backend claude_code ImportError + silently ignored (#979)
+- CodexBackend MCP config + architecture audit gap closure (#974)
+- Replan handler crash when args lacks 'requirement' attribute (#930)
+- Skip LLM calls when provider unhealthy (#929)
+- `__future__` annotations in Pydantic models (#986)
+- Lint issues (F401, F841, E501) across orchestrator and core (#990)
+- Prevent path traversal in artifact paths (#895)
+- Session store thread safety
+
 ## [0.3.7] - 2026-05-18
 
 ### Added
@@ -143,6 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI interface with plan/execute/run commands
 - Reporter and audit logging
 
+[0.4.0]: https://github.com/yaogang1991/weave/compare/v0.3.7...v0.4.0
 [0.3.7]: https://github.com/yaogang1991/weave/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/yaogang1991/weave/compare/v0.3.5...v0.3.6
 [0.3.5]: https://github.com/yaogang1991/weave/compare/v0.3.3...v0.3.5

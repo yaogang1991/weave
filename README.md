@@ -2,7 +2,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.3.7-orange.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/Version-0.4.0-orange.svg)](pyproject.toml)
 
 **Intelligent Multi-Agent Orchestration for Autonomous Software Development**
 
@@ -36,6 +36,9 @@ Based on [Anthropic Managed Agents](https://www.anthropic.com/engineering/manage
 - **Web Console** -- Real-time DAG monitoring, job management, and alert dashboard
 - **Approval Workflow** -- Human-in-the-loop gate for high-risk operations
 - **Multiple Backends** -- Local or git worktree isolation, with Docker sandbox support
+- **Brain/Hands Separation** -- Weave as pure orchestrator (meta-harness), execution delegated to Claude Code / Codex CLI backends (M6)
+- **Backend Registry** -- Multi-backend management with automatic fallback between Claude Code, Codex, and Builtin backends
+- **OTel Observability** -- OpenTelemetry trace propagation, GenAI metrics, and structured logging with trace correlation
 
 ## Quick Start
 
@@ -154,16 +157,16 @@ python main.py viz
 ├──────────────────────────────────────────────────────────────┤
 │              Session Manager (Append-Only Event Log)          │
 ├──────────────────────────────────────────────────────────────┤
-│                     Weave Core (Dumb Loop)                    │
-│   Agent Worker  ←  Tool Registry  ←  Guardrails              │
+│               Backend Registry (M6: Brain/Hands)              │
+│   ClaudeCodeBackend  ·  CodexBackend  ·  BuiltinBackend      │
 ├──────────────────────────────────────────────────────────────┤
-│   Sandbox  ·  Git  ·  Reporter                                │
+│   Sandbox  ·  Git  ·  Reporter  ·  OTel Observability        │
 ├──────────────────────────────────────────────────────────────┤
 │   Memory  ·  Learning  ·  Impact Analysis                     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Four-layer architecture:** Orchestrator → Session Manager → Weave Core → Execution Layer
+**Four-layer architecture (Brain/Hands separation since M6):** Orchestrator → Session Manager → Backend Registry → Execution Layer
 
 For the full architecture document, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -176,7 +179,7 @@ For the full architecture document, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | `ANTHROPIC_API_KEY` | -- | Anthropic API key (required) |
 | `OPENAI_API_KEY` | -- | OpenAI API key (alternative) |
 | `WEAVE_MODEL` | `claude-sonnet-4-6` | Default LLM model |
-| `WEAVE_DEFAULT_BACKEND` | `local` | Execution backend (`local`/`worktree`) |
+| `WEAVE_DEFAULT_BACKEND` | `claude_code` | Execution backend (`claude_code`/`codex`/`builtin`/`local`/`worktree`) |
 | `WEAVE_NON_INTERACTIVE` | `false` | Disable interactive prompts |
 | `WEAVE_PLANNER_MODEL` | -- | Override model for planner agent |
 | `WEAVE_GENERATOR_MODEL` | -- | Override model for generator agent |
@@ -221,7 +224,7 @@ The orchestrator discovers these automatically and assigns them during planning.
 | `core/` | Domain models, configuration, DAG engine, LLM client/router, watchdog |
 | `cli/` | CLI command handlers |
 | `session/` | Event storage, state recovery, checkpoint |
-| `agent/` | LLM API calls, agent pool, system prompts |
+| `agent/` | Agent backend layer (ClaudeCode/Codex/Builtin), agent pool, system prompts |
 | `tools/` | Built-in tools + command runner + MCP integration |
 | `guardrails/` | Risk classification, permission control |
 | `evaluator/` | Automated evaluation (checkers, lint, runner) |

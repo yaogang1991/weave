@@ -2,7 +2,7 @@
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-brightgreen.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-0.3.7-orange.svg)](pyproject.toml)
+[![Version](https://img.shields.io/badge/Version-0.4.0-orange.svg)](pyproject.toml)
 
 **智能多Agent编排 · 自主软件开发系统**
 
@@ -36,6 +36,9 @@
 - **Web 控制台** -- 实时 DAG 监控、任务管理、告警仪表盘
 - **审批工作流** -- 高风险操作的人工审批门控
 - **多后端** -- 本地或 Git Worktree 隔离，支持 Docker 沙箱
+- **Brain/Hands 分离** -- Weave 作为纯编排层（meta-harness），执行委托给 Claude Code / Codex CLI 后端 (M6)
+- **Backend Registry** -- 多后端管理，支持 Claude Code、Codex、Builtin 之间自动回退
+- **OTel 可观测性** -- OpenTelemetry 链路传播、GenAI 指标、结构化日志与追踪关联
 
 ## 快速开始
 
@@ -154,16 +157,16 @@ python main.py viz
 ├──────────────────────────────────────────────────────────────┤
 │              会话管理器 (Append-Only Event Log)                 │
 ├──────────────────────────────────────────────────────────────┤
-│                     Weave 核心 (Dumb Loop)                     │
-│   Agent Worker  ←  Tool Registry  ←  Guardrails              │
+│            Backend Registry (M6: Brain/Hands 分离)             │
+│   ClaudeCodeBackend  ·  CodexBackend  ·  BuiltinBackend      │
 ├──────────────────────────────────────────────────────────────┤
-│   Sandbox  ·  Git  ·  Reporter                                │
+│   Sandbox  ·  Git  ·  Reporter  ·  OTel 可观测性              │
 ├──────────────────────────────────────────────────────────────┤
 │   Memory  ·  Learning  ·  Impact Analysis                     │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**四层架构：** 编排器 → 会话管理器 → Weave 核心 → 执行层
+**四层架构（M6 起 Brain/Hands 分离）：** 编排器 → 会话管理器 → Backend Registry → 执行层
 
 完整架构文档见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
@@ -176,7 +179,7 @@ python main.py viz
 | `ANTHROPIC_API_KEY` | -- | Anthropic API Key（必需） |
 | `OPENAI_API_KEY` | -- | OpenAI API Key（备选） |
 | `WEAVE_MODEL` | `claude-sonnet-4-6` | 默认 LLM 模型 |
-| `WEAVE_DEFAULT_BACKEND` | `local` | 执行后端（`local`/`worktree`） |
+| `WEAVE_DEFAULT_BACKEND` | `claude_code` | 执行后端（`claude_code`/`codex`/`builtin`/`local`/`worktree`） |
 | `WEAVE_NON_INTERACTIVE` | `false` | 禁用交互式提示 |
 | `WEAVE_PLANNER_MODEL` | -- | 覆盖规划 Agent 模型 |
 | `WEAVE_GENERATOR_MODEL` | -- | 覆盖生成 Agent 模型 |
@@ -230,7 +233,7 @@ agents:
 | `core/` | 领域模型、配置、DAG 引擎、LLM 客户端/路由、Watchdog |
 | `cli/` | CLI 命令处理器 |
 | `session/` | 事件存储、状态恢复、检查点 |
-| `agent/` | LLM API 调用、Agent 池、系统提示 |
+| `agent/` | Agent 后端层（ClaudeCode/Codex/Builtin）、Agent 池、系统提示 |
 | `tools/` | 内置工具 + 命令执行器 + MCP 集成 |
 | `guardrails/` | 风险分类、权限控制 |
 | `evaluator/` | 自动评估（检查器、Lint、执行器） |

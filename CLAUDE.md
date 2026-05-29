@@ -8,7 +8,7 @@ Self-hosted unattended software development system based on [Anthropic Managed A
 
 Python 3.11+, Pydantic models, async/await throughout.
 
-**Current version:** M6.4 (cleanup + documentation update). See `docs/roadmap.md` for milestone history.
+**Current version:** M6.9 (OTEL trace propagation to CLI subprocess). See `docs/roadmap.md` for milestone history.
 
 ## Commands
 
@@ -80,19 +80,21 @@ Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `WEAV
 
 ## Architecture
 
-Four-layer architecture:
+Four-layer architecture (Brain/Hands separation since M6):
 
 ```
 Orchestrator Layer (LLM-driven planning, DAG generation)
     ↓
 Session Manager (append-only JSONL event log, state replay)
     ↓
-Weave Core / Dumb Loop (Agent Worker + Tool Registry + Guardrails)
+Backend Registry (ClaudeCodeBackend / CodexBackend / BuiltinBackend)
     ↓
 Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 ```
 
-**Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `AgentPool` → Watchdog monitors heartbeats (M2) → failures go back to orchestrator via `adapt_to_failure()`.
+**Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `BackendRegistry` → external CLI backends (Claude Code / Codex) handle the agent loop → Watchdog monitors heartbeats (M2) → failures go back to orchestrator via `adapt_to_failure()`.
+
+**Key change (M6):** Weave is now a pure orchestrator (meta-harness). Execution is delegated to external coding agents via `ClaudeCodeBackend` / `CodexBackend`. `BuiltinBackend` (lightweight LLM calls, no tool loop) is retained for planner/evaluator nodes. See ADR-0017 for details.
 
 **Key module responsibilities**:
 
