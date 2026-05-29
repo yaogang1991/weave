@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 import traceback
 import uuid
@@ -201,8 +202,11 @@ def _write_job_result(
         })
     artifact_dir = Path(artifact_path) / job.id
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    with open(artifact_dir / "job_result.json", "w", encoding="utf-8") as f:
+    dest = artifact_dir / "job_result.json"
+    tmp = dest.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=2, default=str, ensure_ascii=False)
+    os.replace(tmp, dest)
     return result
 
 
