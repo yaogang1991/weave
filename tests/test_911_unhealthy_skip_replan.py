@@ -6,8 +6,7 @@ Verifies:
 3. Normal flow works when provider IS healthy
 4. Provider health recovery resumes normal LLM calls
 """
-import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 

@@ -5,7 +5,6 @@ without errors.
 """
 from __future__ import annotations
 
-import pytest
 
 
 # --- Backend models (M6.1) ---

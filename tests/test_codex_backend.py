@@ -47,7 +47,10 @@ class TestCodexHealthCheck:
 
     @pytest.mark.asyncio
     async def test_caches_resolved_path(self):
-        with patch("agent.backends.codex.shutil.which", return_value="/usr/bin/codex") as mock_which:
+        with patch(
+            "agent.backends.codex.shutil.which",
+            return_value="/usr/bin/codex",
+        ) as mock_which:
             backend = CodexBackend()
             await backend.health_check()
             await backend.health_check()
@@ -87,8 +90,10 @@ class TestCodexStreamOutput:
         lines = [
             json.dumps({"type": "thread.started", "thread_id": "t1"}),
             json.dumps({"type": "turn.started"}),
-            json.dumps({"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "Hello"}}),
-            json.dumps({"type": "item.completed", "item": {"id": "i2", "type": "agent_message", "text": "World"}}),
+            json.dumps({"type": "item.completed", "item": {
+                       "id": "i1", "type": "agent_message", "text": "Hello"}}),
+            json.dumps({"type": "item.completed", "item": {
+                       "id": "i2", "type": "agent_message", "text": "World"}}),
         ]
 
         mock_process = MagicMock()
@@ -107,8 +112,10 @@ class TestCodexStreamOutput:
     async def test_accumulates_token_usage(self):
         backend = CodexBackend()
         lines = [
-            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 50}}),
-            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 200, "output_tokens": 75}}),
+            json.dumps({"type": "turn.completed", "usage": {
+                       "input_tokens": 100, "output_tokens": 50}}),
+            json.dumps({"type": "turn.completed", "usage": {
+                       "input_tokens": 200, "output_tokens": 75}}),
         ]
 
         mock_process = MagicMock()
@@ -167,7 +174,8 @@ class TestCodexStreamOutput:
         callback = MagicMock()
 
         lines = [
-            json.dumps({"type": "item.completed", "item": {"id": "i1", "type": "command_execution", "command": "ls"}}),
+            json.dumps({"type": "item.completed", "item": {"id": "i1",
+                       "type": "command_execution", "command": "ls"}}),
         ]
 
         mock_process = MagicMock()
@@ -185,20 +193,23 @@ class TestCodexStreamOutput:
 class TestCodexParseResult:
     def test_completed(self):
         backend = CodexBackend()
-        result = backend._parse_result(0, ["Hello", "World"], {"input_tokens": 10, "output_tokens": 5}, "", [])
+        result = backend._parse_result(0, ["Hello", "World"], {
+                                       "input_tokens": 10, "output_tokens": 5}, "", [])
         assert result.status == BackendStatus.COMPLETED
         assert result.summary == "Hello"  # Uses first line (#619 #10)
         assert result.metadata["token_usage"]["input_tokens"] == 10
 
     def test_failed(self):
         backend = CodexBackend()
-        result = backend._parse_result(1, [], {"input_tokens": 0, "output_tokens": 0}, "error msg", [])
+        result = backend._parse_result(
+            1, [], {"input_tokens": 0, "output_tokens": 0}, "error msg", [])
         assert result.status == BackendStatus.FAILED
         assert "error msg" in result.error
 
     def test_cancelled_signal(self):
         backend = CodexBackend()
-        result = backend._parse_result(-1, ["partial"], {"input_tokens": 5, "output_tokens": 3}, "", [])
+        result = backend._parse_result(-1, ["partial"],
+                                       {"input_tokens": 5, "output_tokens": 3}, "", [])
         assert result.status == BackendStatus.CANCELLED
 
     def test_cancelled_none(self):
@@ -244,8 +255,10 @@ class TestCodexExecute:
         ctx = _make_context()
 
         jsonl_lines = [
-            json.dumps({"type": "item.completed", "item": {"id": "i1", "type": "agent_message", "text": "Fixed!"}}),
-            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 100, "output_tokens": 50}}),
+            json.dumps({"type": "item.completed", "item": {
+                       "id": "i1", "type": "agent_message", "text": "Fixed!"}}),
+            json.dumps({"type": "turn.completed", "usage": {
+                       "input_tokens": 100, "output_tokens": 50}}),
         ]
 
         mock_process = MagicMock()
@@ -379,7 +392,10 @@ class TestCodexMCPConfig:
     def test_write_mcp_config_returns_none_on_failure(self, tmp_path):
         mcp_config = MagicMock()
 
-        with patch("mcp.config_export.MCPConfigExporter.write_config", side_effect=Exception("boom")):
+        with patch(
+            "mcp.config_export.MCPConfigExporter.write_config",
+            side_effect=Exception("boom"),
+        ):
             result = CodexBackend._write_codex_mcp_config(mcp_config, str(tmp_path))
 
         assert result is None
@@ -403,8 +419,14 @@ class TestCodexMCPConfig:
         mock_process.stderr.read = AsyncMock(return_value=b"")
 
         with (
-            patch("agent.backends.codex.CodexBackend._write_codex_mcp_config", return_value=config_path),
-            patch("asyncio.create_subprocess_exec", return_value=mock_process) as mock_exec,
+            patch(
+                "agent.backends.codex.CodexBackend._write_codex_mcp_config",
+                return_value=config_path,
+            ),
+            patch(
+                "asyncio.create_subprocess_exec",
+                return_value=mock_process,
+            ) as mock_exec,
             patch("mcp.config_export.MCPConfigExporter.cleanup_config"),
         ):
             result = backend.execute(ctx)

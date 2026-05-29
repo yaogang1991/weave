@@ -5,7 +5,7 @@ When flake8 and ruff are both missing, lint should be treated as an
 uncheckable criterion (WARN) rather than a hard FAIL.
 """
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from core.models import CriterionType, SuccessCriterion
 from core.subprocess_runner import SubprocessResult
@@ -54,7 +54,8 @@ class TestLintWarnWhenUnavailable:
         mock_run.side_effect = [
             SubprocessResult(returncode=0, stdout="", stderr=""),  # autoflake ok
             SubprocessResult(returncode=0, stdout="", stderr=""),  # autopep8 ok
-            SubprocessResult(returncode=1, stdout="code.py:1: E501 line too long", stderr=""),  # flake8 issues
+            SubprocessResult(returncode=1, stdout="code.py:1: E501 line too long",
+                             stderr=""),  # flake8 issues
         ]
         passed, msg, auto = evaluator._check_criterion(
             SuccessCriterion(type=CriterionType.LINT, description="lint clean"),

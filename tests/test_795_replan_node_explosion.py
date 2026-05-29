@@ -8,7 +8,7 @@ Verifies:
 import pytest
 from unittest.mock import AsyncMock
 
-from core.models import DAG, DAGNode, NodeStatus, FailureDecision
+from core.models import DAG, DAGNode, FailureDecision
 from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 
 

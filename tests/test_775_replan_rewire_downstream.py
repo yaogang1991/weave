@@ -7,7 +7,7 @@ so the pipeline can continue instead of skipping all downstream nodes.
 import pytest
 
 from core.models import DAG, DAGNode, NodeStatus
-from core.dag_models import DAGEdge, DependencyType
+from core.dag_models import DependencyType
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
 
@@ -18,7 +18,6 @@ def _make_node(nid, agent_type="generator", task="do stuff", **kwargs):
 
 def _make_engine():
     from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
-    from unittest.mock import AsyncMock
 
     async def noop(*a, **kw):
         return {}

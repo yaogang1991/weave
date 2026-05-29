@@ -1,5 +1,4 @@
 """Tests for M5.1 TokenReporter — token summary generation from trace events."""
-import pytest
 
 from core.event_models import EventType
 from monitoring.token_reporter import TokenReporter
