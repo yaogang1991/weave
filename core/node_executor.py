@@ -644,6 +644,7 @@ class NodeExecutor:
             try:
                 loop.call_soon_threadsafe(node.record_heartbeat)
                 activity_detector.record_activity()
+                tracker.report("heartbeat")
             except RuntimeError:
                 pass
 
