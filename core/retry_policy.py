@@ -151,7 +151,6 @@ class RetryPolicyEngine:
     # ------------------------------------------------------------------
 
     @staticmethod
-    @staticmethod
     def _safe_path(work_dir: str, art: str) -> str | None:
         """Resolve path and return it only if within work_dir, else None."""
         resolved = os.path.realpath(os.path.join(work_dir, art))

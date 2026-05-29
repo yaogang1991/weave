@@ -9,6 +9,7 @@ Inspired by Anthropic's Session design:
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -370,7 +371,11 @@ class SessionStore:
         return sum(1 for _ in open(path, "r", encoding="utf-8"))
 
     def _truncate_log(self, session_id: str, event_index: int) -> None:
-        """Remove events up to event_index from the JSONL log."""
+        """Remove events up to event_index from the JSONL log.
+
+        Uses atomic write (temp file + rename) so the original log is
+        preserved if the write fails.
+        """
         path = self._session_file(session_id)
         if not path.exists():
             return
@@ -378,8 +383,10 @@ class SessionStore:
         try:
             lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
             remaining = lines[event_index:]
-            with open(path, "w", encoding="utf-8") as f:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 f.writelines(remaining)
+            os.replace(tmp, path)
         except OSError as exc:
             logger.error(
                 "Failed to truncate log for session %s at %d: %s",
