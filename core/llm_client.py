@@ -34,7 +34,7 @@ from openai import OpenAI
 
 from core.config import LLMConfig
 from core.progress import ProgressReport
-from core.exceptions import RateLimitError, HardTimeoutError
+from core.exceptions import RateLimitError, HardTimeoutError, LLMResponseError
 from monitoring.otel import (  # noqa: E402 — optional OTel (#509)
     start_llm_turn_span, set_llm_usage_attributes,
     capture_llm_content,  # noqa: E402 — #940
@@ -556,6 +556,11 @@ class LLMClient:
 
         response = self._client.messages.create(**kwargs)
 
+        if not response.content:
+            raise LLMResponseError(
+                f"Anthropic returned empty content for model {self.config.model}"
+            )
+
         # Log cache usage stats from response (#503)
         if hasattr(response, "usage") and response.usage:
             cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
@@ -631,6 +636,11 @@ class LLMClient:
             max_tokens=effective_max_tokens,
             temperature=self.config.temperature,
         )
+
+        if not response.choices:
+            raise LLMResponseError(
+                f"OpenAI returned empty choices for model {self.config.model}"
+            )
 
         choice = response.choices[0]
         msg: dict = {
