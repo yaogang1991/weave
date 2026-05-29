@@ -140,6 +140,7 @@ class DAGExecutionEngine:
         backend_registry: Any | None = None,
         budget_manager: BudgetManager | None = None,
         provider_health: ProviderHealthTracker | None = None,
+        llm_config: Any | None = None,
         project_config: ProjectConfig | None = None,
         # Identifiers and workspace
         work_dir: str | None = None,
@@ -159,6 +160,8 @@ class DAGExecutionEngine:
         self.max_dag_nodes = cfg.max_dag_nodes
         # #900: Provider health tracker
         self._provider_health = provider_health or ProviderHealthTracker()
+        # #910: LLM config for provider/model extraction
+        self._llm_config = llm_config
         # Note: evaluator is stored in NodeExecutor (created below).
         # The .evaluator property proxies to it.
         self.artifact_path = cfg.artifact_path
@@ -237,20 +240,12 @@ class DAGExecutionEngine:
         self._PLANNER_CIRCUIT_BREAKER_THRESHOLD = 3
 
     def _get_provider_model(self) -> tuple[str, str]:
-        """Return the (provider, model) pair used for health tracking.
-
-        TODO(#911-followup): NodeTimeoutConfig doesn't carry provider/model,
-        so this always returns ("anthropic", ""). Should thread LLMConfig or
-        explicit provider/model through the constructor instead.
-        """
-        llm_cfg = getattr(
-            self._node_executor, "_node_timeout_config", None,
-        )
-        provider = (
-            getattr(llm_cfg, "provider", "anthropic") if llm_cfg else "anthropic"
-        )
-        model = getattr(llm_cfg, "model", "") if llm_cfg else ""
-        return provider, model
+        """Return the (provider, model) pair used for health tracking."""
+        if self._llm_config is not None:
+            provider = getattr(self._llm_config, "provider", "anthropic")
+            model = getattr(self._llm_config, "model", "")
+            return provider, model
+        return "anthropic", ""
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
