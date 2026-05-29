@@ -1,11 +1,8 @@
 """Tests for M6.8 MCP config passing to CLI backends."""
 import json
-import os
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
-import pytest
 
 from core.config import MCPConfig, MCPServerConfig
 from mcp.config_export import MCPConfigExporter

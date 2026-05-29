@@ -10,14 +10,12 @@ Covers:
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 
 from core.backend_models import BackendContext
 from core.config import WeaveConfig
 from core.dag_engine import DAGEngineConfig
 from core.dag_models import DAGNode
 from core.project_config import ProjectConfig, ProjectContext
-from core.artifact_handoff import HandoffArtifact
 
 
 # ---------------------------------------------------------------------------

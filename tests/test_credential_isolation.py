@@ -22,7 +22,13 @@ class TestCredentialIsolation:
         os.environ["MY_CUSTOM_VAR"] = "safe_value"
         try:
             result = await self.sandbox.run_command(
-                "python -c \"import os; print(os.environ.get('ANTHROPIC_API_KEY',''), os.environ.get('OPENAI_API_KEY',''), os.environ.get('GITHUB_TOKEN',''), os.environ.get('MY_CUSTOM_VAR',''))\"",
+                "python -c \""
+                "import os; print("
+                "os.environ.get('ANTHROPIC_API_KEY',''), "
+                "os.environ.get('OPENAI_API_KEY',''), "
+                "os.environ.get('GITHUB_TOKEN',''), "
+                "os.environ.get('MY_CUSTOM_VAR',''))"
+                "\"",
                 cwd=".",
                 timeout=5,
             )

@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from core.config import MCPConfig, MCPServerConfig
+from core.config import MCPConfig
 
 logger = logging.getLogger(__name__)
 

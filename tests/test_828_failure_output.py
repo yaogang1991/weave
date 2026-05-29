@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from core.dag_models import DAG, DAGNode, DAGEdge, NodeStatus
 

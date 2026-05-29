@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -21,7 +20,6 @@ from core.dag_models import DAGNode
 from core.exceptions import GuardrailBlockedException
 from core.project_config import GuardrailsConfig
 from guardrails.node_guardrails import NodeGuardrails, _normalize_path
-from guardrails.policy import GuardrailResult
 
 
 # ---------------------------------------------------------------------------
@@ -271,5 +269,5 @@ class TestNodeExecutorIntegration:
         assert "workspace escape" in details["reason"]
 
     def test_guardrail_blocked_no_retry_consumed(self):
-        e = GuardrailBlockedException("denied command", phase="pre")
+        GuardrailBlockedException("denied command", phase="pre")
         assert True  # Pattern verified in event details above

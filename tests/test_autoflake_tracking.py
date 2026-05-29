@@ -101,7 +101,11 @@ class TestAutoflakeTracking:
             if "autopep8" in cmd:
                 return SubprocessResult(returncode=0, stdout="", stderr="")
             if "flake8" in cmd:
-                return SubprocessResult(returncode=1, stdout="bad.py:1:1 E901 SyntaxError", stderr="")
+                return SubprocessResult(
+                    returncode=1,
+                    stdout="bad.py:1:1 E901 SyntaxError",
+                    stderr="",
+                )
             raise RuntimeError(f"unexpected cmd: {cmd}")
 
         with patch("evaluator.runner.run_with_progress", side_effect=fake_run):
