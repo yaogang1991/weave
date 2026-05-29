@@ -167,6 +167,11 @@ class PlanValidator:
         self._detect_cycle(node_ids, edges)
         # Token budget check (M4.6)
         self._check_token_budget(nodes)
+        # Hub-and-spoke softening (#959)
+        # NOTE: edges added by _check_foundation_dependencies above may be
+        # softened here if they create a hub pattern (fan-out >= 4).
+        edges = self._soften_hub_dependencies(nodes, edges)
+        plan_data["edges"] = edges
 
         return plan_data
 
@@ -605,3 +610,42 @@ class PlanValidator:
                     f"exceeds budget of {budget} tokens. "
                     f"Consider splitting into smaller nodes."
                 )
+
+    # Minimum fan-out count that triggers hub softening (#959).
+    _HUB_FANOUT_THRESHOLD = 4
+
+    def _soften_hub_dependencies(
+        self,
+        nodes: list[dict],
+        edges: list[dict],
+    ) -> list[dict]:
+        """Soften hard edges when a single node has too many hard dependents (#959).
+
+        When replan generates a "foundation" node with N≥4 hard dependents,
+        a single failure cascades to all dependents.  Converting these to soft
+        gives dependent nodes a chance to execute (possibly with partial artifacts
+        from prior successful nodes) rather than being skipped outright.
+        """
+        edges = [dict(e) for e in edges]
+        # Count hard dependents per upstream node
+        hard_fanout: dict[str, list[dict]] = {}
+        for edge in edges:
+            if edge.get("dependency_type", "hard") != "hard":
+                continue
+            src = edge.get("from", "")
+            hard_fanout.setdefault(src, []).append(edge)
+
+        softened = 0
+        for src, deps in hard_fanout.items():
+            if len(deps) < self._HUB_FANOUT_THRESHOLD:
+                continue
+            for edge in deps:
+                edge["dependency_type"] = "soft"
+                softened += 1
+
+        if softened:
+            self.warnings.append(
+                f"Softened {softened} hub-dependency hard edges to soft "
+                f"(fan-out ≥ {self._HUB_FANOUT_THRESHOLD}, #959)."
+            )
+        return edges
