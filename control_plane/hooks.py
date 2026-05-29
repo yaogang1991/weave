@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import uuid
 from abc import ABC
@@ -282,10 +283,12 @@ class ImpactHook(ExecutionHook):
             }
             ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
             uid = ctx.run_id[:8] if ctx.run_id else uuid.uuid4().hex[:8]
-            path = record_dir / f"impact_{ts}_{uid}.json"
-            path.write_text(
+            dest = record_dir / f"impact_{ts}_{uid}.json"
+            tmp = dest.with_suffix(".json.tmp")
+            tmp.write_text(
                 json.dumps(record, indent=2, default=str, ensure_ascii=False),
                 encoding="utf-8",
             )
+            os.replace(tmp, dest)
         except Exception:
             pass
