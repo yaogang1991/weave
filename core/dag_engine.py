@@ -1004,7 +1004,8 @@ class DAGExecutionEngine:
             self._stop_watchdog()
             self._watchdog.clear()
             self._running_tasks = {}
-            # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
+            # Shutdown thread pools to avoid RuntimeWarning on exit
+            self._node_executor.close()
             self._executor.shutdown(wait=False)
 
     async def _try_execute_replan(

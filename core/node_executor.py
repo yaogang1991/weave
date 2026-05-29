@@ -120,6 +120,7 @@ class NodeExecutor:
         self._session_store = session_store
         self._node_guardrails = node_guardrails
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self._owns_executor = True
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._eval_pipeline = EvaluationPipeline(
             evaluator=evaluator,
@@ -139,6 +140,11 @@ class NodeExecutor:
     def evaluator(self, value):
         self._evaluator = value
         self._eval_pipeline.evaluator = value
+
+    def close(self) -> None:
+        """Shut down owned thread pool executor to release threads."""
+        if self._owns_executor:
+            self._executor.shutdown(wait=False)
 
     # ------------------------------------------------------------------
     # Main entry point: 3-stage pipeline with retry loop
