@@ -144,6 +144,13 @@ class EvaluatorEngine:
         eval_dir = work_dir or artifact_path
         eval_id = f"{session_id}_{stage_name}"
 
+        # Reset per-eval state to prevent stale data from a previous
+        # evaluation leaking into this one.
+        self._last_autofixed = []
+        self._last_auto_formatted = []
+        self._last_lint_new_issues = []
+        self._last_lint_all_issues = []
+
         self.session_store.emit_event(
             session_id,
             EventType.EVAL_START,
