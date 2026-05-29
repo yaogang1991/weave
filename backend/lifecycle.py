@@ -42,14 +42,7 @@ class HookResult:
     duration_ms: int = 0
 
 
-class HookError(Exception):
-    """Raised when a critical hook (after_create, before_run) fails."""
-
-    def __init__(self, hook_name: str, output: str = "", error: str = ""):
-        self.hook_name = hook_name
-        self.output = output
-        self.error = error
-        super().__init__(f"Hook '{hook_name}' failed: {error or output}")
+from core.exceptions import HookError  # noqa: F401 — re-export (#918)
 
 
 class BackendManager:

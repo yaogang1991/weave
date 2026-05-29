@@ -34,7 +34,7 @@ from openai import OpenAI
 
 from core.config import LLMConfig
 from core.progress import ProgressReport
-from core.exceptions import RateLimitError
+from core.exceptions import RateLimitError, HardTimeoutError
 from monitoring.otel import (  # noqa: E402 — optional OTel (#509)
     start_llm_turn_span, set_llm_usage_attributes,
 )
@@ -50,9 +50,9 @@ _TRANSIENT_MARKERS = frozenset(
 )
 
 
-class _HardTimeoutError(TimeoutError):
-    """Hard wall-clock timeout or cancel_event — NOT transient, do not retry (#674)."""
-    pass
+# Backward-compatible alias — _HardTimeoutError was previously defined here.
+# New code should use HardTimeoutError from core.exceptions (#918).
+_HardTimeoutError = HardTimeoutError
 
 
 # Process-global semaphore to limit concurrent API calls across all
