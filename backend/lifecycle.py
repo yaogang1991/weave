@@ -42,7 +42,9 @@ class HookResult:
     duration_ms: int = 0
 
 
-from core.exceptions import HookError  # noqa: F401 — re-export (#918)
+from core.exceptions import (
+    HookError, ConfigurationError, BackendError,
+)  # noqa: F401 — re-export (#918)
 
 
 class BackendManager:
@@ -93,7 +95,7 @@ class BackendManager:
         self._sandbox_config = sandbox_config or {}
         _VALID_POLICIES = ("always", "on_success", "never")
         if self.cleanup_policy not in _VALID_POLICIES:
-            raise ValueError(
+            raise ConfigurationError(
                 f"Invalid cleanup_policy '{self.cleanup_policy}', "
                 f"must be one of {_VALID_POLICIES}"
             )
@@ -118,7 +120,7 @@ class BackendManager:
                     self.repo_root, self.base_path
                 )
             else:
-                raise ValueError(f"Unknown workspace type: {ws_type}")
+                raise ConfigurationError(f"Unknown workspace type: {ws_type}")
         return self._backends[key]
 
     def _create_sandbox(self) -> SandboxProvider:
@@ -133,7 +135,7 @@ class BackendManager:
                 cpu_limit=self._sandbox_config.get("cpu_limit", 1.0),
             )
         else:
-            raise ValueError(f"Unknown sandbox type: {self.sandbox_type}")
+            raise ConfigurationError(f"Unknown sandbox type: {self.sandbox_type}")
 
     def _select_sandbox(self, risk_level: str | None = None) -> SandboxProvider:
         """Select sandbox provider based on risk level (#484).
@@ -203,7 +205,7 @@ class BackendManager:
                 # Worktree not available, fall back to local
                 backend = self._get_workspace_backend(WorkspaceIsolation.LOCAL)
             else:
-                raise RuntimeError(
+                raise BackendError(
                     f"Workspace backend {ws_type.value} is not available"
                 )
 
@@ -333,7 +335,7 @@ class BackendManager:
                     cwd=self.repo_root, timeout=30,
                 )
                 if wt_result.returncode != 0:
-                    raise RuntimeError(
+                    raise BackendError(
                         f"git worktree add failed (rc={wt_result.returncode}): "
                         f"{wt_result.stderr.strip()}"
                     )

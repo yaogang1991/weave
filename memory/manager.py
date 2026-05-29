@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from core.models import MemoryEntry, MemoryScope, MemoryType, EventType
+from core.exceptions import MemoryStoreError
 from memory.store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -144,13 +145,13 @@ class MemoryManager:
     ) -> MemoryEntry:
         """Store a learning/memory entry."""
         if len(content) > self.config.max_content_length:
-            raise ValueError(
+            raise MemoryStoreError(
                 f"Content length ({len(content)}) exceeds max "
                 f"({self.config.max_content_length})"
             )
 
         if scope == MemoryScope.SESSION and not session_id:
-            raise ValueError(
+            raise MemoryStoreError(
                 "session_id is required when storing SESSION-scoped memory"
             )
 

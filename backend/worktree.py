@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from backend.base import ExecutionBackend, WorkspaceIsolation
+from core.exceptions import BackendError
 
 from core.subprocess_runner import run_with_progress
 
@@ -65,7 +66,7 @@ class WorktreeBackend(ExecutionBackend):
         )
 
         if result.returncode != 0:
-            raise RuntimeError(f"git worktree add failed: {result.stderr}")
+            raise BackendError(f"git worktree add failed: {result.stderr}")
 
         self.worktrees[run_id] = worktree_path
         return worktree_path

@@ -20,7 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
-from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
+from core.exceptions import (
+    BudgetExhaustedError,
+    ConfigurationError,
+    NodeTimeoutError,
+    RateLimitError,
+)
 from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
 from agent.backends.stderr_tail import StderrTail
@@ -71,7 +76,7 @@ class ClaudeCodeRuntimeConfig:
         self._model = model
         self._max_turns = max_turns
         if permission_mode not in VALID_PERMISSION_MODES:
-            raise ValueError(
+            raise ConfigurationError(
                 f"permission_mode must be one of {VALID_PERMISSION_MODES}, "
                 f"got '{permission_mode}'"
             )
