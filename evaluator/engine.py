@@ -97,6 +97,7 @@ class EvaluatorEngine:
         """Register extracted criterion checkers (#178 PR 2)."""
         from evaluator.checkers.file_exists import FileExistsChecker
         from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+        from evaluator.checkers.conftest_db import ConftestDbChecker
 
         file_checker = FileExistsChecker()
         self._checkers[CriterionType.FILE_EXISTS] = file_checker
@@ -107,6 +108,9 @@ class EvaluatorEngine:
         self._checkers[CriterionType.FILE_CHANGED] = bugfix_checker
         self._checkers[CriterionType.PATTERN_ABSENT] = bugfix_checker
         self._checkers[CriterionType.PATTERN_PRESENT] = bugfix_checker
+
+        conftest_checker = ConftestDbChecker()
+        self._checkers[CriterionType.CONFTEST_DB_INIT] = conftest_checker
 
     def register_checker(
         self,
