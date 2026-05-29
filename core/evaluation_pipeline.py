@@ -362,8 +362,10 @@ class EvaluationPipeline:
             fixed = self._rewrite_build_backend(content)
             if fixed is not None:
                 try:
-                    with open(full_path, "w", encoding="utf-8") as f:
+                    tmp = full_path + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
                         f.write(fixed)
+                    os.replace(tmp, full_path)
                     logger.warning(
                         "Fixed invalid build-backend in %s "
                         "(auto-corrected known pattern) (#767)",
