@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from typing import Any
 
 from core.models import ExecutionEvent
@@ -32,8 +33,7 @@ class WebSocketEventBridge:
     def __init__(self):
         self._clients: list[Any] = []  # WebSocket objects
         self._lock = asyncio.Lock()
-        self._history: list[dict] = []  # Recent events buffer
-        self._max_history = 1000
+        self._history: deque[dict] = deque(maxlen=1000)  # Recent events buffer
 
     async def connect(self, websocket) -> None:
         """Register a new WebSocket client."""
@@ -69,8 +69,6 @@ class WebSocketEventBridge:
 
         # Buffer for late-joining clients
         self._history.append(payload)
-        if len(self._history) > self._max_history:
-            self._history.pop(0)
 
         await self._broadcast(payload)
 

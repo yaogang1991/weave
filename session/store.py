@@ -367,7 +367,8 @@ class SessionStore:
         path = self._session_file(session_id)
         if not path.exists():
             return 0
-        return sum(1 for _ in open(path, "r", encoding="utf-8"))
+        with open(path, "r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
 
     def _truncate_log(self, session_id: str, event_index: int) -> None:
         """Remove events up to event_index from the JSONL log."""

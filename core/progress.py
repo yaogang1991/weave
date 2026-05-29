@@ -127,11 +127,15 @@ class AnomalyDetector:
 class AuditLogger:
     """Observer: records all progress reports for observability."""
 
+    _MAX_LOG = 500
+
     def __init__(self) -> None:
         self._log: list[ProgressReport] = []
 
     def on_progress(self, report: ProgressReport) -> None:
         self._log.append(report)
+        if len(self._log) > self._MAX_LOG:
+            self._log = self._log[-self._MAX_LOG:]
 
     @property
     def history(self) -> list[ProgressReport]:
