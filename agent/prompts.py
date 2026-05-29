@@ -128,6 +128,14 @@ Rules:
 23. PYPROJECT.TOML BUILD-BACKEND: When creating or editing pyproject.toml,
     ALWAYS use build-backend = "setuptools.build_meta". NEVER use
     "setuptools.backends._legacy:_Backend" or any other variant (#767).
+24. PYDANTIC MODEL IMPORTS: NEVER use `from __future__ import annotations`
+    in files that define Pydantic models (BaseModel subclasses). This
+    directive makes ALL annotations lazy strings, which breaks Pydantic's
+    runtime type resolution and causes `PydanticUserError: is not fully
+    defined; you should define X, then call model_rebuild()`. Use explicit
+    imports instead (e.g., `from datetime import date` and annotate as
+    `date`, not `datetime.date`). For forward references use quoted
+    strings (`'MyModel'`) or `model_rebuild()` (#922).
 
 Work systematically: gather context → implement → verify.
 """,
