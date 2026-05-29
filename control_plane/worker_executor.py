@@ -54,10 +54,12 @@ def finalize_pending_approval_run(
         runs = repository.list_runs_by_job(job_id)
         for run in runs:
             if run.status == RunStatus.PENDING_APPROVAL:
-                run.status = target_status
-                run.completed_at = datetime.now(timezone.utc)
-                run.dag_result = {"error": detail_msg}
-                repository.update_run(run)
+                updated = run.model_copy(update={
+                    "status": target_status,
+                    "completed_at": datetime.now(timezone.utc),
+                    "dag_result": {"error": detail_msg},
+                })
+                repository.update_run(updated)
     except Exception as exc:
         _json_log(
             "WARNING",
