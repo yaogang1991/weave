@@ -173,8 +173,8 @@ class ProgressTracker:
         for obs in self._observers:
             try:
                 obs.on_progress(report)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Progress observer notification failed: %s", exc)
 
         # Ask filters: extend lease only if ALL agree
         should_extend = all(f.should_extend(report) for f in self._filters)

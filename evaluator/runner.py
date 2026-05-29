@@ -668,8 +668,8 @@ def check_no_critical(path: Path, artifacts: list[str] | None = None) -> tuple[b
             for marker in ["TODO", "FIXME", "XXX", "HACK"]:
                 if marker in content:
                     issues.append(f"{fname}: {marker}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Lint marker extraction failed for %s: %s", fpath, exc)
     passed = len(issues) == 0
     return passed, f"Found markers: {issues}" if issues else "No critical markers found"
 

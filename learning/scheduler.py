@@ -76,8 +76,8 @@ class LearningScheduler:
         if self.analyzer.metrics_collector is not None:
             try:
                 metrics = self.analyzer.metrics_collector.collect()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Metrics collection failed: %s", exc)
         total_jobs = (metrics or {}).get("summary", {}).get("total", 0)
         if total_jobs < self.config.min_samples:
             logger.debug(

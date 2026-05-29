@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -15,8 +16,7 @@ from control_plane.models import JobStatus, RunStatus
 from control_plane.approval import TicketStatus
 from core.exceptions import PendingApprovalError
 
-
-def _json_log(
+logger = logging.getLogger(__name__)def _json_log(
     level: str,
     message: str,
     job_id: str = "",
@@ -200,8 +200,8 @@ async def execute_job_core(
             await asyncio.to_thread(
                 repository.release_lease, job_id
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Lease release failed for %s: %s", job_id, exc)
         raise
 
     except PendingApprovalError as exc:
