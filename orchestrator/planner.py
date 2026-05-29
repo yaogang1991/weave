@@ -456,8 +456,14 @@ def _apply_rename_map(dag: DAG, rename_map: dict[str, str]) -> None:
             if isinstance(crit, SuccessCriterion):
                 new_path, new_pattern = crit.path, crit.pattern
                 for old, new in rename_map.items():
-                    new_path = new_path.replace(f"/{old}/", f"/{new}/").replace(f"/{old}.", f"/{new}.")
-                    new_pattern = new_pattern.replace(f"/{old}/", f"/{new}/").replace(f"/{old}.", f"/{new}.")
+                    new_path = (
+                        new_path.replace(f"/{old}/", f"/{new}/")
+                        .replace(f"/{old}.", f"/{new}.")
+                    )
+                    new_pattern = (
+                        new_pattern.replace(f"/{old}/", f"/{new}/")
+                        .replace(f"/{old}.", f"/{new}.")
+                    )
                 if new_path != crit.path or new_pattern != crit.pattern:
                     crit = crit.model_copy(update={"path": new_path, "pattern": new_pattern})
                 updated.append(crit)
