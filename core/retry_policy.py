@@ -192,15 +192,20 @@ class RetryPolicyEngine:
             if path is None:
                 continue
             os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-            # Backup existing file before overwriting
+            # Backup existing file before overwriting (atomic)
             if os.path.isfile(path):
                 backup_path = path + ".bak"
+                tmp_bak = backup_path + ".tmp"
                 with open(path, "r", encoding="utf-8", errors="replace") as src:
                     backup_content = src.read()
-                with open(backup_path, "w", encoding="utf-8") as dst:
+                with open(tmp_bak, "w", encoding="utf-8") as dst:
                     dst.write(backup_content)
-            with open(path, "w", encoding="utf-8") as f:
+                os.replace(tmp_bak, backup_path)
+            # Write new content atomically
+            tmp_path = path + ".tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 f.write(content)
+            os.replace(tmp_path, path)
 
     @staticmethod
     def rollback_restore(work_dir: str, snapshot: dict[str, str]) -> None:
