@@ -14,7 +14,7 @@ import pytest
 from unittest.mock import AsyncMock
 
 from core.models import DAG, DAGNode, NodeStatus
-from core.node_executor import NodeExecutor
+from core.node_executor import NodeExecutor, NodeExecutorConfig
 from core.watchdog import WatchdogService
 
 
@@ -34,18 +34,19 @@ def _make_dag(node: DAGNode | None = None) -> DAG:
 
 def _make_executor(stall_timeout: int = 5, **overrides) -> NodeExecutor:
     from core.config import NodeTimeoutConfig
-    cfg = NodeTimeoutConfig(
+    timeout_cfg = NodeTimeoutConfig(
         default_timeout=30,
         stall_timeout=stall_timeout,
     )
-    defaults = {
-        "agent_executor": AsyncMock(return_value={"artifacts": []}),
-        "emit_func": AsyncMock(),
-        "watchdog": WatchdogService(enabled=False),
-        "node_timeout_config": cfg,
-    }
-    defaults.update(overrides)
-    return NodeExecutor(**defaults)
+    agent_exec = overrides.pop("agent_executor", AsyncMock(return_value={"artifacts": []}))
+    emit = overrides.pop("emit_func", AsyncMock())
+    wd = overrides.pop("watchdog", WatchdogService(enabled=False))
+    return NodeExecutor(
+        agent_executor=agent_exec,
+        emit_func=emit,
+        watchdog=wd,
+        config=NodeExecutorConfig(node_timeout_config=timeout_cfg, **overrides),
+    )
 
 
 class TestStallKillCancelsTask:

@@ -52,6 +52,36 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class NodeExecutorConfig:
+    """Configuration and optional service dependencies for NodeExecutor.
+
+    Groups the 19 optional parameters that were previously passed individually
+    to ``NodeExecutor.__init__``.  Required behavioral args (agent_executor,
+    emit_func, watchdog) remain as direct constructor parameters.
+    """
+
+    evaluator: Any | None = None
+    artifact_path: str = "./data/artifacts"
+    work_dir: str | None = None
+    quality_gate: QualityGate | None = None
+    artifact_handoff: ArtifactHandoffService | None = None
+    node_timeout_config: Any | None = None
+    backend_manager: Any | None = None
+    job_id: str = ""
+    run_id: str = ""
+    backoff_base: float = 2.0
+    backoff_cap: float = 60.0
+    backend_registry: Any | None = None
+    session_id: str = ""
+    budget_manager: BudgetManager | None = None
+    memory_manager: Any | None = None
+    project_config: Any | None = None
+    default_agent_backend: str = "claude_code"
+    session_store: Any | None = None
+    node_guardrails: Any | None = None
+
+
+@dataclass
 class _PrepareResult:
     """Output of the prepare stage."""
 
@@ -69,7 +99,6 @@ class NodeExecutor:
     Retry is a while loop (not recursion).
     """
 
-    # TODO(M6.3): Extract into NodeExecutorConfig dataclass (20 params)
     def __init__(
         self,
         agent_executor: Callable[
@@ -77,57 +106,40 @@ class NodeExecutor:
         ],
         emit_func: Callable[[ExecutionEvent], Coroutine[Any, Any, None]],
         watchdog: WatchdogService,
-        evaluator: Any | None = None,
-        artifact_path: str = "./data/artifacts",
-        work_dir: str | None = None,
-        quality_gate: QualityGate | None = None,
-        artifact_handoff: ArtifactHandoffService | None = None,
-        node_timeout_config: Any | None = None,
-        backend_manager: Any | None = None,
-        job_id: str = "",
-        run_id: str = "",
-        backoff_base: float = 2.0,
-        backoff_cap: float = 60.0,
-        backend_registry: Any | None = None,
-        session_id: str = "",
-        budget_manager: BudgetManager | None = None,
-        memory_manager: Any | None = None,
-        project_config: Any | None = None,
-        default_agent_backend: str = "claude_code",
-        session_store: Any | None = None,
-        node_guardrails: Any | None = None,
+        config: NodeExecutorConfig | None = None,
     ) -> None:
+        cfg = config or NodeExecutorConfig()
         self.agent_executor = agent_executor
         self._emit = emit_func
         self._watchdog = watchdog
-        self._evaluator = evaluator
-        self.artifact_path = artifact_path
-        self.work_dir = work_dir
-        self._quality_gate = quality_gate or QualityGate()
-        self._artifact_handoff = artifact_handoff or ArtifactHandoffService()
-        self._node_timeout_config = node_timeout_config
-        self.backend_manager = backend_manager
-        self._job_id = job_id
-        self._run_id = run_id
-        self.backoff_base = backoff_base
-        self.backoff_cap = backoff_cap
-        self._backend_registry = backend_registry
-        self._session_id = session_id
-        self._budget_manager = budget_manager
-        self._memory_manager = memory_manager
-        self._project_config = project_config
-        self._default_agent_backend = default_agent_backend
-        self._session_store = session_store
-        self._node_guardrails = node_guardrails
+        self._evaluator = cfg.evaluator
+        self.artifact_path = cfg.artifact_path
+        self.work_dir = cfg.work_dir
+        self._quality_gate = cfg.quality_gate or QualityGate()
+        self._artifact_handoff = cfg.artifact_handoff or ArtifactHandoffService()
+        self._node_timeout_config = cfg.node_timeout_config
+        self.backend_manager = cfg.backend_manager
+        self._job_id = cfg.job_id
+        self._run_id = cfg.run_id
+        self.backoff_base = cfg.backoff_base
+        self.backoff_cap = cfg.backoff_cap
+        self._backend_registry = cfg.backend_registry
+        self._session_id = cfg.session_id
+        self._budget_manager = cfg.budget_manager
+        self._memory_manager = cfg.memory_manager
+        self._project_config = cfg.project_config
+        self._default_agent_backend = cfg.default_agent_backend
+        self._session_store = cfg.session_store
+        self._node_guardrails = cfg.node_guardrails
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._eval_pipeline = EvaluationPipeline(
-            evaluator=evaluator,
+            evaluator=cfg.evaluator,
             quality_gate=self._quality_gate,
-            budget_manager=budget_manager,
-            artifact_path=artifact_path,
-            work_dir=work_dir,
-            node_timeout_config=node_timeout_config,
+            budget_manager=cfg.budget_manager,
+            artifact_path=cfg.artifact_path,
+            work_dir=cfg.work_dir,
+            node_timeout_config=cfg.node_timeout_config,
             emit_func=emit_func,
         )
 
