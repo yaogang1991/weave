@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import statistics
 from collections import Counter
 from datetime import datetime, timezone
@@ -330,7 +331,10 @@ class MetricsReporter:
         """生成 JSON 格式报告。"""
         report = json.dumps(metrics, indent=2, default=str)
         if output_path:
-            Path(output_path).write_text(report, encoding="utf-8")
+            dest = Path(output_path)
+            tmp = dest.with_suffix(".tmp")
+            tmp.write_text(report, encoding="utf-8")
+            os.replace(tmp, dest)
         return report
 
     def generate_markdown_report(
@@ -419,5 +423,8 @@ class MetricsReporter:
 
         report = "\n".join(lines)
         if output_path:
-            Path(output_path).write_text(report, encoding="utf-8")
+            dest = Path(output_path)
+            tmp = dest.with_suffix(".tmp")
+            tmp.write_text(report, encoding="utf-8")
+            os.replace(tmp, dest)
         return report
