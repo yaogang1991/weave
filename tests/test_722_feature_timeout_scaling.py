@@ -41,32 +41,32 @@ class TestFeatureTimeoutScaling:
 
     def test_generator_timeout_scales_with_features(self):
         cfg = NodeTimeoutConfig()
-        # With default gen_stall_scale: base=120, per_feature=40
+        # With default gen_stall_scale: base=300, per_feature=40
         base_timeout = cfg.stall_timeout_for(
             "generator", dep_count=0, feature_count=0,
         )
         scaled_timeout = cfg.stall_timeout_for(
             "generator", dep_count=0, feature_count=8,
         )
-        # Should increase: 120 + 8 * 40 = 440 (vs base 120)
+        # Should increase: 300 + 8 * 40 = 620 (vs base 300)
         assert scaled_timeout > base_timeout
-        assert scaled_timeout == 440
+        assert scaled_timeout == 620
 
     def test_generator_timeout_capped(self):
         cfg = NodeTimeoutConfig()
         timeout = cfg.stall_timeout_for(
             "generator", dep_count=0, feature_count=100,
         )
-        # Should be capped at gen_stall_scale.cap (default 600)
-        assert timeout <= 600
+        # Should be capped at gen_stall_scale.cap (default 900)
+        assert timeout <= 900
 
     def test_combined_dep_and_feature_scaling(self):
         cfg = NodeTimeoutConfig()
         timeout = cfg.stall_timeout_for(
             "generator", dep_count=3, feature_count=5,
         )
-        # 120 + 3*30 + 5*40 = 120 + 90 + 200 = 410
-        assert timeout == 410
+        # 300 + 3*30 + 5*40 = 300 + 90 + 200 = 590
+        assert timeout == 590
 
     def test_feature_scaling_only_for_generators(self):
         cfg = NodeTimeoutConfig()
@@ -86,5 +86,5 @@ class TestFeatureTimeoutScaling:
         timeout = cfg.stall_timeout_for(
             "generator", feature_count=10,
         )
-        # 120 + 10*60 = 720, capped at 600
-        assert timeout == 600
+        # 300 + 10*60 = 900, capped at 900
+        assert timeout == 900
