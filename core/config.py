@@ -385,7 +385,7 @@ class EvaluatorStallScaleConfig(BaseModel):
     """
 
     base: int = Field(
-        default=int(os.getenv("WEAVE_EVAL_STALL_BASE", "120")),
+        default=int(os.getenv("WEAVE_EVAL_STALL_BASE", "300")),
         ge=1,
     )
     per_file: int = Field(
@@ -397,7 +397,7 @@ class EvaluatorStallScaleConfig(BaseModel):
         ge=0,
     )
     cap: int = Field(
-        default=int(os.getenv("WEAVE_EVAL_STALL_CAP", "600")),
+        default=int(os.getenv("WEAVE_EVAL_STALL_CAP", "900")),
         ge=1,
     )
 
