@@ -141,6 +141,13 @@ class EvaluatorEngine:
         progress_tracker: Any | None = None,  # M4.5 — kept for API compat, unused internally
     ) -> EvaluationResult:
         """Evaluate a stage against its success criteria."""
+        # Reset per-eval state to prevent stale lint/autofix data from
+        # previous evaluations leaking into this one (#1019).
+        self._last_autofixed = []
+        self._last_auto_formatted = []
+        self._last_lint_new_issues = []
+        self._last_lint_all_issues = []
+
         eval_dir = work_dir or artifact_path
         eval_id = f"{session_id}_{stage_name}"
 
