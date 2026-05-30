@@ -5,11 +5,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import sys
 import uuid
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from core.config import WeaveConfig, _get_non_interactive_env
 from core.models import DAG, DAGNode, EventType
@@ -79,8 +82,8 @@ async def cmd_plan(args):
                 from learning.optimizer import LearningOptimizer
                 mm = MemoryManager(config.memory, session_store=store)
                 learning_optimizer = LearningOptimizer(mm)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Memory/Learning system init failed: %s", e)
 
         orchestrator = IntelligentOrchestrator(
             llm_config=config.llm,
@@ -291,8 +294,8 @@ def _build_runtime(
         try:
             from memory.manager import MemoryManager
             memory_manager = MemoryManager(config.memory, session_store=store)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Memory system init failed: %s", e)
 
     # Learning optimizer
     learning_optimizer = None
@@ -300,8 +303,8 @@ def _build_runtime(
         try:
             from learning.optimizer import LearningOptimizer
             learning_optimizer = LearningOptimizer(memory_manager)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Learning optimizer init failed: %s", e)
 
     # Agent pool
     approval_repo = ApprovalRepository()

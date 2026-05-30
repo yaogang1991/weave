@@ -451,8 +451,10 @@ class RunService:
                         self.artifact_path, final_job, final_run,
                         final_run.dag_result or {},
                     )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    "Job result artifact write failed for %s: %s", job_id, e
+                )
 
         return self.repository.get_run(run.id) or run
 

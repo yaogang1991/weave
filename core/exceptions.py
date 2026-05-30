@@ -50,6 +50,12 @@ __all__ = [
     "RateLimitError",
     "HookError",
     "WasmRuntimeError",
+    # New infrastructure errors (M7.1)
+    "ConfigurationError",
+    "BackendError",
+    "AgentExecutionError",
+    "MCPError",
+    "MemoryStoreError",
     # Workflow errors
     "PendingApprovalError",
 ]
@@ -224,6 +230,38 @@ class HookError(InfrastructureError):
 
 class WasmRuntimeError(InfrastructureError):
     """Error during WASM execution."""
+
+
+class ConfigurationError(InfrastructureError):
+    """Configuration validation, loading, or parsing failure.
+
+    Note: only defined here, not migrated from Pydantic validator ValueError.
+    Pydantic validator ValueError is auto-converted to pydantic.ValidationError;
+    replacing with ConfigurationError would break that mechanism.
+    """
+
+
+class BackendError(InfrastructureError):
+    """Execution backend initialization, runtime, or cleanup failure."""
+
+
+class AgentExecutionError(InfrastructureError):
+    """Agent execution infrastructure error (SDK failure, CLI not found, etc.).
+
+    Inherits InfrastructureError (not ExecutionError) because CLI-not-found /
+    SDK connection failures should not consume retry budget.
+    """
+
+
+class MCPError(InfrastructureError):
+    """MCP server communication or tool call failure."""
+
+
+class MemoryStoreError(InfrastructureError):
+    """Memory store persistence or retrieval failure.
+
+    Named MemoryStoreError to avoid collision with Python builtin MemoryError.
+    """
 
 
 # ---------------------------------------------------------------------------

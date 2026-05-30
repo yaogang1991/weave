@@ -35,6 +35,10 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from control_plane.repository import JobRepository  # noqa: E402
+import logging
+
+logger = logging.getLogger(__name__)
+
 from control_plane.service import RunService  # noqa: E402
 from control_plane.models import JobStatus  # noqa: E402
 from control_plane.errors import classify_error  # noqa: E402
@@ -296,8 +300,8 @@ class TaskWorker:
             for job in jobs:
                 if job.project_path and job.project_path not in self._config_mtimes:
                     self.register_project_path(job.project_path)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Config reload job listing failed: %s", e)
 
         for project_path_str in list(self._config_mtimes.keys()):
             config_path = Path(project_path_str) / ".weave" / "config.yaml"

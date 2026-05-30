@@ -140,12 +140,10 @@ class LearningHook(ExecutionHook):
             return
         try:
             self._scheduler.maybe_run_analysis()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("LearningHook analysis failed: %s", e)
 
 
-# ============================================================================
-# ImpactHook
 # ============================================================================
 
 
@@ -208,8 +206,8 @@ class ImpactHook(ExecutionHook):
 
             ctx.metadata["impact_scope_id"] = impact_scope.id
             ctx.metadata["predicted_files"] = impact_scope.predicted_files
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("ImpactHook before_execution failed: %s", e)
 
     async def after_execution(self, ctx: ExecutionContext, result_dag: Any) -> None:
         impact_scope = ctx._state.get("impact_scope")
@@ -257,8 +255,8 @@ class ImpactHook(ExecutionHook):
             ctx.metadata["verification_passes"] = verification.passes
 
             self._persist_record(ctx, impact_scope, verification)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("ImpactHook after_execution failed: %s", e)
 
     def _persist_record(
         self, ctx: ExecutionContext, impact_scope: Any, verification: Any,
@@ -287,5 +285,5 @@ class ImpactHook(ExecutionHook):
                 json.dumps(record, indent=2, default=str, ensure_ascii=False),
                 encoding="utf-8",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Impact record persistence failed: %s", e)

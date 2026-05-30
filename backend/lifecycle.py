@@ -42,7 +42,7 @@ class HookResult:
     duration_ms: int = 0
 
 
-from core.exceptions import HookError  # noqa: F401 — re-export (#918)
+from core.exceptions import BackendError, HookError  # noqa: F401 — re-export (#918)
 
 
 class BackendManager:
@@ -93,7 +93,7 @@ class BackendManager:
         self._sandbox_config = sandbox_config or {}
         _VALID_POLICIES = ("always", "on_success", "never")
         if self.cleanup_policy not in _VALID_POLICIES:
-            raise ValueError(
+            raise BackendError(
                 f"Invalid cleanup_policy '{self.cleanup_policy}', "
                 f"must be one of {_VALID_POLICIES}"
             )
@@ -118,7 +118,7 @@ class BackendManager:
                     self.repo_root, self.base_path
                 )
             else:
-                raise ValueError(f"Unknown workspace type: {ws_type}")
+                raise BackendError(f"Unknown workspace type: {ws_type}")
         return self._backends[key]
 
     def _create_sandbox(self) -> SandboxProvider:
@@ -133,7 +133,7 @@ class BackendManager:
                 cpu_limit=self._sandbox_config.get("cpu_limit", 1.0),
             )
         else:
-            raise ValueError(f"Unknown sandbox type: {self.sandbox_type}")
+            raise BackendError(f"Unknown sandbox type: {self.sandbox_type}")
 
     def _select_sandbox(self, risk_level: str | None = None) -> SandboxProvider:
         """Select sandbox provider based on risk level (#484).

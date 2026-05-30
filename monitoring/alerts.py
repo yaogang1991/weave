@@ -358,15 +358,15 @@ class AlertManager:
         try:
             self._send_console(alert)
             success = True
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Console alert delivery failed: %s", e)
 
         # 调用注册的处理器
         for handler in self._alert_handlers:
             try:
                 handler(alert)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Alert handler %s failed: %s", handler, e)
 
         if success:
             self._last_alert_time[alert.rule_name] = datetime.now(

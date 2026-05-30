@@ -34,7 +34,7 @@ from openai import OpenAI
 
 from core.config import LLMConfig
 from core.progress import ProgressReport
-from core.exceptions import RateLimitError, HardTimeoutError
+from core.exceptions import InfrastructureError, RateLimitError, HardTimeoutError
 from monitoring.otel import (  # noqa: E402 — optional OTel (#509)
     start_llm_turn_span, set_llm_usage_attributes,
     capture_llm_content,  # noqa: E402 — #940
@@ -632,6 +632,10 @@ class LLMClient:
             temperature=self.config.temperature,
         )
 
+        if not response.choices:
+            raise InfrastructureError(
+                f"OpenAI API returned empty choices for model {self.config.model}"
+            )
         choice = response.choices[0]
         msg: dict = {
             "role": "assistant",

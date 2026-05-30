@@ -96,8 +96,8 @@ class BackendLifecycleService:
         """Preserve workspace artifacts. Backend errors are swallowed."""
         try:
             backend_manager.preserve(job_id, run_id, reason=reason)
-        except Exception:
-            pass  # Backend cleanup failure must not mask original error
+        except Exception as e:
+            logger.warning("Backend cleanup failure: %s", e)
 
     def cleanup(
         self,
@@ -108,8 +108,8 @@ class BackendLifecycleService:
         """Clean up workspace. Backend errors are swallowed."""
         try:
             backend_manager.cleanup(job_id, run_id)
-        except Exception:
-            pass  # Backend cleanup failure must not mask original error
+        except Exception as e:
+            logger.warning("Backend cleanup failure: %s", e)
 
     @staticmethod
     def load_project_hooks(project_path: str | None) -> dict[str, str]:
@@ -127,6 +127,6 @@ class BackendLifecycleService:
                 for key in ("after_create", "before_run", "after_run", "before_remove"):
                     if key in hook_cfg:
                         hooks[key] = hook_cfg[key]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Backend cleanup failure: %s", e)
         return hooks

@@ -6,7 +6,18 @@ across control_plane/.
 """
 from __future__ import annotations
 
-from core.exceptions import NodeTimeoutError, RateLimitError
+from core.exceptions import (
+    AgentExecutionError,
+    BackendError,
+    ConfigurationError,
+    HookError,
+    InfrastructureError,
+    MCPError,
+    MemoryStoreError,
+    NodeTimeoutError,
+    RateLimitError,
+    WasmRuntimeError,
+)
 
 
 def classify_error(error: str | BaseException) -> str:
@@ -21,6 +32,22 @@ def classify_error(error: str | BaseException) -> str:
         return "rate_limit"
     if isinstance(error, NodeTimeoutError):
         return "timeout"
+    if isinstance(error, HookError):
+        return "hook_error"
+    if isinstance(error, WasmRuntimeError):
+        return "wasm_error"
+    if isinstance(error, ConfigurationError):
+        return "configuration_error"
+    if isinstance(error, BackendError):
+        return "backend_error"
+    if isinstance(error, AgentExecutionError):
+        return "agent_error"
+    if isinstance(error, MCPError):
+        return "mcp_error"
+    if isinstance(error, MemoryStoreError):
+        return "memory_error"
+    if isinstance(error, InfrastructureError):
+        return "infrastructure_error"
 
     # Extract string for pattern matching
     if isinstance(error, BaseException):

@@ -5,6 +5,10 @@ Extracted from TaskWorker for maintainability (#442).
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import asyncio
 import json
 import sys
@@ -200,9 +204,9 @@ async def execute_job_core(
             await asyncio.to_thread(
                 repository.release_lease, job_id
             )
-        except Exception:
-            pass
-        raise
+        except Exception as e:
+            logger.warning("Lease release failed: %s", e)
+            raise
 
     except PendingApprovalError as exc:
         # Agent hit a high-risk tool — pause and wait for approval.

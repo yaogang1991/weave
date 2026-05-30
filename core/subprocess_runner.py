@@ -133,10 +133,11 @@ def run_with_progress(
                         stderr=f"Timed out after {timeout}s",
                         timed_out=True,
                     )
-    except Exception:
+    except Exception as e:
+        logger.warning("Subprocess execution failed: %s", e)
         proc.kill()
         try:
             proc.communicate(timeout=5)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Subprocess cleanup after kill failed: %s", e)
         raise

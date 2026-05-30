@@ -241,8 +241,8 @@ def inject_token_estimator(
                     api_key=api_key,
                     base_url=base_url or None,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Token estimation failed: %s", e)
 
         estimator = TokenEstimator(
             config=config,

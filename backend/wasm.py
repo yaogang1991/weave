@@ -75,8 +75,8 @@ def check_wasm_available() -> dict[str, Any]:
         try:
             import wasmtime
             wasi_support = hasattr(wasmtime, "WasiConfig")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("WASM runtime check failed: %s", e)
 
     return {
         "available": True,

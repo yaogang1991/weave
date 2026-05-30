@@ -112,16 +112,16 @@ class Planner:
                 hints = self.learning_optimizer.get_planning_hints(requirement)
                 if hints:
                     user_prompt += f"\n\n{hints}"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Learning hints unavailable: %s", e)
 
         if self.skill_registry:
             try:
                 skills_desc = self.skill_registry.to_prompt_description()
                 if skills_desc:
                     user_prompt += f"\n\n{skills_desc}"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Skill descriptions unavailable: %s", e)
 
         messages = [
             {"role": "system", "content": system_prompt},

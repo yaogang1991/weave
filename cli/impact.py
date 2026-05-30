@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import glob as glob_mod
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 from core.config import WeaveConfig
 
@@ -55,7 +58,7 @@ async def cmd_impact_history(args):
         try:
             with open(f, "r", encoding="utf-8") as fh:
                 records.append(json.load(fh))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Impact record load failed for %s: %s", f, e)
 
     print(json.dumps({"history": records[:50], "count": len(records)}, indent=2, default=str))

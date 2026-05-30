@@ -349,6 +349,6 @@ class ExecutionFactory:
                     result["denied_commands"] = gr["denied_commands"]
                 if "allowed_tools" in gr:
                     result["allowed_tools"] = gr["allowed_tools"]
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Guardrail config load failed, using defaults: %s", e)
         return result

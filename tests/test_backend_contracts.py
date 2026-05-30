@@ -21,6 +21,7 @@ from backend.base import WorkspaceIsolation  # noqa: E402
 from backend.local import LocalBackend  # noqa: E402
 from backend.worktree import WorktreeBackend  # noqa: E402
 from backend.lifecycle import BackendManager  # noqa: E402
+from core.exceptions import BackendError
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +363,7 @@ class TestCleanupPolicyValidation:
 
     def test_backend_manager_rejects_invalid_policy(self, tmp_path):
         """BackendManager must reject invalid cleanup_policy."""
-        with pytest.raises(ValueError, match="Invalid cleanup_policy"):
+        with pytest.raises(BackendError, match="Invalid cleanup_policy"):
             BackendManager(
                 base_path=str(tmp_path),
                 cleanup_policy="Always",
@@ -370,7 +371,7 @@ class TestCleanupPolicyValidation:
 
     def test_backend_manager_rejects_unknown_policy(self, tmp_path):
         """BackendManager must reject unknown cleanup_policy."""
-        with pytest.raises(ValueError, match="Invalid cleanup_policy"):
+        with pytest.raises(BackendError, match="Invalid cleanup_policy"):
             BackendManager(
                 base_path=str(tmp_path),
                 cleanup_policy="sometimes",
