@@ -189,7 +189,7 @@ class TaskWorker:
 
         while not self._stop_event.is_set():
             try:
-                self._check_config_reload()
+                await asyncio.to_thread(self._check_config_reload)
                 found_job = await self._poll_and_execute()
 
                 if found_job:
