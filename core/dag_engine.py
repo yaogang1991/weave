@@ -36,7 +36,7 @@ from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
-from core.node_executor import NodeExecutor
+from core.node_executor import NodeExecutor, NodeExecutorConfig
 from core.budget_manager import BudgetManager
 from core.project_config import ProjectConfig
 from core.provider_health import FailureCategory, ProviderHealthTracker
@@ -198,25 +198,27 @@ class DAGExecutionEngine:
             agent_executor=agent_executor,
             emit_func=self._emit,
             watchdog=self._watchdog,
-            evaluator=evaluator,
-            artifact_path=cfg.artifact_path,
-            work_dir=work_dir,
-            quality_gate=self._quality_gate,
-            artifact_handoff=self._artifact_handoff,
-            node_timeout_config=cfg.node_timeout_config,
-            backend_manager=backend_manager,
-            job_id=job_id,
-            run_id=run_id,
-            backoff_base=cfg.backoff_base,
-            backoff_cap=cfg.backoff_cap,
-            backend_registry=backend_registry,
-            session_id=session_id or "",
-            budget_manager=budget_manager,
-            memory_manager=memory_manager,
-            project_config=project_config,
-            default_agent_backend=cfg.default_agent_backend,
-            session_store=session_store,
-            node_guardrails=node_guardrails,
+            config=NodeExecutorConfig(
+                evaluator=evaluator,
+                artifact_path=cfg.artifact_path,
+                work_dir=work_dir,
+                quality_gate=self._quality_gate,
+                artifact_handoff=self._artifact_handoff,
+                node_timeout_config=cfg.node_timeout_config,
+                backend_manager=backend_manager,
+                job_id=job_id,
+                run_id=run_id,
+                backoff_base=cfg.backoff_base,
+                backoff_cap=cfg.backoff_cap,
+                backend_registry=backend_registry,
+                session_id=session_id or "",
+                budget_manager=budget_manager,
+                memory_manager=memory_manager,
+                project_config=project_config,
+                default_agent_backend=cfg.default_agent_backend,
+                session_store=session_store,
+                node_guardrails=node_guardrails,
+            ),
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
