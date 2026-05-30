@@ -31,11 +31,12 @@ from typing import Any  # noqa: F401 — still used for dict[str, Any] return ty
 # Allow imports from project root (core/, orchestrator/, agent/, session/, ...)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.config import LLMConfig, WatchdogConfig  # noqa: E402
+from core.config import BudgetConfig, LLMConfig, WatchdogConfig  # noqa: E402
 from session.store import SessionStore  # noqa: E402
 from guardrails.policy import GuardrailPolicy  # noqa: E402
 from core.models import DAG, EventType, NodeStatus  # noqa: E402
 from core.exceptions import PendingApprovalError  # noqa: E402
+from core.budget_manager import BudgetManager  # noqa: E402
 
 from control_plane.approval import ApprovalRepository  # noqa: E402
 from control_plane.models import Job, Run, JobStatus, RetryPolicy  # noqa: E402
@@ -255,6 +256,7 @@ class RunService:
         approval_repo: ApprovalRepository | None = None,
         approval_timeout_sec: int = 300,
         watchdog_config: WatchdogConfig | None = None,
+        budget_config: BudgetConfig | None = None,
     ) -> None:
         self.repository = repository
         self.llm_config = llm_config
@@ -300,7 +302,11 @@ class RunService:
             hooks=self._hooks,
             approval_repo=approval_repo,
             policy=policy,
-            budget_manager=None,  # TODO: propagate from WeaveConfig.budget (#595)
+            budget_manager=(
+                BudgetManager(budget_config)
+                if budget_config and budget_config.enabled
+                else None
+            ),  # Fixed: propagate from WeaveConfig.budget (#595)
 
         )
 
