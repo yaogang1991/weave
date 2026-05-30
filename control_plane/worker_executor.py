@@ -16,7 +16,10 @@ from control_plane.models import JobStatus, RunStatus
 from control_plane.approval import TicketStatus
 from core.exceptions import PendingApprovalError
 
-logger = logging.getLogger(__name__)def _json_log(
+logger = logging.getLogger(__name__)
+
+
+def _json_log(
     level: str,
     message: str,
     job_id: str = "",
