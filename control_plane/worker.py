@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import signal
 import socket
 import sys
@@ -50,7 +51,7 @@ from control_plane.worker_executor import (  # noqa: E402
     poll_for_approval,
 )
 
-
+logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -296,8 +297,8 @@ class TaskWorker:
             for job in jobs:
                 if job.project_path and job.project_path not in self._config_mtimes:
                     self.register_project_path(job.project_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Config reload task list failed: %s", exc)
 
         for project_path_str in list(self._config_mtimes.keys()):
             config_path = Path(project_path_str) / ".weave" / "config.yaml"
