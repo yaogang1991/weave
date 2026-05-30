@@ -152,13 +152,32 @@ def run_tests(
                     + "\n".join(f"  - {w}" for w in shadow_warnings)
                 )
             return passed, "Tests passed"
-        # Extract specific failure lines for actionable feedback
+        # Extract specific failure lines for actionable feedback.
+        # Combine stdout + stderr — database init errors (OperationalError,
+        # fixture setup failures) typically appear in stderr (#1001).
+        combined = rwp.stdout + "\n" + rwp.stderr
         failure_lines = []
-        for line in rwp.stdout.split("\n"):
-            if any(kw in line for kw in ("FAILED", "AssertionError", "Error:", "error")):
+        for line in combined.split("\n"):
+            if any(kw in line for kw in (
+                "FAILED", "AssertionError", "Error:", "error",
+                "OperationalError", "no such table",
+                "fixture", "conftest",
+            )):
                 failure_lines.append(line)
-        detail = "\n".join(failure_lines[-20:]) if failure_lines else rwp.stdout[-500:]
+        detail = "\n".join(failure_lines[-20:]) if failure_lines else combined[-500:]
         msg = f"Tests failed:\n{detail}"
+        # Actionable hint for database initialization failures (#1001).
+        if "no such table" in combined or "OperationalError" in combined:
+            msg += (
+                "\n\nHINT: Database tables not created. Common causes:\n"
+                "  1. models/__init__.py does not import all model classes "
+                "-> Base.metadata.create_all() has nothing to create\n"
+                "  2. conftest.py uses a separate Base instance instead of "
+                "the one from models\n"
+                "  3. create_all() is called before models are imported\n"
+                "Fix: ensure all SQLAlchemy models are imported before "
+                "calling Base.metadata.create_all(bind=engine)."
+            )
         if shadow_warnings:
             msg += (
                 "\n\nWARNING: Shadowing test __init__.py files detected "
