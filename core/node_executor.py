@@ -242,8 +242,9 @@ class NodeExecutor:
                         node_workspace = self._cleanup_for_retry(
                             dag, node_id, node_workspace,
                         )
-                        backoff = self._compute_backoff(
+                        backoff = RetryPolicyEngine.compute_backoff(
                             dag.nodes[node_id].retry_count,
+                            base=self.backoff_base, cap=self.backoff_cap,
                         )
                         await asyncio.sleep(backoff)
                         continue
@@ -885,8 +886,3 @@ class NodeExecutor:
         failed_soft: list[str] | None = None,
     ) -> list[HandoffArtifact]:
         return self._artifact_handoff.collect(dag, node_id, failed_soft)
-
-    def _compute_backoff(self, retry_count: int) -> float:
-        return RetryPolicyEngine.compute_backoff(
-            retry_count, base=self.backoff_base, cap=self.backoff_cap,
-        )

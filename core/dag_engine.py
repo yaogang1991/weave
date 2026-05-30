@@ -712,7 +712,10 @@ class DAGExecutionEngine:
                                 continue
 
                             # Exponential backoff before retry
-                            backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
+                            backoff = self._retry_policy.compute_backoff(
+                                dag.nodes[failed_id].retry_count,
+                                base=self.backoff_base, cap=self.backoff_cap,
+                            )
                             if backoff > 0:
                                 await asyncio.sleep(backoff)
 
@@ -1146,12 +1149,6 @@ class DAGExecutionEngine:
         return None
 
     # -- File snapshot for regression rollback (#212) ----------------------
-
-    def _compute_backoff(self, retry_count: int) -> float:
-        """Compute exponential backoff delay in seconds."""
-        return self._retry_policy.compute_backoff(
-            retry_count, base=self.backoff_base, cap=self.backoff_cap,
-        )
 
     def _check_planner_circuit_break(
         self, dag: DAG, failed_id: str,
