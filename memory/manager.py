@@ -391,8 +391,8 @@ class MemoryManager:
                     if disk_data.get("access_count", 0) != entry.access_count:
                         from memory.store import _json_dump_atomic
                         _json_dump_atomic(entry.model_dump(mode="json"), path)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("Memory persistence failed for %s: %s", path, exc)
 
     # -- Statistics --
 
