@@ -186,11 +186,13 @@ class JobLifecycleManager:
         run = active_runs[-1]
 
         if job.status in {JobStatus.RUNNING, JobStatus.LEASED}:
-            job.status = JobStatus.QUEUED
-            job.lease_owner = None
-            job.lease_expires_at = None
-            job.last_error = ""
-            job.error_category = ""
+            job = job.model_copy(update={
+                "status": JobStatus.QUEUED,
+                "lease_owner": None,
+                "lease_expires_at": None,
+                "last_error": "",
+                "error_category": "",
+            })
             job = self.repository.update_job(job)
         elif job.status != JobStatus.QUEUED:
             return None
@@ -238,8 +240,10 @@ class JobLifecycleManager:
                 error_category="tool_blocked",
             )
             # Clear lease metadata so workers can immediately acquire this queued job.
-            job.lease_owner = None
-            job.lease_expires_at = None
+            job = job.model_copy(update={
+                "lease_owner": None,
+                "lease_expires_at": None,
+            })
             job = self.repository.update_job(job)
         elif job.status == JobStatus.QUEUED:
             job = self.repository.transition_job_status(
