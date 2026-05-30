@@ -50,6 +50,7 @@ __all__ = [
     "RateLimitError",
     "HookError",
     "WasmRuntimeError",
+    "LLMResponseError",
     # Workflow errors
     "PendingApprovalError",
 ]
@@ -224,6 +225,14 @@ class HookError(InfrastructureError):
 
 class WasmRuntimeError(InfrastructureError):
     """Error during WASM execution."""
+
+
+class LLMResponseError(InfrastructureError):
+    """Raised when an LLM API returns an unexpected response structure.
+
+    Covers edge cases like empty choices lists (OpenAI) or empty content
+    blocks (Anthropic) that would otherwise cause IndexError/AttributeError.
+    """
 
 
 # ---------------------------------------------------------------------------
