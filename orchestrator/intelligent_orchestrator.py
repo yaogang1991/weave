@@ -31,6 +31,7 @@ from orchestrator.llm_utils import (
     prune_messages_for_size,
     prune_messages_for_tokens,
     extract_json,
+    is_response_truncated,
     repair_truncated_json,
 )
 from orchestrator.plan_validator import PlanValidator
@@ -51,18 +52,6 @@ logger = logging.getLogger(__name__)
 
 from learning.optimizer import LearningOptimizer  # noqa: E402
 from skills.registry import SkillRegistry  # noqa: E402
-
-
-def _is_response_truncated(content: str) -> bool:
-    """Detect if planner JSON response was truncated (#621)."""
-    if not content:
-        return False
-    stripped = content.strip()
-    if not stripped.startswith("{"):
-        return False
-    if stripped.endswith("}"):
-        return False
-    return stripped.count("{") > stripped.count("}")
 
 
 class IntelligentOrchestrator:
@@ -177,7 +166,7 @@ class IntelligentOrchestrator:
 
     @staticmethod
     def _is_response_truncated(content: str) -> bool:
-        return _is_response_truncated(content)
+        return is_response_truncated(content)
 
     def _plan_structured_output(self, messages: list[dict]) -> dict | None:
         return self._planner._plan_structured_output(messages)
