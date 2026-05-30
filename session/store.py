@@ -9,6 +9,7 @@ Inspired by Anthropic's Session design:
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -339,14 +340,16 @@ class SessionStore:
             logger.debug("Auto-snapshot failed for session %s: %s", session_id, exc)
 
     def _save_snapshot(self, session_id: str, snapshot: SessionSnapshot) -> None:
-        """Write snapshot to disk."""
+        """Write snapshot to disk atomically."""
         path = self._snapshot_file(session_id)
         try:
-            with open(path, "w", encoding="utf-8") as f:
+            tmp = path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 f.write(json.dumps(
                     snapshot.model_dump(mode="json"),
                     indent=2, default=str, ensure_ascii=False,
                 ))
+            os.replace(tmp, path)
         except OSError as exc:
             logger.error("Failed to save snapshot for session %s: %s", session_id, exc)
 
