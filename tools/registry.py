@@ -335,8 +335,10 @@ class ToolRegistry:
                 return ToolResult(tool_call_id="", success=False, error=write_error)
             path = self._resolve_path(file_path)
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 f.write(content)
+            os.replace(tmp, path)
 
             msg = f"Written {len(content)} chars to {file_path}"
 
@@ -389,7 +391,9 @@ class ToolRegistry:
 
             line_num = content[:idx].count("\n") + 1
             content = content[:idx] + new_string + content[idx + len(old_string):]
-            path.write_text(content, encoding="utf-8")
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(content, encoding="utf-8")
+            os.replace(tmp, path)
 
             # Build before/after context so agent trusts the result (#153)
             old_lines = old_string.splitlines()
