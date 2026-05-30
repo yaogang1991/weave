@@ -17,6 +17,7 @@ from contextlib import AsyncExitStack
 from typing import Any
 
 from core.config import MCPServerConfig
+from core.exceptions import MCPError
 from core.models import MCPToolInfo, MCPServerStatus
 from monitoring.otel import inject_trace_context
 
@@ -81,7 +82,7 @@ class MCPServerConnection:
         except Exception as e:
             self.status = MCPServerStatus.ERROR
             logger.error("MCP server '%s' connection failed: %s", self.config.name, e)
-            raise
+            raise MCPError(self.config.name, "connect") from e
 
     async def discover_tools(self) -> list[MCPToolInfo]:
         """List tools available on this server."""
