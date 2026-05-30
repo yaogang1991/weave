@@ -13,7 +13,6 @@ Key design decisions:
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 import time
 from pathlib import Path
@@ -185,12 +184,6 @@ class DAGExecutionEngine:
         self._session_id = session_id
         # M3.4: Node timeout configuration (#360)
         self._node_timeout_config = cfg.node_timeout_config
-        # Dedicated thread pool for evaluator calls — avoids global pool
-        # join timeout warnings on event loop exit.
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=cfg.max_parallel,
-            thread_name_prefix="dag-engine",
-        )
         # Best-attempt tracking delegated to RetryPolicyEngine (#177 PR4).
         self._retry_policy = RetryPolicyEngine()
         # Quality gate delegated to QualityGate service (#177 PR4).
@@ -1005,7 +998,6 @@ class DAGExecutionEngine:
             self._watchdog.clear()
             self._running_tasks = {}
             # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
-            self._executor.shutdown(wait=False)
 
     async def _try_execute_replan(
         self, dag: DAG, failed_id: str,
