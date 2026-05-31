@@ -5,6 +5,7 @@ Extracted from main.py as part of #438.
 """
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,20 @@ from control_plane.service import RunService
 from control_plane.approval import ApprovalRepository
 
 
+def _normalize_msys_path(path: str) -> str:
+    """Convert MSYS2/Git Bash paths to native paths on Windows (#1047).
+
+    Git Bash on Windows uses Unix-style paths like /d/Project/foo which
+    Python's Path doesn't understand. Convert to D:/Project/foo.
+    """
+    if sys.platform != "win32":
+        return path
+    m = re.match(r'^/([a-zA-Z])((?:/.*)?)$', path)
+    if m:
+        return f"{m.group(1).upper()}:{m.group(2).replace('/', '\\')}"
+    return path
+
+
 def _resolve_project_path(project: str | None, allow_self_modify: bool = False) -> str | None:
     """Resolve and validate the project path for mutating operations.
 
@@ -27,6 +42,7 @@ def _resolve_project_path(project: str | None, allow_self_modify: bool = False) 
     SystemExit with a clear error message.
     """
     if project:
+        project = _normalize_msys_path(project)
         resolved = str(Path(project).resolve())
         # Check if explicitly targeting Weave tree
         weave_root = Path(__file__).parent.parent.resolve()
