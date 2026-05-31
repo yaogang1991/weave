@@ -346,7 +346,7 @@ def _build_runtime(
     from agent.backends.registry import BackendRegistry
     backend_registry = BackendRegistry.from_pool(pool=pool, session_id=session_id)
 
-    # M4.1: Register ClaudeCodeBackend if enabled or requested
+    # M4.1: Register ClaudeCodeBackend if enabled, requested, or CLI available
     backend_name = getattr(args, "backend", None)
     if backend_name == "claude_code" or config.claude_code.enabled:
         from agent.backends.claude_code import (
@@ -356,6 +356,22 @@ def _build_runtime(
         cc_config = RuntimeConfig.from_core_config(config.claude_code)
         cc_backend = ClaudeCodeBackend(config=cc_config)
         backend_registry.register("claude_code", cc_backend)
+    elif backend_name != "builtin":
+        # Auto-detect: register if claude CLI is available in PATH (#1045)
+        import shutil
+        if shutil.which(config.claude_code.cli_path):
+            from agent.backends.claude_code import (
+                ClaudeCodeBackend,
+                ClaudeCodeRuntimeConfig as RuntimeConfig,
+            )
+            cc_config = RuntimeConfig.from_core_config(config.claude_code)
+            cc_backend = ClaudeCodeBackend(config=cc_config)
+            backend_registry.register("claude_code", cc_backend)
+            import logging as _logging
+            _logging.getLogger(__name__).info(
+                "Auto-registered claude_code backend (CLI found: %s) (#1045)",
+                config.claude_code.cli_path,
+            )
 
     # M4.2: Budget manager from CLI args
     budget_manager = None
