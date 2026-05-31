@@ -416,6 +416,28 @@ class ClaudeCodeBackend(AgentBackend):
                     messages=[m.model_dump() for m in parser.messages],
                 )
 
+            # Detect silent failures: CLI exits 0 but produced zero tokens
+            # with stderr output — common with third-party API endpoints
+            # that return non-standard responses (#1040).
+            total_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+            if total_tokens == 0 and stderr:
+                logger.warning(
+                    "Claude CLI exited 0 but produced zero tokens with "
+                    "stderr output — treating as failure (#1040). "
+                    "stderr: %s",
+                    stderr[:500],
+                )
+                return BackendResult(
+                    status=BackendStatus.FAILED,
+                    error=(
+                        f"CLI exited successfully but produced zero tokens. "
+                        f"stderr: {stderr[:1000]}"
+                    ),
+                    artifacts=[],
+                    metadata={"token_usage": usage},
+                    messages=[m.model_dump() for m in parser.messages],
+                )
+
             artifacts = self._discover_artifacts(context)
             return self._build_stream_result(
                 parser, usage, state, artifacts,
