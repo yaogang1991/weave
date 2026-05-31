@@ -25,6 +25,7 @@ from orchestrator.llm_utils import (
     prune_messages_for_size,
     prune_messages_for_tokens,
     extract_json,
+    is_response_truncated,
 )
 from orchestrator.plan_validator import PlanValidator, PlanValidationError
 from orchestrator.prompts import PromptRegistry
@@ -305,7 +306,7 @@ class Planner:
                 break
             if attempt < max_retries:
                 failed_content = response.get("content", "")
-                is_truncated = _is_response_truncated(failed_content)
+                is_truncated = is_response_truncated(failed_content)
                 if len(failed_content) > 2000:
                     failed_content = failed_content[:2000] + "\n... (truncated)"
                 messages.append({"role": "assistant", "content": failed_content})
@@ -417,17 +418,6 @@ class Planner:
 
 
 # -- Module-level helpers (no circular imports) --
-
-
-def _is_response_truncated(content: str) -> bool:
-    if not content:
-        return False
-    stripped = content.strip()
-    if not stripped.startswith("{"):
-        return False
-    if stripped.endswith("}"):
-        return False
-    return stripped.count("{") > stripped.count("}")
 
 
 def _infer_fallback_edges(dag: DAG) -> DAG:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,8 @@ from typing import Any
 from control_plane.models import JobStatus, RunStatus
 from control_plane.approval import TicketStatus
 from core.exceptions import PendingApprovalError
+
+logger = logging.getLogger(__name__)
 
 
 def _json_log(
@@ -54,10 +57,12 @@ def finalize_pending_approval_run(
         runs = repository.list_runs_by_job(job_id)
         for run in runs:
             if run.status == RunStatus.PENDING_APPROVAL:
-                run.status = target_status
-                run.completed_at = datetime.now(timezone.utc)
-                run.dag_result = {"error": detail_msg}
-                repository.update_run(run)
+                updated = run.model_copy(update={
+                    "status": target_status,
+                    "completed_at": datetime.now(timezone.utc),
+                    "dag_result": {"error": detail_msg},
+                })
+                repository.update_run(updated)
     except Exception as exc:
         _json_log(
             "WARNING",
@@ -200,8 +205,8 @@ async def execute_job_core(
             await asyncio.to_thread(
                 repository.release_lease, job_id
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Lease release failed for %s: %s", job_id, exc)
         raise
 
     except PendingApprovalError as exc:

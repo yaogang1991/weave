@@ -332,6 +332,7 @@ def _make_run_service(repository: JobRepository, non_interactive: bool = False) 
         approval_repo=approval_repo,
         non_interactive=non_interactive,
         approval_timeout_sec=weave_config.approval_timeout_sec,
+        budget_config=weave_config.budget,
     )
     if llm_router:
         service.llm_router = llm_router

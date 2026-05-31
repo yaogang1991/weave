@@ -8,20 +8,26 @@ Fault tolerance contract (#360):
     All faults propagate via exception types, not return-value status dicts.
     Each layer catches only the exceptions in its contract.
 
-Exception hierarchy (#918):
+Exception hierarchy (#918, #1007):
 
     WeaveError (base)
     ├── ExecutionError
     │   ├── NodeTimeoutError
     │   ├── HardTimeoutError(NodeTimeoutError)
     │   ├── BudgetExhaustedError
-    │   └── GuardrailBlockedException
+    │   ├── GuardrailBlockedException
+    │   └── AgentExecutionError
     ├── PlanningError
     │   └── PlanValidationError
     ├── InfrastructureError
     │   ├── RateLimitError
     │   ├── HookError
-    │   └── WasmRuntimeError
+    │   ├── WasmRuntimeError
+    │   ├── LLMResponseError
+    │   ├── ConfigurationError
+    │   ├── BackendError
+    │   ├── MCPError
+    │   └── MemoryStoreError
     └── WorkflowError
         └── PendingApprovalError
 """
@@ -50,6 +56,11 @@ __all__ = [
     "RateLimitError",
     "HookError",
     "WasmRuntimeError",
+    "LLMResponseError",
+    "ConfigurationError",
+    "BackendError",
+    "MCPError",
+    "MemoryStoreError",
     # Workflow errors
     "PendingApprovalError",
 ]
@@ -173,6 +184,17 @@ class GuardrailBlockedException(ExecutionError):
         )
 
 
+class AgentExecutionError(ExecutionError):
+    """Raised when an agent backend fails during execution.
+
+    Propagation chain:
+        BuiltinBackend._ensure_closure() — no pool configured
+          -> raises AgentExecutionError
+        -> DAGExecutionEngine._execute_single_node() — marks FAILED
+        -> RunService.run_job() — classifies as "agent_error"
+    """
+
+
 # ---------------------------------------------------------------------------
 # Planning errors
 # ---------------------------------------------------------------------------
@@ -224,6 +246,59 @@ class HookError(InfrastructureError):
 
 class WasmRuntimeError(InfrastructureError):
     """Error during WASM execution."""
+
+
+
+class LLMResponseError(InfrastructureError):
+    """Raised when an LLM API returns an unexpected response structure.
+
+    Covers edge cases like empty choices lists (OpenAI) or empty content
+    blocks (Anthropic) that would otherwise cause IndexError/AttributeError.
+    """
+
+
+class ConfigurationError(InfrastructureError):
+    """Raised when configuration validation or loading fails.
+
+    Replaces bare ``ValueError`` in non-Pydantic config validation
+    (backend type selection, cleanup policy, sandbox type, etc.).
+    Pydantic field_validator methods continue using ``ValueError``
+    which Pydantic wraps into its own ``ValidationError``.
+    """
+
+
+class BackendError(InfrastructureError):
+    """Raised when an execution backend fails during setup or operation.
+
+    Covers workspace setup failures (worktree add, workspace unavailable)
+    and backend lifecycle errors.
+    """
+
+
+class MCPError(InfrastructureError):
+    """Raised when MCP server communication fails.
+
+    Propagation chain:
+        MCPServerConnection.connect() — connection/initialization failure
+          -> raises MCPError (wrapping original exception)
+        -> MCPClient.connect_all() — logs and skips the server
+    """
+
+    def __init__(self, server_name: str, operation: str) -> None:
+        self.server_name = server_name
+        self.operation = operation
+        super().__init__(
+            f"MCP server '{server_name}' failed during {operation}"
+        )
+
+
+class MemoryStoreError(InfrastructureError):
+    """Raised when memory store persistence or retrieval fails.
+
+    Replaces bare ``ValueError`` in memory validation (content length,
+    session_id requirements) so callers can distinguish memory-system
+    errors from generic validation errors.
+    """
 
 
 # ---------------------------------------------------------------------------

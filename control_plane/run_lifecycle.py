@@ -4,6 +4,10 @@ RunLifecycleManager — extracted from RunService (#177 PR 1).
 Manages Run status transitions: succeeded, failed, timed_out, canceled,
 pending_approval.  Each method returns the updated Run so the caller can
 chain or return directly.
+
+Uses model_copy() for immutable state transitions — the original Run
+object is never mutated in-place, so a failed update_run() cannot leave
+the caller with a corrupted in-memory object.
 """
 from __future__ import annotations
 
@@ -19,8 +23,12 @@ logger = logging.getLogger(__name__)
 class RunLifecycleManager:
     """Centralized Run status transitions.
 
-    Extracts all direct ``run.status = ...`` mutations from RunService so
+    Extracts all ``run.status = ...`` mutations from RunService so
     status logic lives in one place and is independently testable.
+
+    All methods use model_copy() to produce a new Run instance without
+    mutating the original, consistent with the project's immutability
+    convention.
     """
 
     def __init__(self, repository: JobRepository) -> None:
@@ -28,11 +36,13 @@ class RunLifecycleManager:
 
     def mark_succeeded(self, run: Run, dag_result: dict[str, Any]) -> Run:
         """Transition run to SUCCEEDED and persist."""
-        run.status = RunStatus.SUCCEEDED
-        run.dag_result = dag_result
-        run.completed_at = self._utc_now()
-        self.repository.update_run(run)
-        return run
+        updated = run.model_copy(update={
+            "status": RunStatus.SUCCEEDED,
+            "dag_result": dag_result,
+            "completed_at": self._utc_now(),
+        })
+        self.repository.update_run(updated)
+        return updated
 
     def mark_failed(
         self,
@@ -40,28 +50,38 @@ class RunLifecycleManager:
         dag_result: dict[str, Any] | None = None,
     ) -> Run:
         """Transition run to FAILED and persist."""
-        run.status = RunStatus.FAILED
+        updates: dict[str, Any] = {
+            "status": RunStatus.FAILED,
+            "completed_at": self._utc_now(),
+        }
         if dag_result is not None:
-            run.dag_result = dag_result
-        run.completed_at = self._utc_now()
-        self.repository.update_run(run)
-        return run
+            updates["dag_result"] = dag_result
+        updated = run.model_copy(update=updates)
+        self.repository.update_run(updated)
+        return updated
 
     def mark_timed_out(self, run: Run, timeout_seconds: int) -> Run:
         """Transition run to TIMED_OUT and persist."""
-        run.status = RunStatus.TIMED_OUT
-        run.completed_at = self._utc_now()
-        run.dag_result = {"error": "timeout", "reason": f"Exceeded {timeout_seconds}s"}
-        self.repository.update_run(run)
-        return run
+        updated = run.model_copy(update={
+            "status": RunStatus.TIMED_OUT,
+            "completed_at": self._utc_now(),
+            "dag_result": {
+                "error": "timeout",
+                "reason": f"Exceeded {timeout_seconds}s",
+            },
+        })
+        self.repository.update_run(updated)
+        return updated
 
     def mark_canceled(self, run: Run, reason: str = "") -> Run:
         """Transition run to ABORTED (canceled) and persist."""
-        run.status = RunStatus.ABORTED
-        run.completed_at = self._utc_now()
-        run.dag_result = {"error": "canceled", "reason": reason}
-        self.repository.update_run(run)
-        return run
+        updated = run.model_copy(update={
+            "status": RunStatus.ABORTED,
+            "completed_at": self._utc_now(),
+            "dag_result": {"error": "canceled", "reason": reason},
+        })
+        self.repository.update_run(updated)
+        return updated
 
     def mark_pending_approval(
         self,
@@ -69,13 +89,15 @@ class RunLifecycleManager:
         ticket_id: str,
     ) -> Run:
         """Transition run to PENDING_APPROVAL and persist."""
-        run.status = RunStatus.PENDING_APPROVAL
-        run.dag_result = {
-            "status": "pending_approval",
-            "ticket_id": ticket_id,
-        }
-        self.repository.update_run(run)
-        return run
+        updated = run.model_copy(update={
+            "status": RunStatus.PENDING_APPROVAL,
+            "dag_result": {
+                "status": "pending_approval",
+                "ticket_id": ticket_id,
+            },
+        })
+        self.repository.update_run(updated)
+        return updated
 
     def resolve_external_status(self, run: Run, job: Job) -> Run | None:
         """Check if job was externally canceled/requeued while running.

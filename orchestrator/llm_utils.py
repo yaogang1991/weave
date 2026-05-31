@@ -254,6 +254,23 @@ def prune_messages_for_tokens(
     return pruned
 
 
+def is_response_truncated(content: str) -> bool:
+    """Detect if planner JSON response was truncated (#621).
+
+    Checks for unclosed braces in what looks like a JSON object.
+    Used by both Planner and IntelligentOrchestrator to detect
+    incomplete LLM responses that need repair or retry.
+    """
+    if not content:
+        return False
+    stripped = content.strip()
+    if not stripped.startswith("{"):
+        return False
+    if stripped.endswith("}"):
+        return False
+    return stripped.count("{") > stripped.count("}")
+
+
 def extract_json(text: str) -> dict | None:
     """Extract JSON from LLM response (handles markdown code blocks).
 
