@@ -584,7 +584,16 @@ class LLMClient:
 
         for block in response.content:
             if block.type == "tool_use":
-                args = block.input if isinstance(block.input, dict) else {}
+                # Normalize tool call input for third-party API compat (#1048).
+                # Non-Anthropic models may return input as a JSON string
+                # instead of a dict. Parse it before falling back to {}.
+                raw_input = block.input
+                if isinstance(raw_input, dict):
+                    args = raw_input
+                elif isinstance(raw_input, str) and raw_input.strip():
+                    args = LLMClient._parse_tool_arguments(raw_input)
+                else:
+                    args = {}
                 # Fallback: try extracting args from text content (#579)
                 if not args and text_content:
                     extracted = self._extract_tool_args_from_text(

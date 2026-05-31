@@ -278,3 +278,71 @@ class TestEmptyResponseGuards:
             client._call_anthropic(
                 [{"role": "user", "content": "test"}], [],
             )
+
+
+# ------------------------------------------------------------------------------
+# Third-party API tool call arg normalization (#1048)
+# ------------------------------------------------------------------------------
+
+class TestToolCallArgCompat:
+    """Non-Anthropic models may return tool_use input as JSON string."""
+
+    @staticmethod
+    def _make_tool_use_response(client, tool_input):
+        """Create a mock Anthropic response with a tool_use block."""
+        block = MagicMock(type="tool_use")
+        block.id = "call_1"
+        block.name = "write"
+        block.input = tool_input
+
+        text_block = MagicMock(type="text", text="")
+
+        mock_response = MagicMock()
+        mock_response.content = [text_block, block]
+        mock_response.usage = MagicMock(
+            input_tokens=10, output_tokens=5,
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        client._client.messages.create = MagicMock(return_value=mock_response)
+        return mock_response
+
+    def test_dict_input_passes_through(self, client):
+        """Standard Anthropic response (dict input) unchanged."""
+        self._make_tool_use_response(
+            client, {"file_path": "test.py", "content": "pass"},
+        )
+        result = client._call_anthropic(
+            [{"role": "user", "content": "write"}], [],
+        )
+        assert result["tool_calls"][0]["arguments"] == {
+            "file_path": "test.py", "content": "pass",
+        }
+
+    def test_json_string_input_parsed(self, client):
+        """Third-party API returns input as JSON string (#1048)."""
+        self._make_tool_use_response(
+            client, '{"file_path": "app.py", "content": "hello"}',
+        )
+        result = client._call_anthropic(
+            [{"role": "user", "content": "write"}], [],
+        )
+        assert result["tool_calls"][0]["arguments"] == {
+            "file_path": "app.py", "content": "hello",
+        }
+
+    def test_none_input_falls_back_to_empty(self, client):
+        """None input becomes empty dict (existing behavior)."""
+        self._make_tool_use_response(client, None)
+        result = client._call_anthropic(
+            [{"role": "user", "content": "write"}], [],
+        )
+        assert result["tool_calls"][0]["arguments"] == {}
+
+    def test_malformed_string_input_falls_back_to_empty(self, client):
+        """Non-JSON string input falls back to empty dict."""
+        self._make_tool_use_response(client, "not valid json {")
+        result = client._call_anthropic(
+            [{"role": "user", "content": "write"}], [],
+        )
+        assert result["tool_calls"][0]["arguments"] == {}
