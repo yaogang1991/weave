@@ -664,21 +664,29 @@ class PlanValidator:
         self,
         nodes: list[dict],
         edges: list[dict],
+        auto_foundation_keys: set[tuple[str, str]] | None = None,
     ) -> list[dict]:
         """Soften hard edges when a single node has too many hard dependents (#959).
 
-        When replan generates a "foundation" node with N≥4 hard dependents,
+        When replan generates a "foundation" node with N>=4 hard dependents,
         a single failure cascades to all dependents.  Converting these to soft
         gives dependent nodes a chance to execute (possibly with partial artifacts
         from prior successful nodes) rather than being skipped outright.
+
+        auto_foundation_keys: edges auto-added by _check_foundation_dependencies
+        are excluded from softening to preserve hard foundation semantics (#1043).
         """
+        _excluded = auto_foundation_keys or set()
         edges = [dict(e) for e in edges]
-        # Count hard dependents per upstream node
+        # Count hard dependents per upstream node (excluding auto-foundation)
         hard_fanout: dict[str, list[dict]] = {}
         for edge in edges:
             if edge.get("dependency_type", "hard") != "hard":
                 continue
             src = edge.get("from", "")
+            dst = edge.get("to", "")
+            if (src, dst) in _excluded:
+                continue
             hard_fanout.setdefault(src, []).append(edge)
 
         softened = 0
@@ -689,9 +697,22 @@ class PlanValidator:
                 edge["dependency_type"] = "soft"
                 softened += 1
 
+        # Count auto-foundation edges that were excluded
+        excluded_count = 0
+        if _excluded:
+            edge_keys = {
+                (e.get("from", ""), e.get("to", "")) for e in edges
+            }
+            excluded_count = len(_excluded & edge_keys)
+
         if softened:
             self.warnings.append(
                 f"Softened {softened} hub-dependency hard edges to soft "
-                f"(fan-out ≥ {self._HUB_FANOUT_THRESHOLD}, #959)."
+                f"(fan-out >= {self._HUB_FANOUT_THRESHOLD}, #959)."
+            )
+        if excluded_count:
+            self.warnings.append(
+                f"Preserved {excluded_count} auto-added foundation hard "
+                f"dependencies from hub softening (#1043)."
             )
         return edges
