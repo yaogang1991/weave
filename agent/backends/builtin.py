@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
+from core.exceptions import AgentExecutionError
 from agent.backends.base import AgentBackend
 from agent.prompts import SYSTEM_PROMPTS
 
@@ -47,7 +48,7 @@ class BuiltinBackend(AgentBackend):
         """Lazily create the executor closure from AgentPool."""
         if self._executor_closure is None:
             if self._pool is None:
-                raise RuntimeError(
+                raise AgentExecutionError(
                     "BuiltinBackend: no pool available for executor closure. "
                     "Provide either lightweight_caller or pool."
                 )

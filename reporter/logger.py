@@ -3,6 +3,7 @@ Reporter: audit trail, progress tracking, and session reports.
 """
 
 import json
+import os
 from pathlib import Path
 
 from core.models import EventType
@@ -60,7 +61,9 @@ class Reporter:
 
         # Write report
         report_file = self.report_path / f"{session_id}.md"
-        report_file.write_text(report, encoding="utf-8")
+        tmp = report_file.with_suffix(".md.tmp")
+        tmp.write_text(report, encoding="utf-8")
+        os.replace(tmp, report_file)
 
         return str(report_file)
 

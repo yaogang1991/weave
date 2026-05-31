@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 from core.models import (
     MemoryEntry, MemoryScope, MemoryType, EventType, DAG, DAGNode,
 )
+from core.exceptions import MemoryStoreError
 from core.config import MemoryConfig
 from memory.store import MemoryStore
 from memory.manager import MemoryManager, _extract_keywords, _compute_relevance
@@ -407,7 +408,7 @@ class TestMemoryManager:
             assert len(kw) >= 3
 
     def test_store_learning_enforces_content_length(self, memory_manager):
-        with pytest.raises(ValueError, match="Content length"):
+        with pytest.raises(MemoryStoreError, match="Content length"):
             memory_manager.store_learning(
                 agent_type="planner",
                 content="x" * 1001,  # default max is 1000

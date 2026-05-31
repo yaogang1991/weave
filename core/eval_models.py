@@ -39,6 +39,7 @@ class CriterionType(str, Enum):
     PATTERN_ABSENT = "pattern_absent"
     PATTERN_PRESENT = "pattern_present"
     TEST_FILE_EXISTS = "test_file_exists"
+    CONFTEST_DB_INIT = "conftest_db_init"
     CUSTOM = "custom"
 
 

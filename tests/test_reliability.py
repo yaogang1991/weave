@@ -251,13 +251,15 @@ class TestRetryBackoff:
     @pytest.mark.asyncio
     async def test_backoff_compute_increases(self):
         """Backoff delay increases with retry count (capped)."""
-        engine = DAGExecutionEngine(_noop_executor, _noop_failure_handler)
+        from core.retry_policy import RetryPolicyEngine
 
-        assert engine._compute_backoff(1) == 2.0   # 2^1
-        assert engine._compute_backoff(2) == 4.0   # 2^2
-        assert engine._compute_backoff(3) == 8.0   # 2^3
-        assert engine._compute_backoff(5) == 32.0  # 2^5
-        assert engine._compute_backoff(10) == 60.0  # capped at 60s
+        # Match DAGExecutionEngine defaults: base=2, cap=60
+        cb = lambda rc: RetryPolicyEngine.compute_backoff(rc, base=2, cap=60)
+        assert cb(1) == 2.0   # 2^1
+        assert cb(2) == 4.0   # 2^2
+        assert cb(3) == 8.0   # 2^3
+        assert cb(5) == 32.0  # 2^5
+        assert cb(10) == 60.0  # capped at 60s
 
     @pytest.mark.asyncio
     async def test_handle_job_failure_queues_for_retry(

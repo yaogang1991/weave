@@ -16,6 +16,7 @@ from core.config import WeaveConfig
 from core.dag_engine import DAGEngineConfig
 from core.dag_models import DAGNode
 from core.project_config import ProjectConfig, ProjectContext
+from core.node_executor import NodeExecutorConfig
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +150,7 @@ class TestNodeExecutorInjection:
             agent_executor=AsyncMock(return_value={}),
             emit_func=AsyncMock(),
             watchdog=WatchdogService(),
-            memory_manager=mm,
+            config=NodeExecutorConfig(memory_manager=mm),
         )
         assert executor._memory_manager is mm
 
@@ -162,7 +163,7 @@ class TestNodeExecutorInjection:
             agent_executor=AsyncMock(return_value={}),
             emit_func=AsyncMock(),
             watchdog=WatchdogService(),
-            project_config=pc,
+            config=NodeExecutorConfig(project_config=pc),
         )
         assert executor._project_config is pc
 
@@ -174,7 +175,7 @@ class TestNodeExecutorInjection:
             agent_executor=AsyncMock(return_value={}),
             emit_func=AsyncMock(),
             watchdog=WatchdogService(),
-            default_agent_backend="codex",
+            config=NodeExecutorConfig(default_agent_backend="codex"),
         )
         assert executor._default_agent_backend == "codex"
 
@@ -192,7 +193,7 @@ class TestNodeExecutorInjection:
             agent_executor=AsyncMock(return_value={}),
             emit_func=AsyncMock(),
             watchdog=WatchdogService(),
-            default_agent_backend="claude_code",
+            config=NodeExecutorConfig(default_agent_backend="claude_code"),
         )
         backend_name = node.backend or executor._default_agent_backend
         assert backend_name == "claude_code"
@@ -210,7 +211,7 @@ class TestNodeExecutorInjection:
             agent_executor=AsyncMock(return_value={}),
             emit_func=AsyncMock(),
             watchdog=WatchdogService(),
-            default_agent_backend="claude_code",
+            config=NodeExecutorConfig(default_agent_backend="claude_code"),
         )
         backend_name = node.backend or executor._default_agent_backend
         assert backend_name == "codex"
@@ -228,7 +229,7 @@ class TestNodeExecutorInjection:
             agent_executor=AsyncMock(return_value={}),
             emit_func=AsyncMock(),
             watchdog=WatchdogService(),
-            default_agent_backend="claude_code",
+            config=NodeExecutorConfig(default_agent_backend="claude_code"),
         )
         backend_name = node.backend or executor._default_agent_backend
         assert backend_name == "builtin"

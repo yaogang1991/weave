@@ -159,7 +159,9 @@ class PlanValidator:
         # Parallel write conflict detection (#272)
         self._check_parallel_write_conflicts(nodes, edges)
         # Foundation node dependency enforcement (#740)
-        edges = self._check_foundation_dependencies(nodes, edges)
+        edges, auto_foundation_keys = self._check_foundation_dependencies(
+            nodes, edges,
+        )
         plan_data["edges"] = edges
         # Evaluator-to-evaluator dependency softening (#958)
         edges = self._soften_evaluator_dependencies(nodes, edges)
@@ -170,9 +172,9 @@ class PlanValidator:
         # Token budget check (M4.6)
         self._check_token_budget(nodes)
         # Hub-and-spoke softening (#959)
-        # NOTE: edges added by _check_foundation_dependencies above may be
-        # softened here if they create a hub pattern (fan-out >= 4).
-        edges = self._soften_hub_dependencies(nodes, edges)
+        # NOTE: auto-added foundation edges (auto_foundation_keys) are
+        # excluded from softening to avoid contradicting _check_foundation_dependencies (#1043).
+        edges = self._soften_hub_dependencies(nodes, edges, auto_foundation_keys)
         plan_data["edges"] = edges
 
         return plan_data
@@ -536,7 +538,7 @@ class PlanValidator:
         self,
         nodes: list[dict],
         edges: list[dict],
-    ) -> list[dict]:
+    ) -> tuple[list[dict], set[tuple[str, str]]]:
         """Ensure implementation nodes depend on foundation nodes (#740).
 
         When the planner produces a foundation/shared node (identified by
@@ -544,8 +546,10 @@ class PlanValidator:
         on it, the DAG may execute impl nodes in parallel with (or before)
         the foundation — causing missing database models, shared utilities, etc.
 
-        When auto_fix is True, missing edges are added automatically.
-        Otherwise, a warning is emitted.
+        Returns (updated_edges, auto_added_keys) where auto_added_keys is
+        the set of (from, to) tuples for edges added by this method.
+        These keys are used by _soften_hub_dependencies to avoid softening
+        auto-added foundation dependencies (#1043).
         """
         # Identify foundation nodes: generator type + foundation keywords
         foundation_ids: list[str] = []
@@ -561,7 +565,7 @@ class PlanValidator:
                 foundation_ids.append(nid)
 
         if not foundation_ids:
-            return edges
+            return edges, set()
 
         # Build existing edge set: from → set of to
         edge_set: set[tuple[str, str]] = set()
@@ -570,6 +574,7 @@ class PlanValidator:
 
         # Find generator nodes that should depend on foundation but don't
         new_edges: list[dict] = []
+        auto_added_keys: set[tuple[str, str]] = set()
         for node in nodes:
             nid = node.get("id", "")
             if nid in foundation_ids:
@@ -581,7 +586,6 @@ class PlanValidator:
                 (fid, nid) in edge_set for fid in foundation_ids
             )
             if not has_foundation_dep:
-                # Auto-fix: add dependency on the first foundation node
                 fid = foundation_ids[0]
                 new_edge = {
                     "from": fid,
@@ -589,7 +593,9 @@ class PlanValidator:
                     "dependency_type": "hard",
                 }
                 new_edges.append(new_edge)
-                edge_set.add((fid, nid))
+                key = (fid, nid)
+                edge_set.add(key)
+                auto_added_keys.add(key)
                 self.warnings.append(
                     f"Node '{nid}' (generator) has no dependency on "
                     f"foundation node '{fid}' — auto-added hard "
@@ -599,7 +605,7 @@ class PlanValidator:
         if new_edges:
             edges = list(edges) + new_edges
 
-        return edges
+        return edges, auto_added_keys
 
     def _soften_evaluator_dependencies(
         self,
@@ -658,21 +664,29 @@ class PlanValidator:
         self,
         nodes: list[dict],
         edges: list[dict],
+        auto_foundation_keys: set[tuple[str, str]] | None = None,
     ) -> list[dict]:
         """Soften hard edges when a single node has too many hard dependents (#959).
 
-        When replan generates a "foundation" node with N≥4 hard dependents,
+        When replan generates a "foundation" node with N>=4 hard dependents,
         a single failure cascades to all dependents.  Converting these to soft
         gives dependent nodes a chance to execute (possibly with partial artifacts
         from prior successful nodes) rather than being skipped outright.
+
+        auto_foundation_keys: edges auto-added by _check_foundation_dependencies
+        are excluded from softening to preserve hard foundation semantics (#1043).
         """
+        _excluded = auto_foundation_keys or set()
         edges = [dict(e) for e in edges]
-        # Count hard dependents per upstream node
+        # Count hard dependents per upstream node (excluding auto-foundation)
         hard_fanout: dict[str, list[dict]] = {}
         for edge in edges:
             if edge.get("dependency_type", "hard") != "hard":
                 continue
             src = edge.get("from", "")
+            dst = edge.get("to", "")
+            if (src, dst) in _excluded:
+                continue
             hard_fanout.setdefault(src, []).append(edge)
 
         softened = 0
@@ -683,9 +697,22 @@ class PlanValidator:
                 edge["dependency_type"] = "soft"
                 softened += 1
 
+        # Count auto-foundation edges that were excluded
+        excluded_count = 0
+        if _excluded:
+            edge_keys = {
+                (e.get("from", ""), e.get("to", "")) for e in edges
+            }
+            excluded_count = len(_excluded & edge_keys)
+
         if softened:
             self.warnings.append(
                 f"Softened {softened} hub-dependency hard edges to soft "
-                f"(fan-out ≥ {self._HUB_FANOUT_THRESHOLD}, #959)."
+                f"(fan-out >= {self._HUB_FANOUT_THRESHOLD}, #959)."
+            )
+        if excluded_count:
+            self.warnings.append(
+                f"Preserved {excluded_count} auto-added foundation hard "
+                f"dependencies from hub softening (#1043)."
             )
         return edges

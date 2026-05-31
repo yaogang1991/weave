@@ -97,6 +97,7 @@ class EvaluatorEngine:
         """Register extracted criterion checkers (#178 PR 2)."""
         from evaluator.checkers.file_exists import FileExistsChecker
         from evaluator.checkers.bugfix_patterns import BugfixPatternChecker
+        from evaluator.checkers.conftest_db import ConftestDbChecker
 
         file_checker = FileExistsChecker()
         self._checkers[CriterionType.FILE_EXISTS] = file_checker
@@ -107,6 +108,9 @@ class EvaluatorEngine:
         self._checkers[CriterionType.FILE_CHANGED] = bugfix_checker
         self._checkers[CriterionType.PATTERN_ABSENT] = bugfix_checker
         self._checkers[CriterionType.PATTERN_PRESENT] = bugfix_checker
+
+        conftest_checker = ConftestDbChecker()
+        self._checkers[CriterionType.CONFTEST_DB_INIT] = conftest_checker
 
     def register_checker(
         self,
@@ -141,6 +145,13 @@ class EvaluatorEngine:
         progress_tracker: Any | None = None,  # M4.5 — kept for API compat, unused internally
     ) -> EvaluationResult:
         """Evaluate a stage against its success criteria."""
+        # Reset per-eval state to prevent stale lint/autofix data from
+        # previous evaluations leaking into this one (#1019).
+        self._last_autofixed = []
+        self._last_auto_formatted = []
+        self._last_lint_new_issues = []
+        self._last_lint_all_issues = []
+
         eval_dir = work_dir or artifact_path
         eval_id = f"{session_id}_{stage_name}"
 

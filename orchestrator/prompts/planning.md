@@ -178,6 +178,7 @@ Each success_criteria entry should be a structured object with a "type" field:
 - **file_pattern**: {{"type": "file_pattern", "pattern": "reporter/*.py", "description": "report module exists"}} — glob pattern; at least one non-empty file must match; use when the generator can choose the filename
 - **coverage**: {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
 - **no_critical**: {{"type": "no_critical", "description": "no critical markers"}}
+- **conftest_db_init**: {{"type": "conftest_db_init", "description": "conftest.py correctly initializes DB tables"}} — validates that conftest.py imports all model classes and calls create_all(); add to foundation or test generator nodes when the project uses SQLAlchemy
 
 **file_exists vs file_pattern**:
 - Use `file_exists` when the exact file path matters (e.g., entry points, config files, imports by other modules).

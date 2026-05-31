@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -70,7 +71,9 @@ class MCPConfigExporter:
         target = Path(target_dir)
         tag = suffix or uuid.uuid4().hex[:8]
         config_path = target / f".mcp-weave-{tag}.json"
-        config_path.write_text(json.dumps(mcp_json, indent=2), encoding="utf-8")
+        tmp = config_path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(mcp_json, indent=2), encoding="utf-8")
+        os.replace(tmp, config_path)
         logger.debug("Wrote MCP config to %s", config_path)
         return config_path
 
