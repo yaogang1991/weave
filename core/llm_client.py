@@ -606,11 +606,25 @@ class LLMClient:
             msg["tool_calls"] = tool_calls
 
         # M4.2: Extract token usage from response
+        # Third-party APIs may use different field names (#1046)
         if hasattr(response, "usage") and response.usage:
-            msg["usage"] = {
-                "input_tokens": getattr(response.usage, "input_tokens", 0) or 0,
-                "output_tokens": getattr(response.usage, "output_tokens", 0) or 0,
-            }
+            u = response.usage
+            inp = (
+                getattr(u, "input_tokens", None)
+                or getattr(u, "prompt_tokens", None)
+                or 0
+            )
+            out = (
+                getattr(u, "output_tokens", None)
+                or getattr(u, "completion_tokens", None)
+                or 0
+            )
+            if inp == 0 and out == 0:
+                logger.debug(
+                    "Token usage both 0 — usage object: %s (#1046)",
+                    vars(u) if hasattr(u, "__dict__") else u,
+                )
+            msg["usage"] = {"input_tokens": inp, "output_tokens": out}
 
         # Extract stop_reason for OTel finish_reasons (#936)
         if hasattr(response, "stop_reason") and response.stop_reason:
