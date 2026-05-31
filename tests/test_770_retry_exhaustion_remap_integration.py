@@ -5,7 +5,6 @@ these tests call DAGExecutionEngine.execute() end-to-end and verify that
 the emitted audit events contain the remapped action, not the raw "retry".
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from core.models import DAG, DAGNode, NodeStatus, ExecutionEvent
 from core.dag_models import FailureDecision

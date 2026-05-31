@@ -4,7 +4,7 @@ Tests for evaluator/engine.py — criterion checking, scoring, evaluation flow.
 import json
 import sys
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from core.models import EvaluationResult, SuccessCriterion, CriterionType
 from core.subprocess_runner import SubprocessResult
@@ -72,7 +72,8 @@ class TestCriterionChecking:
     @patch("evaluator.runner.run_with_progress")
     def test_lint_dirty(self, mock_run, evaluator, tmp_path):
         (tmp_path / "code.py").write_text("x = 1\n", encoding="utf-8")
-        mock_run.return_value = SubprocessResult(returncode=1, stdout="E501 line too long", stderr="")
+        mock_run.return_value = SubprocessResult(
+            returncode=1, stdout="E501 line too long", stderr="")
         passed, msg = evaluator._run_lint(["code.py"], tmp_path)
         assert not passed
         assert "issues" in msg.lower()
@@ -215,7 +216,8 @@ class TestCriterionChecking:
 class TestEvaluateStage:
     @patch("evaluator.runner.run_with_progress")
     def test_all_pass(self, mock_run, evaluator, tmp_path):
-        mock_run.return_value = SubprocessResult(returncode=0, stdout="OK\nTOTAL    100%", stderr="")
+        mock_run.return_value = SubprocessResult(
+            returncode=0, stdout="OK\nTOTAL    100%", stderr="")
         result = evaluator.evaluate_stage(
             "s1", "impl", ["tests pass", "lint clean"], str(tmp_path)
         )
@@ -344,7 +346,8 @@ class TestShadowInitDetection:
         shadow_file = tmp_path / "tests" / "configlib" / "__init__.py"
         shadow_file.write_text("# shadow", encoding="utf-8")
 
-        mock_run.return_value = SubprocessResult(returncode=1, stdout="FAILED test_something", stderr="")
+        mock_run.return_value = SubprocessResult(
+            returncode=1, stdout="FAILED test_something", stderr="")
         passed, msg = evaluator._run_tests(tmp_path)
         assert not passed
         assert "shadow" in msg.lower()

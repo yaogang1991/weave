@@ -1,5 +1,4 @@
 """Tests for leftover generated files cleanup (#240)."""
-import os
 import time
 
 import pytest

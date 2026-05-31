@@ -4,7 +4,6 @@ Verifies that only API-level failures count toward the unhealthy threshold.
 Evaluation failures, stall timeouts, and other non-API errors should not
 trigger provider health degradation.
 """
-import pytest
 
 from core.provider_health import (
     FailureCategory,
@@ -98,7 +97,8 @@ class TestClassifyFailure:
 
     def test_rate_limit_string(self):
         from core.dag_engine import _classify_failure
-        assert _classify_failure("Rate limit exhausted for anthropic/claude") == FailureCategory.RATE_LIMIT
+        assert _classify_failure(
+            "Rate limit exhausted for anthropic/claude") == FailureCategory.RATE_LIMIT
 
     def test_429_in_error(self):
         from core.dag_engine import _classify_failure
@@ -110,7 +110,8 @@ class TestClassifyFailure:
 
     def test_eval_in_error(self):
         from core.dag_engine import _classify_failure
-        assert _classify_failure("Evaluation score 0.0 below threshold") == FailureCategory.EVALUATION
+        assert _classify_failure(
+            "Evaluation score 0.0 below threshold") == FailureCategory.EVALUATION
 
     def test_timeout_in_error(self):
         from core.dag_engine import _classify_failure

@@ -256,7 +256,7 @@ class TestPlanningPromptRule:
     """Verify planning prompt includes retry continuity rule."""
 
     def test_planning_prompt_has_retry_continuity_rule(self):
-        prompt = Path("orchestrator/prompts/planning.md").read_text()
+        prompt = Path("orchestrator/prompts/planning.md").read_text(encoding="utf-8")
         assert "Retry continuity" in prompt
         assert "completion plan" in prompt
         assert "full rebuild" in prompt

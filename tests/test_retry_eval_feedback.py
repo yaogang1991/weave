@@ -91,5 +91,5 @@ class TestRetryInstructionIncludesFixtureGuidance:
     def test_instruction_mentions_fixture(self):
         """Retry instruction includes fixture/config guidance."""
         from pathlib import Path
-        source = Path("agent/agent_pool.py").read_text()
+        source = Path("agent/agent_pool.py").read_text(encoding="utf-8")
         assert "FIXTURE/CONFIG ISSUES" in source

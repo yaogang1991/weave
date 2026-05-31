@@ -3,7 +3,7 @@
 ---
 
 **最后更新:** 2026-05-29
-**当前版本:** M6.4 (cleanup + documentation update)
+**当前版本:** M6.9 (OTEL trace propagation to CLI subprocess)
 
 ---
 
@@ -37,6 +37,7 @@
 | **M6.6** | Node timeout semantic (progress-driven) | ✅ 已完成 | 2026-05-28 |
 | **M6.7** | Session Resume + BackendResult 扩展 + bidirectional comms | ✅ 已完成 | 2026-05-29 |
 | **M6.8** | MCP Config 传递到外部 Backend | ✅ 已完成 | 2026-05-29 |
+| **M6.9** | OTEL trace propagation to CLI subprocess | ✅ 已完成 | 2026-05-29 |
 
 ---
 
@@ -384,6 +385,74 @@ python main.py impact-history
 
 ---
 
+## M6 — Brain/Hands Separation
+
+**目标:** 将 Weave 从自建 Agent 循环迁移为纯编排层（meta-harness），执行委托给 ClaudeCodeBackend / CodexBackend，BuiltinBackend 保留为规划/评估后端。基于 [Anthropic Managed Agents](https://www.anthropic.com/engineering/managed-agents) 架构理念，以及 [ADR-0017](docs/adrs/0017-brain-hands-separation.md) 决策。
+
+### M6.1 — BackendContext 扩展 + 默认 backend 切换
+
+- ✅ `core/backend_models.py` — BackendContext 扩展 `memory_prompt`、`project_context` 字段
+- ✅ `core/node_executor.py` — 注入 memory/project context 到 BackendContext
+- ✅ `agent/backends/claude_code.py` — 使用新字段构建 prompt
+- ✅ 默认 backend 从 `builtin` 切换到 `claude_code`
+
+### M6.2 — Node Guardrails + stderr tail + semantic timeout
+
+- ✅ `core/node_executor.py` — pre_check/post_check 机制（从 tool-call 级提升到 node 级）
+- ✅ `agent/backends/stderr_tail.py` — StderrTail: 尾随 stderr 提取进度事件
+- ✅ `core/config.py` — NodeTimeoutConfig 增加动态复杂度缩放的 `stall_timeout`
+
+### M6.3 — LightweightLLMCaller + BackendRegistry 重构
+
+- ✅ `agent/backends/base.py` — AgentBackend 抽象接口（Protocol）
+- ✅ `agent/backends/builtin.py` — BuiltinBackend: 包装 LightweightLLMCaller 或 AgentPool
+- ✅ `agent/backends/registry.py` — BackendRegistry: 管理多 backend 实例 + fallback
+- ✅ `agent/agent_pool.py` — 标记为 deprecated（M6.3），保留供 BuiltinBackend 使用
+
+### M6.4 — 清理 + 文档更新
+
+- ✅ 代码清理与文档同步
+- ✅ `tools/registry.py` — 保留 write/edit/bash 供 BuiltinBackend 兼容
+
+### M6.5 — Stream-JSON Event Parsing
+
+- ✅ `agent/backends/stream_parser.py` — StreamParser: 解析 CLI backend 的流式 JSON 事件
+- ✅ `core/activity_detector.py` — 检测 backend 输出中的有意义事件
+
+### M6.6 — Node Timeout Semantic (Progress-Driven)
+
+- ✅ 基于 stderr 进度事件的语义超时，替代固定时间超时
+- ✅ `agent/backends/stderr_tail.py` — 集成到超时检测逻辑
+
+### M6.7 — Session Resume + Bidirectional Comms
+
+- ✅ `agent/backends/bidirectional.py` — 双向通信协议（支持会话恢复）
+- ✅ `core/backend_models.py` — BackendResult 扩展会话状态字段
+- ✅ 会话恢复机制
+
+### M6.8 — MCP Config 传递到外部 Backend
+
+- ✅ `mcp/config_export.py` — MCP 配置导出器，传递给外部 backend
+- ✅ CLI backend 启动时注入 MCP 服务器配置
+
+### M6.9 — OTEL Trace Propagation
+
+- ✅ OpenTelemetry trace context 传播到 CLI 子进程
+- ✅ 端到端可观测性：编排层 → CLI backend → 子进程
+
+### 架构变化总览
+
+```
+迁移前:  ToolRegistry.execute(tool_name, args) → guardrail_check → execute
+迁移后:  NodeExecutor.execute_node(node) → pre_check → backend.execute() → post_check
+
+迁移前:  AgentPool → AgentWorker (自建 LLM 循环 + 工具管理)
+迁移后:  BackendRegistry → ClaudeCodeBackend/CodexBackend (外部 Agent)
+                            ↘ BuiltinBackend (轻量 LLM 调用, 无工具循环)
+```
+
+---
+
 ## 完整文件清单
 
 ```
@@ -406,8 +475,13 @@ weave/
 │   ├── llm_router.py              # M3.1: 多模型路由
 │   ├── dag_engine.py              # DAG 引擎
 │   ├── node_executor.py           # 单节点执行
+│   ├── evaluation_pipeline.py     # M6: 后执行评估管道
 │   ├── quality_gate.py            # 质量检查
 │   ├── retry_policy.py            # 重试策略
+│   ├── progress.py                # 进度追踪 + 异常检测
+│   ├── subprocess_runner.py       # 通用子进程执行
+│   ├── backend_models.py          # M6.1: BackendContext/Result/Status
+│   ├── activity_detector.py       # M6.5: 事件检测
 │   ├── watchdog.py                # Watchdog
 │   └── project_config.py          # 项目配置
 ├── cli/                           # CLI 命令（从 main.py 拆分）
@@ -446,9 +520,18 @@ weave/
 │   ├── llm_utils.py               # LLM 工具
 │   └── prompts/                   # Prompt 模板
 ├── agent/
-│   ├── worker.py                  # Agent Worker
-│   ├── agent_pool.py              # Agent 池
-│   └── prompts.py                 # System prompts
+│   ├── worker.py                  # Agent Worker (deprecated M6.3, retained for BuiltinBackend)
+│   ├── agent_pool.py              # Agent 池 (deprecated M6.3, retained for BuiltinBackend)
+│   ├── prompts.py                 # System prompts (retained for BuiltinBackend compat)
+│   └── backends/                  # M6: Agent Backend 抽象层
+│       ├── base.py                # AgentBackend 抽象接口
+│       ├── builtin.py             # BuiltinBackend (轻量 LLM 调用)
+│       ├── claude_code.py         # ClaudeCodeBackend (Claude Code CLI)
+│       ├── codex.py               # CodexBackend (Codex CLI)
+│       ├── registry.py            # BackendRegistry (多 backend + fallback)
+│       ├── stderr_tail.py         # StderrTail (进度事件提取)
+│       ├── stream_parser.py       # StreamParser (流式 JSON 解析)
+│       └── bidirectional.py       # 双向通信协议 (会话恢复)
 ├── evaluator/
 │   ├── engine.py                  # 评估编排
 │   ├── runner.py                  # 执行器
@@ -463,7 +546,11 @@ weave/
 ├── guardrails/
 │   └── policy.py                  # 安全策略
 ├── mcp/
-│   └── client.py                  # MCP 客户端
+│   ├── client.py                  # MCP 客户端
+│   ├── server.py                  # MCP 服务器
+│   ├── analysis_tools.py          # M4.3: 分析工具
+│   ├── weave_tools_server.py      # M4.3: 独立 MCP 服务器
+│   └── config_export.py           # M6.8: 配置导出器
 ├── skills/
 │   └── registry.py                # SkillRegistry
 ├── session/

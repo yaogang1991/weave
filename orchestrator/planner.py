@@ -19,11 +19,13 @@ from core.models import (
 from core.dag_models import DAGOutputModel
 from core.agent_registry import AgentRegistry
 from core.llm_client import LLMClient
+from core.provider_health import ProviderHealthTracker, FailureCategory
 from orchestrator.llm_utils import (
     truncate_requirement_if_needed,
     prune_messages_for_size,
     prune_messages_for_tokens,
     extract_json,
+    is_response_truncated,
 )
 from orchestrator.plan_validator import PlanValidator, PlanValidationError
 from orchestrator.prompts import PromptRegistry
@@ -54,6 +56,7 @@ class Planner:
         self.learning_optimizer = learning_optimizer
         self.skill_registry = skill_registry
         self._token_estimator = token_estimator
+        self._plan_health = ProviderHealthTracker()
 
     def _prune_messages(self, messages: list[dict]) -> list[dict]:
         pruned = prune_messages_for_size(messages)
@@ -128,14 +131,30 @@ class Planner:
 
         plan_data = None
         last_timeout_exc = None
+        provider = getattr(self.llm_config, "provider", "anthropic")
+        model = getattr(self.llm_config, "model", "")
         for plan_attempt in range(self._PLAN_TIMEOUT_RETRIES + 1):
+            if plan_attempt > 0 and not self._plan_health.is_healthy(
+                provider, model,
+            ):
+                logger.warning(
+                    "Provider %s/%s unhealthy after timeout, "
+                    "skipping plan retry %d/%d (#934)",
+                    provider, model,
+                    plan_attempt + 1, self._PLAN_TIMEOUT_RETRIES + 1,
+                )
+                break
             try:
                 plan_data = self._plan_structured_output(messages)
                 if plan_data is None:
                     plan_data = self._plan_free_text(messages)
+                self._plan_health.record_success(provider, model)
                 break
             except TimeoutError as exc:
                 last_timeout_exc = exc
+                self._plan_health.record_failure(
+                    provider, model, FailureCategory.UNKNOWN,
+                )
                 if plan_attempt < self._PLAN_TIMEOUT_RETRIES:
                     logger.warning(
                         "Plan LLM timeout (attempt %d/%d), retrying (#735): %s",
@@ -287,7 +306,7 @@ class Planner:
                 break
             if attempt < max_retries:
                 failed_content = response.get("content", "")
-                is_truncated = _is_response_truncated(failed_content)
+                is_truncated = is_response_truncated(failed_content)
                 if len(failed_content) > 2000:
                     failed_content = failed_content[:2000] + "\n... (truncated)"
                 messages.append({"role": "assistant", "content": failed_content})
@@ -399,17 +418,6 @@ class Planner:
 
 
 # -- Module-level helpers (no circular imports) --
-
-
-def _is_response_truncated(content: str) -> bool:
-    if not content:
-        return False
-    stripped = content.strip()
-    if not stripped.startswith("{"):
-        return False
-    if stripped.endswith("}"):
-        return False
-    return stripped.count("{") > stripped.count("}")
 
 
 def _infer_fallback_edges(dag: DAG) -> DAG:

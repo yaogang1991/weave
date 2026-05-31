@@ -8,7 +8,7 @@ where the generator regenerates files with the same unused imports.
 M4.5: Updated to mock run_with_progress instead of subprocess.run.
 """
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from core.subprocess_runner import SubprocessResult
 from evaluator.engine import EvaluatorEngine

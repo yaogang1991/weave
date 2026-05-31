@@ -1,7 +1,6 @@
 """Tests for M4.0 AgentBackend abstraction layer."""
-import asyncio
 import threading
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

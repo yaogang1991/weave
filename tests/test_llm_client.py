@@ -10,6 +10,7 @@ import pytest
 
 from core.llm_client import LLMClient
 from core.config import LLMConfig
+from core.exceptions import LLMResponseError
 
 
 @pytest.fixture
@@ -235,3 +236,45 @@ class TestMaxTokensOverride:
         )
         call_kwargs = client._client.messages.create.call_args[1]
         assert call_kwargs["max_tokens"] == 4096  # config default
+
+
+# ------------------------------------------------------------------------------
+# Empty response boundary checks (#1007)
+# ------------------------------------------------------------------------------
+
+class TestEmptyResponseGuards:
+    def test_openai_empty_choices_raises(self):
+        """OpenAI returning empty choices should raise LLMResponseError."""
+        cfg = LLMConfig(provider="openai", model="gpt-4", api_key="test-key")
+        client = LLMClient(cfg, max_retries=1)
+
+        mock_response = MagicMock()
+        mock_response.choices = []
+        client._client.chat.completions.create = MagicMock(
+            return_value=mock_response,
+        )
+
+        with pytest.raises(LLMResponseError, match="empty choices"):
+            client._call_openai(
+                [{"role": "user", "content": "test"}], [],
+            )
+
+    def test_anthropic_empty_content_raises(self):
+        """Anthropic returning empty content should raise LLMResponseError."""
+        cfg = LLMConfig(provider="anthropic", model="claude-sonnet-4-6", api_key="test-key")
+        client = LLMClient(cfg, max_retries=1)
+
+        mock_response = MagicMock()
+        mock_response.content = []
+        mock_response.usage = MagicMock(
+            cache_read_input_tokens=0,
+            cache_creation_input_tokens=0,
+        )
+        client._client.messages.create = MagicMock(
+            return_value=mock_response,
+        )
+
+        with pytest.raises(LLMResponseError, match="empty content"):
+            client._call_anthropic(
+                [{"role": "user", "content": "test"}], [],
+            )

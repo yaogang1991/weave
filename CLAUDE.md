@@ -8,7 +8,7 @@ Self-hosted unattended software development system based on [Anthropic Managed A
 
 Python 3.11+, Pydantic models, async/await throughout.
 
-**Current version:** M6.4 (cleanup + documentation update). See `docs/roadmap.md` for milestone history.
+**Current version:** M6.9 (OTEL trace propagation to CLI subprocess). See `docs/roadmap.md` for milestone history.
 
 ## Commands
 
@@ -80,19 +80,21 @@ Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `WEAV
 
 ## Architecture
 
-Four-layer architecture:
+Four-layer architecture (Brain/Hands separation since M6):
 
 ```
 Orchestrator Layer (LLM-driven planning, DAG generation)
     ↓
 Session Manager (append-only JSONL event log, state replay)
     ↓
-Weave Core / Dumb Loop (Agent Worker + Tool Registry + Guardrails)
+Backend Registry (ClaudeCodeBackend / CodexBackend / BuiltinBackend)
     ↓
 Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 ```
 
-**Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `AgentPool` → Watchdog monitors heartbeats (M2) → failures go back to orchestrator via `adapt_to_failure()`.
+**Flow**: User requirement → `IntelligentOrchestrator.plan()` queries `AgentRegistry`, generates a `DAG` → `DAGExecutionEngine` topologically sorts and executes levels in parallel via `BackendRegistry` → external CLI backends (Claude Code / Codex) handle the agent loop → Watchdog monitors heartbeats (M2) → failures go back to orchestrator via `adapt_to_failure()`.
+
+**Key change (M6):** Weave is now a pure orchestrator (meta-harness). Execution is delegated to external coding agents via `ClaudeCodeBackend` / `CodexBackend`. `BuiltinBackend` (lightweight LLM calls, no tool loop) is retained for planner/evaluator nodes. See ADR-0017 for details.
 
 **Key module responsibilities**:
 
@@ -229,14 +231,15 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - **Error handling**: Tools return `ToolResult` wrapper (success/failure), never throw exceptions that break the main loop. DAG engine catches exceptions via `traceback.format_exc()` and writes to node `error` field.
 - **No circular imports**: Modules layered by responsibility (`core/` → `agent/` → `orchestrator/` → `tools/`).
 - **Immutability**: All state mutations create new objects. Never mutate shared state in-place.
+- **Abstract interfaces**: Prefer `typing.Protocol` for new abstract interfaces. Existing `abc.ABC` classes are retained for backward compat and replaced only when the module is otherwise being modified. Protocol supports structural subtyping (no explicit inheritance needed) and avoids `abc` import coupling (#920).
 
 ## When Modifying Code
 
 - **Adding a tool**: Register in `tools/registry.py`, add risk level in `guardrails/policy.py` `RISK_MAP`.
 - **Adding a default agent type**: Add to `core/agent_registry.py` `_register_defaults()`, update prompt in `agent/prompts.py`, update orchestrator prompt in `orchestrator/prompts/planning.md`.
 - **Data model changes**: Add to the appropriate `core/*_models.py` file. Re-export from `core/models.py` for backward compatibility.
-- **Adding an execution backend**: Extend `backend/base.py` `ExecutionBackend`, register in `backend/lifecycle.py` `BackendManager`.
-- **Adding an execution hook**: Extend `ExecutionHook` in `control_plane/hooks.py`, register in `control_plane/service.py` `_register_hooks()`.
+- **Adding an execution backend**: Extend `backend/base.py` `ExecutionBackend` (ABC, retained for compat), register in `backend/lifecycle.py` `BackendManager`.
+- **Adding an execution hook**: Extend `ExecutionHook` in `control_plane/hooks.py` (ABC, retained for compat), register in `control_plane/service.py` `_register_hooks()`.
 - **Adding a CLI command**: Add handler in `cli/` subdirectory, register subparser in `main.py`.
 - **State is externalized**: All runtime state lives in `./data/events/` (JSONL) and `./data/artifacts/`. Agent context windows are just cache.
 - **Memory system**: `memory/store.py` handles persistence (atomic writes), `memory/manager.py` is the primary API. Memory is injected into agent system prompts via `memory_manager.get_context_for_agent()` + `format_memory_prompt()` in `agent/agent_pool.py`.

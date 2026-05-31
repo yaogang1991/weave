@@ -9,6 +9,7 @@ Inspired by Anthropic's Session design:
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -79,7 +80,11 @@ class SessionStore:
         with self._write_lock:
             try:
                 with open(file_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(event.model_dump(mode="json"), default=str, ensure_ascii=False) + "\n")
+                    line = json.dumps(
+                        event.model_dump(mode="json"),
+                        default=str, ensure_ascii=False,
+                    )
+                    f.write(line + "\n")
             except OSError as exc:
                 logger.error(
                     "Failed to write event %s to session %s: %s",
@@ -335,11 +340,16 @@ class SessionStore:
             logger.debug("Auto-snapshot failed for session %s: %s", session_id, exc)
 
     def _save_snapshot(self, session_id: str, snapshot: SessionSnapshot) -> None:
-        """Write snapshot to disk."""
+        """Write snapshot to disk atomically."""
         path = self._snapshot_file(session_id)
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(json.dumps(snapshot.model_dump(mode="json"), indent=2, default=str, ensure_ascii=False))
+            tmp = path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(
+                    snapshot.model_dump(mode="json"),
+                    indent=2, default=str, ensure_ascii=False,
+                ))
+            os.replace(tmp, path)
         except OSError as exc:
             logger.error("Failed to save snapshot for session %s: %s", session_id, exc)
 
@@ -360,10 +370,15 @@ class SessionStore:
         path = self._session_file(session_id)
         if not path.exists():
             return 0
-        return sum(1 for _ in open(path, "r", encoding="utf-8"))
+        with open(path, "r", encoding="utf-8") as f:
+            return sum(1 for _ in f)
 
     def _truncate_log(self, session_id: str, event_index: int) -> None:
-        """Remove events up to event_index from the JSONL log."""
+        """Remove events up to event_index from the JSONL log.
+
+        Uses atomic write (temp file + rename) so the original log is
+        preserved if the write fails.
+        """
         path = self._session_file(session_id)
         if not path.exists():
             return
@@ -371,8 +386,10 @@ class SessionStore:
         try:
             lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
             remaining = lines[event_index:]
-            with open(path, "w", encoding="utf-8") as f:
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 f.writelines(remaining)
+            os.replace(tmp, path)
         except OSError as exc:
             logger.error(
                 "Failed to truncate log for session %s at %d: %s",

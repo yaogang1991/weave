@@ -37,8 +37,7 @@ logger = logging.getLogger(__name__)
 _PREFERRED_RUNTIME = "wasmtime"
 
 
-class WasmRuntimeError(Exception):
-    """Error during WASM execution."""
+from core.exceptions import WasmRuntimeError  # noqa: F401 — re-export (#918)
 
 
 def detect_runtime() -> str | None:

@@ -7,7 +7,7 @@ M4.5: Updated to mock run_with_progress returning SubprocessResult.
 """
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

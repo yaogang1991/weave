@@ -4,7 +4,6 @@ When artifact matching returns empty (no matching test file exists yet),
 the evaluator should NOT fall back to running all test files in the project,
 as that causes cross-module test pollution.
 """
-import pytest
 from unittest.mock import patch, MagicMock
 
 from evaluator.engine import EvaluatorEngine

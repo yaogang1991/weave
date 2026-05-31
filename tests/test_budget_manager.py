@@ -2,7 +2,6 @@
 
 import threading
 
-import pytest
 
 from core.config import BudgetConfig
 from core.budget_manager import BudgetManager

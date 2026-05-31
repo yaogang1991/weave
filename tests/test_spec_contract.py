@@ -487,7 +487,7 @@ class TestPyprojectConfig:
     def test_pyproject_toml_valid_syntax(self):
         """pyproject.toml 可被 toml 解析，无重复键。"""
         import tomllib  # Python 3.11+
-        content = Path("pyproject.toml").read_text()
+        content = Path("pyproject.toml").read_text(encoding="utf-8")
         config = tomllib.loads(content)
 
         # 基本结构检查
@@ -498,7 +498,7 @@ class TestPyprojectConfig:
 
     def test_pyproject_no_duplicate_asyncio_mode(self):
         """asyncio_mode 不重复定义（防回归）。"""
-        content = Path("pyproject.toml").read_text()
+        content = Path("pyproject.toml").read_text(encoding="utf-8")
         # 统计 asyncio_mode 出现次数
         count = content.count("asyncio_mode")
         assert count <= 1, f"asyncio_mode defined {count} times, should be 0 or 1"

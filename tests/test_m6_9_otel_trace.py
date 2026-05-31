@@ -1,15 +1,13 @@
 """Tests for M6.9 (#964): OTEL trace propagation to CLI subprocess."""
 import asyncio
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
-from core.backend_models import BackendContext, BackendResult, BackendStatus
+from core.backend_models import BackendContext, BackendStatus
 from core.dag_models import DAGNode
 from monitoring.otel import (
     NoOpSpan,
-    get_trace_context,
     inject_trace_context,
     start_backend_call_span,
 )

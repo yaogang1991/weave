@@ -18,7 +18,10 @@ from typing import Any
 _otel_trace = None
 _otel_context = None
 try:
-    from opentelemetry import trace as _otel_trace, context as _otel_context  # type: ignore[no-redef]
+    from opentelemetry import (  # type: ignore[no-redef]
+        trace as _otel_trace,
+        context as _otel_context,
+    )
 except ImportError:
     pass
 

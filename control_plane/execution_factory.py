@@ -264,6 +264,7 @@ class ExecutionFactory:
             run_id=run_id or "",
             backend_registry=backend_registry,
             budget_manager=self._budget_manager,
+            llm_config=self._llm_config,
             project_config=ProjectConfig.load(work_dir),
             session_store=store,
             node_guardrails=node_guardrails,
@@ -348,6 +349,6 @@ class ExecutionFactory:
                     result["denied_commands"] = gr["denied_commands"]
                 if "allowed_tools" in gr:
                     result["allowed_tools"] = gr["allowed_tools"]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Guardrail config loading failed: %s", exc)
         return result

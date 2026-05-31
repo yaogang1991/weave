@@ -20,7 +20,12 @@ from pathlib import Path
 from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
-from core.exceptions import BudgetExhaustedError, NodeTimeoutError, RateLimitError
+from core.exceptions import (
+    BudgetExhaustedError,
+    ConfigurationError,
+    NodeTimeoutError,
+    RateLimitError,
+)
 from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
 from agent.backends.stderr_tail import StderrTail
@@ -71,7 +76,7 @@ class ClaudeCodeRuntimeConfig:
         self._model = model
         self._max_turns = max_turns
         if permission_mode not in VALID_PERMISSION_MODES:
-            raise ValueError(
+            raise ConfigurationError(
                 f"permission_mode must be one of {VALID_PERMISSION_MODES}, "
                 f"got '{permission_mode}'"
             )
@@ -145,9 +150,17 @@ class ClaudeCodeBackend(AgentBackend):
     - Evaluation (handled by EvaluatorEngine)
     - Retry logic (handled by NodeExecutor)
     - Timeout enforcement (handled by NodeExecutor)
+
+    #992: CLI instances share state in ~/.claude/ (sessions, locks, hooks).
+    On Windows, concurrent CLI processes hang due to file-lock contention.
+    A class-level semaphore serializes CLI invocations to prevent this.
     """
 
     BACKEND_NAME = "claude_code"
+
+    # Serialize CLI invocations — concurrent Claude CLI processes share
+    # ~/.claude/ state and hang on Windows due to file-lock contention (#992).
+    _cli_semaphore = asyncio.Semaphore(1)
 
     def __init__(self, config: ClaudeCodeRuntimeConfig) -> None:
         self._config = config
@@ -313,6 +326,13 @@ class ClaudeCodeBackend(AgentBackend):
         """Execute via claude CLI subprocess with stream-json output."""
         cwd = context.workspace_path or "."
 
+        async with self._cli_semaphore:
+            return await self._execute_via_cli_inner(context, prompt, cwd)
+
+    async def _execute_via_cli_inner(
+        self, context: BackendContext, prompt: str, cwd: str,
+    ) -> BackendResult:
+        """Inner implementation — runs under the CLI semaphore (#992)."""
         with start_backend_call_span(
             context.run_id or "", context.node.id, self.BACKEND_NAME,
         ):

@@ -128,6 +128,28 @@ Rules:
 23. PYPROJECT.TOML BUILD-BACKEND: When creating or editing pyproject.toml,
     ALWAYS use build-backend = "setuptools.build_meta". NEVER use
     "setuptools.backends._legacy:_Backend" or any other variant (#767).
+24. PYDANTIC MODEL IMPORTS: NEVER use `from __future__ import annotations`
+    in files that define Pydantic models (BaseModel subclasses). This
+    directive makes ALL annotations lazy strings, which breaks Pydantic's
+    runtime type resolution and causes `PydanticUserError: is not fully
+    defined; you should define X, then call model_rebuild()`. Use explicit
+    imports instead (e.g., `from datetime import date` and annotate as
+    `date`, not `datetime.date`). For forward references use quoted
+    strings (`'MyModel'`) or `model_rebuild()` (#922).
+25. FASTAPI+SQLALCHEMY CONFTEST: When writing tests/conftest.py for a
+    project that uses SQLAlchemy, you MUST ensure database tables are
+    created before any test runs. Follow this pattern:
+    a. Import ALL model classes from the models module (e.g.
+       `from models import User, Item, ...` or `from models import *`).
+       NEVER import only Base — if the model classes are not imported,
+       Base.metadata will be empty and create_all() creates zero tables.
+    b. Use the SAME Base instance that models use (import it from the
+       models module, not from sqlalchemy.orm directly).
+    c. In the db fixture, call `Base.metadata.create_all(bind=engine)`
+       BEFORE yielding the session, and `Base.metadata.drop_all()` in
+       cleanup.
+    d. Verify: run `python -c "from models import Base; print(Base.metadata.tables.keys())"`
+       — it must list ALL expected tables, not an empty set (#1001).
 
 Work systematically: gather context → implement → verify.
 """,

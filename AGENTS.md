@@ -53,6 +53,11 @@ weave/
 │   ├── quality_gate.py            # 质量检查
 │   ├── retry_policy.py            # 重试策略
 │   ├── watchdog.py                # 心跳监控
+│   ├── backend_models.py          # M6: BackendContext/Result/Status
+│   ├── evaluation_pipeline.py     # M6: 后执行评估管道
+│   ├── activity_detector.py       # M6.5: 事件检测
+│   ├── progress.py                # 进度追踪
+│   ├── subprocess_runner.py       # 通用子进程执行
 │   └── project_config.py          # 项目配置加载
 ├── cli/                           # CLI 命令（从 main.py 拆分）
 │   ├── execution.py               # plan/execute/run/viz
@@ -63,10 +68,19 @@ weave/
 │   ├── impact.py                  # impact-predict/graph/history
 │   ├── skills.py                  # skills/skill/templates
 │   └── utils.py                   # 共享工具
-├── agent/                         # Agent Worker 层
-│   ├── worker.py                  # 单 Agent LLM 调用循环
-│   ├── agent_pool.py              # Agent 实例池（独立上下文、记忆注入/提取）
-│   └── prompts.py                 # Agent system prompts
+├── agent/                         # Agent Backend 层 (M6: Brain/Hands 分离)
+│   ├── worker.py                  # 单 Agent LLM 调用循环 (deprecated M6.3)
+│   ├── agent_pool.py              # Agent 实例池 (deprecated M6.3, 保留兼容)
+│   ├── prompts.py                 # Agent system prompts (保留 BuiltinBackend 兼容)
+│   └── backends/                  # M6: Agent Backend 抽象层
+│       ├── base.py                # AgentBackend 抽象接口
+│       ├── builtin.py             # BuiltinBackend (轻量 LLM 调用, 无工具循环)
+│       ├── claude_code.py         # ClaudeCodeBackend (Claude Code CLI, 默认)
+│       ├── codex.py               # CodexBackend (Codex CLI)
+│       ├── registry.py            # BackendRegistry (多 backend + 自动 fallback)
+│       ├── stderr_tail.py         # StderrTail (stderr 进度事件提取)
+│       ├── stream_parser.py       # StreamParser (流式 JSON 解析)
+│       └── bidirectional.py       # 双向通信协议 (会话恢复)
 ├── orchestrator/                  # 编排层
 │   ├── intelligent_orchestrator.py # 智能编排 Agent
 │   ├── plan_validator.py          # DAG 验证与自动修复
@@ -104,7 +118,11 @@ weave/
 │   ├── docker_stub.py             # Docker stub
 │   └── lifecycle.py               # BackendManager
 ├── mcp/                           # Model Context Protocol
-│   └── client.py                  # MCP 客户端
+│   ├── client.py                  # MCP 客户端
+│   ├── server.py                  # MCP 服务器
+│   ├── analysis_tools.py          # 分析工具
+│   ├── weave_tools_server.py      # 独立 MCP 服务器入口
+│   └── config_export.py           # M6.8: MCP 配置导出器
 ├── skills/                        # 技能系统
 │   └── registry.py                # SkillRegistry
 ├── session/                       # 状态持久化

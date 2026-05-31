@@ -13,7 +13,7 @@ tests likely indicates a regression in evaluator semantics.
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from pathlib import Path
 
 from core.models import CriterionType, EvalStatus, SuccessCriterion

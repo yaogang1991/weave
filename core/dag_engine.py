@@ -13,7 +13,6 @@ Key design decisions:
 from __future__ import annotations
 
 import asyncio
-import concurrent.futures
 import logging
 import time
 from pathlib import Path
@@ -37,7 +36,7 @@ from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
 from core.watchdog import WatchdogService
-from core.node_executor import NodeExecutor
+from core.node_executor import NodeExecutor, NodeExecutorConfig
 from core.budget_manager import BudgetManager
 from core.project_config import ProjectConfig
 from core.provider_health import FailureCategory, ProviderHealthTracker
@@ -140,6 +139,7 @@ class DAGExecutionEngine:
         backend_registry: Any | None = None,
         budget_manager: BudgetManager | None = None,
         provider_health: ProviderHealthTracker | None = None,
+        llm_config: Any | None = None,
         project_config: ProjectConfig | None = None,
         # Identifiers and workspace
         work_dir: str | None = None,
@@ -159,6 +159,8 @@ class DAGExecutionEngine:
         self.max_dag_nodes = cfg.max_dag_nodes
         # #900: Provider health tracker
         self._provider_health = provider_health or ProviderHealthTracker()
+        # #910: LLM config for provider/model extraction
+        self._llm_config = llm_config
         # Note: evaluator is stored in NodeExecutor (created below).
         # The .evaluator property proxies to it.
         self.artifact_path = cfg.artifact_path
@@ -182,12 +184,6 @@ class DAGExecutionEngine:
         self._session_id = session_id
         # M3.4: Node timeout configuration (#360)
         self._node_timeout_config = cfg.node_timeout_config
-        # Dedicated thread pool for evaluator calls — avoids global pool
-        # join timeout warnings on event loop exit.
-        self._executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=cfg.max_parallel,
-            thread_name_prefix="dag-engine",
-        )
         # Best-attempt tracking delegated to RetryPolicyEngine (#177 PR4).
         self._retry_policy = RetryPolicyEngine()
         # Quality gate delegated to QualityGate service (#177 PR4).
@@ -202,25 +198,27 @@ class DAGExecutionEngine:
             agent_executor=agent_executor,
             emit_func=self._emit,
             watchdog=self._watchdog,
-            evaluator=evaluator,
-            artifact_path=cfg.artifact_path,
-            work_dir=work_dir,
-            quality_gate=self._quality_gate,
-            artifact_handoff=self._artifact_handoff,
-            node_timeout_config=cfg.node_timeout_config,
-            backend_manager=backend_manager,
-            job_id=job_id,
-            run_id=run_id,
-            backoff_base=cfg.backoff_base,
-            backoff_cap=cfg.backoff_cap,
-            backend_registry=backend_registry,
-            session_id=session_id or "",
-            budget_manager=budget_manager,
-            memory_manager=memory_manager,
-            project_config=project_config,
-            default_agent_backend=cfg.default_agent_backend,
-            session_store=session_store,
-            node_guardrails=node_guardrails,
+            config=NodeExecutorConfig(
+                evaluator=evaluator,
+                artifact_path=cfg.artifact_path,
+                work_dir=work_dir,
+                quality_gate=self._quality_gate,
+                artifact_handoff=self._artifact_handoff,
+                node_timeout_config=cfg.node_timeout_config,
+                backend_manager=backend_manager,
+                job_id=job_id,
+                run_id=run_id,
+                backoff_base=cfg.backoff_base,
+                backoff_cap=cfg.backoff_cap,
+                backend_registry=backend_registry,
+                session_id=session_id or "",
+                budget_manager=budget_manager,
+                memory_manager=memory_manager,
+                project_config=project_config,
+                default_agent_backend=cfg.default_agent_backend,
+                session_store=session_store,
+                node_guardrails=node_guardrails,
+            ),
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
         self.backend_manager = backend_manager
@@ -237,20 +235,12 @@ class DAGExecutionEngine:
         self._PLANNER_CIRCUIT_BREAKER_THRESHOLD = 3
 
     def _get_provider_model(self) -> tuple[str, str]:
-        """Return the (provider, model) pair used for health tracking.
-
-        TODO(#911-followup): NodeTimeoutConfig doesn't carry provider/model,
-        so this always returns ("anthropic", ""). Should thread LLMConfig or
-        explicit provider/model through the constructor instead.
-        """
-        llm_cfg = getattr(
-            self._node_executor, "_node_timeout_config", None,
-        )
-        provider = (
-            getattr(llm_cfg, "provider", "anthropic") if llm_cfg else "anthropic"
-        )
-        model = getattr(llm_cfg, "model", "") if llm_cfg else ""
-        return provider, model
+        """Return the (provider, model) pair used for health tracking."""
+        if self._llm_config is not None:
+            provider = getattr(self._llm_config, "provider", "anthropic")
+            model = getattr(self._llm_config, "model", "")
+            return provider, model
+        return "anthropic", ""
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
@@ -717,7 +707,10 @@ class DAGExecutionEngine:
                                 continue
 
                             # Exponential backoff before retry
-                            backoff = self._compute_backoff(dag.nodes[failed_id].retry_count)
+                            backoff = self._retry_policy.compute_backoff(
+                                dag.nodes[failed_id].retry_count,
+                                base=self.backoff_base, cap=self.backoff_cap,
+                            )
                             if backoff > 0:
                                 await asyncio.sleep(backoff)
 
@@ -1010,7 +1003,6 @@ class DAGExecutionEngine:
             self._watchdog.clear()
             self._running_tasks = {}
             # Shutdown dedicated thread pool to avoid RuntimeWarning on exit
-            self._executor.shutdown(wait=False)
 
     async def _try_execute_replan(
         self, dag: DAG, failed_id: str,
@@ -1151,12 +1143,6 @@ class DAGExecutionEngine:
         return None
 
     # -- File snapshot for regression rollback (#212) ----------------------
-
-    def _compute_backoff(self, retry_count: int) -> float:
-        """Compute exponential backoff delay in seconds."""
-        return self._retry_policy.compute_backoff(
-            retry_count, base=self.backoff_base, cap=self.backoff_cap,
-        )
 
     def _check_planner_circuit_break(
         self, dag: DAG, failed_id: str,

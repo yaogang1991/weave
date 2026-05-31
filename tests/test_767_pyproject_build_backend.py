@@ -15,7 +15,6 @@ import tempfile
 from core.evaluation_pipeline import EvaluationPipeline
 from core.models import DAG, DAGNode, NodeStatus
 from core.quality_gate import QualityGate
-from unittest.mock import MagicMock
 
 
 def _make_pipeline(work_dir=None):

@@ -5,7 +5,7 @@ Regression tests for:
 2. Coverage check scoped to work_dir, not falling back to --cov=.
 """
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from core.models import SuccessCriterion, CriterionType
 from core.subprocess_runner import SubprocessResult

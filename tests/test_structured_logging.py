@@ -1,7 +1,6 @@
 """Tests for #937: structured logging with trace correlation."""
 import json
 import logging
-import os
 
 from monitoring.logging_config import (
     JsonFormatter,

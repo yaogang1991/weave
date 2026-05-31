@@ -93,7 +93,7 @@ def test_max_files_per_node_constant():
 def test_planning_prompt_has_decomposition_rule():
     """Planning prompt should include the decomposition rule."""
     from pathlib import Path
-    prompt = Path("orchestrator/prompts/planning.md").read_text()
+    prompt = Path("orchestrator/prompts/planning.md").read_text(encoding="utf-8")
     assert "15" in prompt
     assert "decomposition" in prompt.lower() or "Decompose" in prompt
     assert "foundation" in prompt.lower()

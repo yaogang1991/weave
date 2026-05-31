@@ -506,7 +506,11 @@ class AgentPool:
         run_id: str | None = None,
     ):
         import warnings
-        warnings.warn("AgentPool is deprecated in favor of BackendRegistry. See M6.3 (#951).", DeprecationWarning, stacklevel=2)
+        warnings.warn(
+            "AgentPool is deprecated in favor of BackendRegistry. See M6.3 (#951).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         self.llm_config = llm_config
         self.session_store = session_store

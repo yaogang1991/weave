@@ -1,6 +1,5 @@
 """Tests for #827: strip doubled project directory prefix in _resolve_path."""
 
-import pytest
 from pathlib import Path
 
 from tools.registry import ToolRegistry

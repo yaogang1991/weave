@@ -1,6 +1,5 @@
 """Tests for M4.5 progress tracking: ProgressReport, Filter/Observer, AnomalyDetector."""
 import time
-import pytest
 
 from core.progress import (
     ProgressReport,

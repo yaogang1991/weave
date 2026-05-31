@@ -183,9 +183,50 @@ Available Worker Agents:
 
 **并发控制**：`max_parallel` 参数限制同时执行的 Agent 数
 
-### 4. Agent Pool (`agent/agent_pool.py`)
+### 4. Backend Registry (`agent/backends/`) — M6
 
-**职责**：管理多个独立的 Worker Agent 实例
+**职责**：M6 Brain/Hands 分离后的执行后端管理
+
+**架构变化**（ADR-0017）：
+- Weave 成为纯编排层（meta-harness），不再自建 Agent LLM 循环
+- 执行委托给外部 CLI 工具（Claude Code / Codex）
+- `BuiltinBackend` 保留为规划/评估后端（轻量 LLM 调用，无工具循环）
+
+**三个执行后端**：
+
+| 后端 | 用途 | 说明 |
+|------|------|------|
+| `ClaudeCodeBackend` | 默认执行后端 | 调用 Claude Code CLI，处理文件操作、工具管理 |
+| `CodexBackend` | 备选执行后端 | 调用 Codex CLI |
+| `BuiltinBackend` | 规划/评估 | 包装 LightweightLLMCaller，无工具循环 |
+
+**关键组件**：
+
+| 组件 | 说明 |
+|------|------|
+| `base.py` | AgentBackend 抽象接口 |
+| `registry.py` | BackendRegistry — 多后端管理 + 自动回退 |
+| `stream_parser.py` | StreamParser — 解析 CLI 流式 JSON 事件（M6.5） |
+| `stderr_tail.py` | StderrTail — 尾随 stderr 提取进度事件（M6.6） |
+| `bidirectional.py` | 双向通信协议，支持会话恢复（M6.7） |
+| `config_export.py` | MCP 配置导出给外部后端（M6.8） |
+
+**Guardrails 提升**（M6.2）：
+```
+迁移前:  ToolRegistry.execute(tool_name, args) → guardrail_check → execute
+迁移后:  NodeExecutor.execute_node(node) → pre_check(risk, workspace) → backend.execute() → post_check(changes)
+```
+
+**OTel 可观测性**（M6.9）：
+- Trace context 传播到 CLI 子进程
+- GenAI Semantic Conventions 指标
+- 结构化日志与 trace correlation
+
+### 5. Agent Pool (`agent/agent_pool.py`) — Deprecated
+
+**状态**：M6.3 起已弃用，保留供 `BuiltinBackend` 向后兼容
+
+**原职责**：管理多个独立的 Worker Agent 实例
 
 **关键特性**：
 - 每个 Agent 类型一个实例（延迟创建）
@@ -207,6 +248,7 @@ Available Worker Agents:
 | `eval_models.py` | `SuccessCriterion`, `EvaluationResult` |
 | `tool_models.py` | `ToolInfo`, `ToolResult` |
 | `mcp_models.py` | `MCPToolInfo`, `MCPServerStatus` |
+| `backend_models.py` | `BackendContext`, `BackendResult`, `BackendStatus` — M6 Brain/Hands |
 | `artifact_handoff.py` | `HandoffArtifact`, artifact 交接 |
 | `exceptions.py` | 自定义异常层级 |
 
@@ -560,6 +602,11 @@ weave/
 │   ├── quality_gate.py            # 节点后质量检查
 │   ├── retry_policy.py            # 重试/退避策略
 │   ├── watchdog.py                # Watchdog 心跳监控
+│   ├── backend_models.py          # M6: BackendContext/Result/Status
+│   ├── evaluation_pipeline.py     # M6: 后执行评估管道
+│   ├── activity_detector.py       # M6.5: 事件检测
+│   ├── progress.py                # 进度追踪 + 异常检测
+│   ├── subprocess_runner.py       # 通用子进程执行
 │   ├── project_config.py          # .weave/config.yaml 加载器
 │   └── context.py                 # 运行时上下文
 ├── cli/                           # CLI 命令处理器
@@ -603,9 +650,18 @@ weave/
 │   ├── llm_utils.py                # LLM 工具
 │   └── prompts/                    # Prompt 模板
 ├── agent/
-│   ├── worker.py                  # Agent Worker
-│   ├── agent_pool.py              # Agent 实例池
-│   └── prompts.py                 # Agent system prompts
+│   ├── worker.py                  # Agent Worker (deprecated M6.3, retained for BuiltinBackend)
+│   ├── agent_pool.py              # Agent 实例池 (deprecated M6.3, retained for BuiltinBackend)
+│   ├── prompts.py                 # Agent system prompts (retained for BuiltinBackend compat)
+│   └── backends/                  # M6: Agent Backend 抽象层
+│       ├── base.py                # AgentBackend 抽象接口
+│       ├── builtin.py             # BuiltinBackend (轻量 LLM 调用)
+│       ├── claude_code.py         # ClaudeCodeBackend (默认, Claude Code CLI)
+│       ├── codex.py               # CodexBackend (Codex CLI)
+│       ├── registry.py            # BackendRegistry (多 backend + fallback)
+│       ├── stderr_tail.py         # StderrTail (进度事件提取, M6.6)
+│       ├── stream_parser.py       # StreamParser (流式 JSON 解析, M6.5)
+│       └── bidirectional.py       # 双向通信协议 (会话恢复, M6.7)
 ├── evaluator/                     # 评估引擎
 │   ├── engine.py                  # 评估编排
 │   ├── runner.py                  # 测试/lint 执行器
@@ -627,7 +683,10 @@ weave/
 │   └── output_monitor.py          # 输出监控
 ├── mcp/                           # Model Context Protocol
 │   ├── client.py                  # MCP 客户端
-│   └── server.py                  # MCP 服务器
+│   ├── server.py                  # MCP 服务器
+│   ├── analysis_tools.py          # M4.3: 分析工具
+│   ├── weave_tools_server.py      # M4.3: 独立 MCP 服务器入口
+│   └── config_export.py           # M6.8: MCP 配置导出器
 ├── skills/                        # 技能系统
 │   └── registry.py                # SkillRegistry
 ├── session/
@@ -651,7 +710,7 @@ weave/
 ├── monitoring/
 │   ├── metrics.py                 # 指标聚合
 │   ├── alerts.py                  # 告警系统
-│   └── otel.py                    # OpenTelemetry 集成
+│   └── otel.py                    # OpenTelemetry 集成 (M6.9: trace propagation)
 ├── a2a/                           # Agent-to-Agent 协议
 │   ├── agent_card.py              # Agent Card 模型
 │   ├── discovery.py               # Agent 发现
@@ -706,5 +765,5 @@ python main.py run "设计登录页面" --project ./my-project
 
 ---
 
-*日期: 2026-05-18*
-*状态: M3.6 完成 + 安全加固 + 基础设施增强*
+*日期: 2026-05-29*
+*状态: M6.9 完成 — Brain/Hands 分离架构*

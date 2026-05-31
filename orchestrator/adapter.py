@@ -249,4 +249,15 @@ class Adapter:
                     f"Available: {[a.id for a in self.agent_registry.list_agents()]}"
                 )
 
+        # Soften hub-and-spoke dependencies to prevent cascade skip (#959).
+        validator = PlanValidator()
+        plan_dump = plan.model_dump()
+        plan_dump["edges"] = validator._soften_hub_dependencies(
+            plan_dump.get("nodes", []),
+            plan_dump.get("edges", []),
+        )
+        plan.edges = plan_dump["edges"]
+        for w in validator.warnings:
+            logger.warning("[ReplanValidator] %s", w)
+
         return self._plan_to_dag(plan)

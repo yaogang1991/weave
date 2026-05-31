@@ -1,6 +1,6 @@
 # ADR 0017: Brain/Hands Separation — Weave as Pure Orchestrator
 
-**Status:** Accepted — Phase 1 (M6.1), Phase 2 (M6.2), Phase 3 (M6.3), Phase 4 (M6.4), M6.5–M6.8 complete.
+**Status:** Accepted — All phases complete (M6.1–M6.9).
 **Date:** 2026-05-26
 **Updated:** 2026-05-29
 **Deciders:** Project Lead
@@ -89,12 +89,17 @@ class BackendContext(BaseModel):
 
 ### 迁移分期
 
-| Phase | 周数 | 内容 |
-|-------|------|------|
-| **Phase 1: 接口变更** | 1–2 | BackendContext 扩展、NodeExecutor 注入 memory、ClaudeCodeBackend 使用新字段、默认 backend 改为 claude_code |
-| **Phase 2: Guardrails 提升** | 2–3 | NodeExecutor 增加 pre/post check、移除 tools/ 中的 guardrail、node 级别生效 |
-| **Phase 3: AgentPool 重构** | 3–4 | get_executor() → get_backend()、AgentWorker 去工具循环、AgentPool 变为 BackendContext 工厂 |
-| **Phase 4: 清理** | 4–6 | tools/ 精简、prompts.py 简化、stuck_detector/context 评估、文档更新 |
+| Phase | 周数 | 内容 | 状态 |
+|-------|------|------|------|
+| **Phase 1: 接口变更** | 1–2 | BackendContext 扩展、NodeExecutor 注入 memory、ClaudeCodeBackend 使用新字段、默认 backend 改为 claude_code | ✅ M6.1 |
+| **Phase 2: Guardrails 提升** | 2–3 | NodeExecutor 增加 pre/post check、移除 tools/ 中的 guardrail、node 级别生效 | ✅ M6.2 |
+| **Phase 3: AgentPool 重构** | 3–4 | get_executor() → get_backend()、AgentWorker 去工具循环、AgentPool 变为 BackendContext 工厂 | ✅ M6.3 |
+| **Phase 4: 清理** | 4–6 | tools/ 精简、prompts.py 简化、stuck_detector/context 评估、文档更新 | ✅ M6.4 |
+| **M6.5** | — | Stream-JSON event parsing for CLI backends | ✅ |
+| **M6.6** | — | Progress-driven semantic timeout | ✅ |
+| **M6.7** | — | Session Resume + Bidirectional comms | ✅ |
+| **M6.8** | — | MCP Config 传递到外部 Backend | ✅ |
+| **M6.9** | — | OTEL Trace Propagation to CLI subprocess | ✅ |
 
 ## Consequences
 
