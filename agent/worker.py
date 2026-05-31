@@ -228,17 +228,39 @@ class AgentWorker:
                     break  # At least one valid tool call → proceed normally
 
                 # Early termination for completely empty args (#541).
-                # When ALL tool calls have args={}, retrying is futile — the
-                # LLM produced no arguments at all and error feedback won't help.
-                # Skip remaining retries and go straight to degenerate detection.
+                # When ALL tool calls have args={}, retry with a targeted
+                # hint before giving up (#1042). Only enter degenerate
+                # detection when retries are exhausted.
                 all_empty_args = all(
                     tc.get("arguments") == {}
                     for tc in assistant_message.get("tool_calls", [])
                 )
                 if all_empty_args:
+                    if llm_attempt < EMPTY_CALL_MAX_RETRIES:
+                        logger.warning(
+                            "All tool calls have empty args {} — retrying "
+                            "with targeted hint (attempt %d/%d) (#1042)",
+                            llm_attempt + 1, EMPTY_CALL_MAX_RETRIES,
+                        )
+                        messages.append(assistant_message)
+                        messages.append({
+                            "role": "user",
+                            "content": (
+                                "SYSTEM: Your tool calls had completely "
+                                "empty arguments {}. You MUST provide "
+                                "complete arguments. For example: "
+                                "write(file_path='path/to/file', "
+                                "content='file content'). "
+                                "Retry now with proper arguments."
+                            ),
+                        })
+                        tool_results = []
+                        _report_progress()
+                        continue
                     logger.warning(
-                        "All tool calls have empty args {} — skipping "
-                        "remaining retries, entering degenerate detection (#541)",
+                        "All tool calls have empty args {} after %d "
+                        "retries — entering degenerate detection (#541)",
+                        EMPTY_CALL_MAX_RETRIES,
                     )
                     break
 

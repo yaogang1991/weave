@@ -212,12 +212,11 @@ def test_degenerate_constant_value():
 
 
 def test_empty_args_skips_llm_retries():
-    """Completely empty args {} skip the 3× LLM retry cycle (#541).
+    """Empty args {} retry with targeted hint before degenerate (#1042).
 
-    Without the fix, each iteration would try up to 4 LLM calls
-    (1 initial + 3 retries). With the fix, empty-args responses
-    break out of the retry loop immediately, so each iteration
-    only makes 1 LLM call.
+    Each degenerate iteration retries EMPTY_CALL_MAX_RETRIES times with
+    a targeted hint, then falls through to degenerate detection.
+    Total calls = DEGENERATE_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1).
     """
     from agent.worker import DEGENERATE_CALL_LIMIT, EMPTY_CALL_MAX_RETRIES
 
@@ -243,17 +242,13 @@ def test_empty_args_skips_llm_retries():
     ))
 
     call_count = len(worker.llm.call.call_args_list)
-    # With early termination, each iteration makes only 1 LLM call
-    # (not EMPTY_CALL_MAX_RETRIES + 1 = 4). Total calls should be
-    # close to DEGENERATE_CALL_LIMIT (3 iterations × 1 call each).
-    # Allow some margin for boundary effects.
-    max_expected = DEGENERATE_CALL_LIMIT + 2
-    assert call_count <= max_expected, (
-        f"Expected ~{DEGENERATE_CALL_LIMIT} LLM calls with early termination, "
-        f"got {call_count} (retries not being skipped?)"
+    expected = DEGENERATE_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1)
+    assert call_count == expected, (
+        f"Expected {expected} LLM calls "
+        f"({DEGENERATE_CALL_LIMIT} iterations x "
+        f"{EMPTY_CALL_MAX_RETRIES + 1} calls each), "
+        f"got {call_count}"
     )
-    # Without the fix, would be ~(DEGENERATE_CALL_LIMIT * (EMPTY_CALL_MAX_RETRIES + 1))
-    # = 3 * 4 = 12 calls
     assert EMPTY_CALL_MAX_RETRIES == 3  # sanity check
 
 
@@ -307,11 +302,20 @@ def test_recovery_hint_includes_workspace_files():
             "tool_calls": [],
         }
 
-        worker.llm.call.side_effect = [
-            write_response,
-            empty_response,  # triggers recovery hint
-            valid_response,  # model recovers
-        ]
+        from agent.worker import EMPTY_CALL_MAX_RETRIES
+
+        # Build side_effect: 1 valid write, then N retries with targeted
+        # hint, then 1 more empty to trigger degenerate recovery hint
+        # (with workspace files), then valid response.
+        responses = [write_response]
+        for _ in range(EMPTY_CALL_MAX_RETRIES):
+            responses.append(empty_response)
+        # After retries exhausted, one more empty call triggers the
+        # degenerate recovery hint which includes workspace files.
+        responses.append(empty_response)
+        responses.append(valid_response)
+
+        worker.llm.call.side_effect = responses
 
         tool_executor = MagicMock()
         tool_executor.execute.side_effect = [
@@ -331,13 +335,15 @@ def test_recovery_hint_includes_workspace_files():
             max_iterations=50,
         ))
 
-        # The third call should include the recovery hint with files
+        # The call after retries exhausted should include the degenerate
+        # recovery hint with workspace files.
         all_calls = worker.llm.call.call_args_list
-        assert len(all_calls) >= 3
+        # 1 write + EMPTY_CALL_MAX_RETRIES retries + 1 degenerate recovery
+        assert len(all_calls) >= 2 + EMPTY_CALL_MAX_RETRIES
 
-        third_call_messages = all_calls[2][0][0]
+        last_call_messages = all_calls[-1][0][0]
         user_msgs = [
-            m for m in third_call_messages if m["role"] == "user"
+            m for m in last_call_messages if m["role"] == "user"
         ]
         hint_msg = user_msgs[-1]["content"]
         assert "src/app.py" in hint_msg
