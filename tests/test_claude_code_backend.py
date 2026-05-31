@@ -87,7 +87,7 @@ class TestClaudeCodeBackendHealthCheck:
         from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
         with patch("shutil.which", return_value="/usr/local/bin/claude"):
             backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
-            
+
             assert asyncio.run(backend.health_check())
 
     def test_unhealthy_when_nothing_available(self):
@@ -95,7 +95,7 @@ class TestClaudeCodeBackendHealthCheck:
         with patch("shutil.which", return_value=None):
             backend = ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
             backend._sdk_available = False
-            
+
             assert not asyncio.run(backend.health_check())
 
 
@@ -355,7 +355,7 @@ class TestClaudeCodeBackendExecuteDispatch:
         ctx = _make_context()
 
         with patch("shutil.which", return_value=None):
-            
+
             result = asyncio.run(
                 backend.execute(ctx),
             )
@@ -515,3 +515,73 @@ class TestBackendResultTokenUsage:
         r = BackendResult(status=BackendStatus.COMPLETED, summary="done")
         d = r.to_dict()
         assert "token_usage" not in d
+
+
+# -- Silent failure detection (#1040) --
+
+
+class TestSilentCliFailure:
+    """CLI exits 0 but produces zero tokens with stderr (#1040)."""
+
+    @pytest.fixture
+    def backend(self):
+        from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
+        return ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
+
+    @pytest.mark.asyncio
+    async def test_zero_tokens_with_stderr_fails(self, backend):
+        """CLI exit 0 + zero tokens + stderr -> FAILED (#1040)."""
+        ctx = _make_context()
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"Error: API returned 401\n")
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(return_value=b"")
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process):
+            result = await backend._execute_via_cli(ctx, "test prompt")
+
+        assert result.status == BackendStatus.FAILED
+        assert "zero tokens" in result.error
+        assert "401" in result.error
+
+    @pytest.mark.asyncio
+    async def test_zero_tokens_no_stderr_succeeds(self, backend):
+        """CLI exit 0 + zero tokens + no stderr -> still succeeds."""
+        ctx = _make_context()
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(return_value=b"")
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process), \
+             patch.object(backend, "_discover_artifacts", return_value=["file.py"]):
+            result = await backend._execute_via_cli(ctx, "test prompt")
+
+        assert result.status == BackendStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_nonzero_tokens_with_stderr_succeeds(self, backend):
+        """CLI exit 0 + nonzero tokens + stderr -> succeeds (normal)."""
+        ctx = _make_context()
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"some warning\n")
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(
+            side_effect=[
+                json.dumps({"type": "result", "result": "done",
+                            "usage": {"input_tokens": 100, "output_tokens": 50}}).encode() + b"\n",
+                b"",
+            ],
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process), \
+             patch.object(backend, "_discover_artifacts", return_value=[]):
+            result = await backend._execute_via_cli(ctx, "test prompt")
+
+        assert result.status == BackendStatus.COMPLETED
