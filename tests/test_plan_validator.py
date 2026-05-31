@@ -180,6 +180,7 @@ def test_mixed_auto_and_explicit_hub():
         {"id": "impl_foundation", "agent_type": "generator",
          "task": "Create foundation"},
         {"id": "eval", "agent_type": "evaluator", "task": "Evaluate"},
+        # gen_0..gen_3: explicit deps on foundation (4 explicit, meets threshold)
         {"id": "impl_gen_0", "agent_type": "generator",
          "task": "Implement feature 0"},
         {"id": "impl_gen_1", "agent_type": "generator",
@@ -188,18 +189,26 @@ def test_mixed_auto_and_explicit_hub():
          "task": "Implement feature 2"},
         {"id": "impl_gen_3", "agent_type": "generator",
          "task": "Implement feature 3"},
+        # gen_4, gen_5: NO dep on foundation (auto-added)
         {"id": "impl_gen_4", "agent_type": "generator",
          "task": "Implement feature 4"},
+        {"id": "impl_gen_5", "agent_type": "generator",
+         "task": "Implement feature 5"},
     ]
     edges = [
         {"from": "plan", "to": "impl_foundation", "dependency_type": "hard"},
         {"from": "plan", "to": "eval", "dependency_type": "hard"},
+        # Explicit deps for gen_0..gen_3
         {"from": "impl_foundation", "to": "impl_gen_0",
          "dependency_type": "hard"},
         {"from": "impl_foundation", "to": "impl_gen_1",
          "dependency_type": "hard"},
+        {"from": "impl_foundation", "to": "impl_gen_2",
+         "dependency_type": "hard"},
+        {"from": "impl_foundation", "to": "impl_gen_3",
+         "dependency_type": "hard"},
     ]
-    for i in range(5):
+    for i in range(6):
         edges.append({
             "from": f"impl_gen_{i}", "to": "eval",
             "dependency_type": "hard",
@@ -215,10 +224,16 @@ def test_mixed_auto_and_explicit_hub():
         and e["to"].startswith("impl_gen_")
     }
 
-    # Explicit (gen_0, gen_1) → softened
-    assert foundation_edges["impl_gen_0"]["dependency_type"] == "soft"
-    assert foundation_edges["impl_gen_1"]["dependency_type"] == "soft"
+    # Explicit (gen_0..gen_3): 4 explicit edges meet hub threshold -> softened
+    for i in range(4):
+        nid = f"impl_gen_{i}"
+        assert foundation_edges[nid]["dependency_type"] == "soft", (
+            f"Explicit edge to {nid} should be softened"
+        )
 
-    # Auto-added (gen_2, gen_3, gen_4) → remain hard
-    for nid in ("impl_gen_2", "impl_gen_3", "impl_gen_4"):
-        assert foundation_edges[nid]["dependency_type"] == "hard"
+    # Auto-added (gen_4, gen_5): excluded from softening -> remain hard
+    for i in range(4, 6):
+        nid = f"impl_gen_{i}"
+        assert foundation_edges[nid]["dependency_type"] == "hard", (
+            f"Auto-added edge to {nid} should remain hard"
+        )
