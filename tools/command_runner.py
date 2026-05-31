@@ -61,6 +61,10 @@ class SyncSandboxAdapter:
         self._sandbox = sandbox
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
+    def close(self) -> None:
+        """Shut down thread pool executor to release thread."""
+        self._executor.shutdown(wait=False)
+
     def run_command(
         self,
         command: str,
