@@ -53,8 +53,14 @@ class _ProviderState:
 class ProviderHealthTracker:
     """Thread-safe tracker for per-provider health state."""
 
-    def __init__(self, config: ProviderHealthConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ProviderHealthConfig | None = None,
+        *,
+        disabled: bool = False,
+    ) -> None:
         self._config = config or ProviderHealthConfig()
+        self._disabled = disabled
         self._states: dict[str, _ProviderState] = {}
         self._lock = threading.Lock()
 
@@ -65,6 +71,8 @@ class ProviderHealthTracker:
         self, provider: str, model: str,
         category: FailureCategory = FailureCategory.UNKNOWN,
     ) -> None:
+        if self._disabled:
+            return
         key = self._key(provider, model)
         with self._lock:
             state = self._states.setdefault(key, _ProviderState())
@@ -89,6 +97,8 @@ class ProviderHealthTracker:
                 )
 
     def record_success(self, provider: str, model: str) -> None:
+        if self._disabled:
+            return
         key = self._key(provider, model)
         with self._lock:
             state = self._states.setdefault(key, _ProviderState())
@@ -101,6 +111,8 @@ class ProviderHealthTracker:
             state.marked_unhealthy_at = 0.0
 
     def is_healthy(self, provider: str, model: str) -> bool:
+        if self._disabled:
+            return True
         key = self._key(provider, model)
         with self._lock:
             state = self._states.get(key)
