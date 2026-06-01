@@ -416,6 +416,10 @@ class ClaudeCodeBackend(AgentBackend):
                 for line in stderr_text.splitlines():
                     stderr_tail.write(line + "\n")
 
+            # #1063: Explicitly close pipe transports on Windows to prevent
+            # ResourceWarning / ValueError on GC.
+            self._close_process_pipes(process)
+
             stderr = stderr_tail.tail().strip()
 
             if process.returncode == 127:
@@ -892,3 +896,20 @@ class ClaudeCodeBackend(AgentBackend):
         if self._config.timeout_override > 0:
             return self._config.timeout_override
         return DEFAULT_CLI_TIMEOUT
+
+    @staticmethod
+    def _close_process_pipes(process: asyncio.subprocess.Process) -> None:
+        """Explicitly close pipe transports to prevent ResourceWarning (#1063).
+
+        On Windows, async pipe transports (_ProactorBasePipeTransport) are not
+        closed before GC, causing ``ValueError: I/O operation on closed pipe``
+        and ``ResourceWarning`` at process exit.
+        """
+        for pipe in (process.stdout, process.stderr):
+            if pipe is not None:
+                transport = getattr(pipe, "_transport", None)
+                if transport is not None and hasattr(transport, "close"):
+                    try:
+                        transport.close()
+                    except Exception:
+                        pass
