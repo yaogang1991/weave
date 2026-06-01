@@ -237,9 +237,19 @@ class AgentWorker:
                 )
                 if all_empty_args:
                     if llm_attempt < EMPTY_CALL_MAX_RETRIES:
+                        # Build concrete examples based on the requested tools (#1057).
+                        tool_names = [tc.get("name", "") for tc in assistant_message.get("tool_calls", [])]
+                        examples = []
+                        for tn in tool_names:
+                            req = TOOL_REQUIRED_ARGS.get(tn, [])
+                            if req:
+                                fake_args = ", ".join(f"{k}='value'" for k in req)
+                                examples.append(f"{tn}({fake_args})")
+                        example_str = "; ".join(examples) if examples else "write(file_path='path', content='code')"
+
                         logger.warning(
                             "All tool calls have empty args {} — retrying "
-                            "with targeted hint (attempt %d/%d) (#1042)",
+                            "with targeted hint (attempt %d/%d) (#1042 #1057)",
                             llm_attempt + 1, EMPTY_CALL_MAX_RETRIES,
                         )
                         messages.append(assistant_message)
@@ -248,9 +258,8 @@ class AgentWorker:
                             "content": (
                                 "SYSTEM: Your tool calls had completely "
                                 "empty arguments {}. You MUST provide "
-                                "complete arguments. For example: "
-                                "write(file_path='path/to/file', "
-                                "content='file content'). "
+                                f"complete arguments. Expected format: {example_str}. "
+                                "Do NOT omit any required fields. "
                                 "Retry now with proper arguments."
                             ),
                         })

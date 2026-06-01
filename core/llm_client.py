@@ -124,33 +124,54 @@ class LLMClient:
     def _extract_tool_args_from_text(
         text: str, tool_name: str,
     ) -> dict | None:
-        """Try to extract tool arguments from text content (#579).
+        """Try to extract tool arguments from text content (#579 #1057).
 
-        Some LLM backends (e.g. glm-5.1 via Anthropic-compatible API) return
+        Some LLM backends (e.g., glm-5.1 via Anthropic-compatible API) return
         tool_use blocks with empty input but include the arguments as JSON in
-        the text content. This fallback attempts to parse that JSON.
+        the text content.  This fallback attempts to parse that JSON.
         """
         import re
-        # Look for JSON objects in the text that might be tool arguments
-        # Pattern: find the largest JSON-like object after the tool name
-        pattern = rf'{re.escape(tool_name)}\s*(?:\(|:)\s*(\{{[^}}]*\}})'
+
+        # Strategy 1: find JSON object after tool name mention (#579).
+        # Use raw_decode to handle nested braces properly (#1057).
+        pattern = rf'{re.escape(tool_name)}\s*(?:\(|:)\s*(\{{)'
         match = re.search(pattern, text)
         if match:
+            json_start = match.start(1)
             try:
-                parsed = json.loads(match.group(1))
+                decoder = json.JSONDecoder()
+                parsed, _ = decoder.raw_decode(text, json_start)
                 if isinstance(parsed, dict):
                     return parsed
-            except (json.JSONDecodeError, TypeError):
+            except (json.JSONDecodeError, ValueError):
                 pass
 
-        # Fallback: find any JSON object in the text
-        for match in re.finditer(r'\{[^{}]*\}', text):
-            try:
-                parsed = json.loads(match.group())
-                if isinstance(parsed, dict) and len(parsed) >= 2:
-                    return parsed
-            except (json.JSONDecodeError, TypeError):
-                continue
+        # Strategy 2: find any JSON object in the text (nested-safe).
+        decoder = json.JSONDecoder()
+        for i, ch in enumerate(text):
+            if ch == '{':
+                try:
+                    parsed, _ = decoder.raw_decode(text, i)
+                    if isinstance(parsed, dict) and len(parsed) >= 2:
+                        return parsed
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+        # Strategy 3: parse keyword-style args from text (#1057).
+        # Handles: write(file_path="path", content="code")
+        kw_pattern = rf'{re.escape(tool_name)}\s*\(([^)]+)\)'
+        kw_match = re.search(kw_pattern, text)
+        if kw_match:
+            args: dict = {}
+            for kv in re.finditer(
+                r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')',
+                kw_match.group(1),
+            ):
+                args[kv.group(1)] = (
+                    kv.group(2) if kv.group(2) is not None else kv.group(3)
+                )
+            if len(args) >= 2:
+                return args
 
         return None
 
