@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import shutil
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -336,6 +337,22 @@ class ClaudeCodeBackend(AgentBackend):
         with start_backend_call_span(
             context.run_id or "", context.node.id, self.BACKEND_NAME,
         ):
+            # Pre-execution file snapshot for artifact discovery (#1061).
+            # Captures existing files so _discover_artifacts can diff after.
+            workspace = context.workspace_path
+            if workspace and os.path.isdir(workspace):
+                pre_files: set[str] = set()
+                for root, _dirs, files in os.walk(workspace):
+                    for fname in files:
+                        rel = os.path.relpath(
+                            os.path.join(root, fname), workspace,
+                        ).replace("\\", "/")
+                        if not any(p.startswith(".") for p in rel.split("/")):
+                            pre_files.add(rel)
+                if context.metadata is None:
+                    context.metadata = {}
+                context.metadata["_pre_files"] = pre_files
+
             env = inject_trace_context(dict(os.environ))
 
             # Write MCP config for --mcp-config support (M6.8).
@@ -632,6 +649,7 @@ class ClaudeCodeBackend(AgentBackend):
             self._config.cli_path,
             "-p",
             "--output-format", "stream-json",
+            "--verbose",
             "--permission-mode", self._config.permission_mode,
         ]
 
@@ -645,8 +663,11 @@ class ClaudeCodeBackend(AgentBackend):
             cmd.extend(["--append-system-prompt", self._config.system_prompt_append])
         for tool in self._config.allowed_tools:
             cmd.extend(["--allowed-tools", tool])
+        # Each invocation needs a unique session ID to avoid "Session ID already
+        # in use" when parallel nodes execute or when a node is retried (#1059).
         if context.session_id:
-            cmd.extend(["--session-id", context.session_id])
+            unique_sid = str(uuid.uuid4())
+            cmd.extend(["--session-id", unique_sid])
         # M6.7: Resume previous session when resume_session_id is provided.
         if context.resume_session_id:
             cmd.append("--resume")
@@ -714,15 +735,17 @@ class ClaudeCodeBackend(AgentBackend):
     # -- Artifact discovery --------------------------------------------------
 
     def _discover_artifacts(self, context: BackendContext) -> list[str]:
-        """Discover files created/modified by Claude Code via git diff.
+        """Discover files created/modified by Claude Code.
 
-        Synchronous subprocess call — runs after async CLI execution
-        completes, so event loop blocking is acceptable here.
+        Strategy: try ``git diff`` first (fast, accurate in repos).
+        If the workspace is not a git repo, fall back to listing all
+        files recursively and diffing against a pre-execution snapshot.
         """
         workspace = context.workspace_path
         if not workspace:
             return []
 
+        # Strategy 1: git diff (works in git repos with pre-existing HEAD)
         try:
             result = run_with_progress(
                 ["git", "diff", "--name-only", "--diff-filter=ACMR"],
@@ -738,9 +761,32 @@ class ClaudeCodeBackend(AgentBackend):
                     if f.strip()
                 ]
         except OSError as exc:
-            logger.debug("Artifact discovery failed: %s", exc)
+            logger.debug("Artifact discovery via git diff failed: %s", exc)
 
-        return []
+        # Strategy 2: snapshot diff — compare files now vs. before execution.
+        # Pre-execution snapshot is stored in context.metadata by _prepare().
+        pre_files: set[str] = set()
+        if context.metadata and "_pre_files" in context.metadata:
+            pre_files = set(context.metadata["_pre_files"])
+
+        post_files: set[str] = set()
+        for root, _dirs, files in os.walk(workspace):
+            for fname in files:
+                rel = os.path.relpath(
+                    os.path.join(root, fname), workspace,
+                ).replace("\\", "/")
+                # Skip hidden/VCS dirs
+                if any(p.startswith(".") for p in rel.split("/")):
+                    continue
+                post_files.add(rel)
+
+        new_files = sorted(post_files - pre_files)
+        if new_files:
+            logger.info(
+                "Discovered %d artifacts via snapshot diff (non-git workspace)",
+                len(new_files),
+            )
+        return new_files
 
     # -- Token usage extraction ----------------------------------------------
 

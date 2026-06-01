@@ -157,3 +157,44 @@ class TestRewireReplacementEdges:
 
         # Should not raise
         engine._rewire_replacement_edges(new_dag, old_dag, new_dag, "nonexistent")
+
+    async def test_cycle_detection_after_rewire_aborts_replan(self):
+        """Replan that produces a cyclic DAG falls back gracefully (#1060).
+
+        Scenario: A -> B -> C. B fails, replan creates B2 that depends on C.
+        Rewiring A->C edges to A->B2 creates cycle B2 -> C -> B2.
+        """
+        engine = _make_engine()
+
+        old_dag = DAG(reasoning="old")
+        old_dag.add_node(_make_node("A", "planner"))
+        old_dag.add_node(_make_node("B", "generator"))
+        old_dag.add_node(_make_node("C", "evaluator"))
+        old_dag.add_edge("A", "B")
+        old_dag.add_edge("B", "C")
+        old_dag.update_node("A", status=NodeStatus.SUCCESS)
+        old_dag.update_node("B", status=NodeStatus.FAILED, error="x")
+
+        # Replan creates B2 (generator) that depends on C, creating a cycle
+        # when B's downstream edge to C is rewired to B2.
+        new_dag = DAG(reasoning="replan")
+        new_dag.add_node(_make_node("B2", "generator"))
+        new_dag.add_node(_make_node("C", "evaluator"))
+        new_dag.add_edge("B2", "C")
+        new_dag.add_edge("C", "B2")  # Creates cycle: B2 -> C -> B2
+
+        async def replan_handler(dag, failed_id):
+            return new_dag
+
+        engine.replan_handler = replan_handler
+        levels = old_dag.topological_levels()
+
+        dag, out_levels, level_idx, replan_count, initiated = await engine._try_execute_replan(
+            old_dag, "B", levels, 1, 0,
+        )
+
+        # Replan should be rejected (initiated=False) due to cycle
+        assert initiated is False
+        assert replan_count == 0
+        # B should be marked as skipped (graceful degradation)
+        assert dag.nodes["B"].status == NodeStatus.SKIPPED

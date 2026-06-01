@@ -1004,7 +1004,6 @@ class DAGExecutionEngine:
             self._running_tasks = {}
             # Shutdown thread pools to avoid RuntimeWarning on exit
             self._node_executor.close()
-            self._executor.shutdown(wait=False)
 
     async def _try_execute_replan(
         self, dag: DAG, failed_id: str,
@@ -1081,8 +1080,22 @@ class DAGExecutionEngine:
         # re-trigger replan when other nodes fail later.
         if failed_id in dag.nodes and failed_id not in replan_node_ids:
             dag.update_node(failed_id, status=NodeStatus.SUPERSEDED)
+
+        # #1060: Validate the merged DAG is still acyclic after edge rewiring.
+        try:
+            levels = dag.topological_levels()
+        except ValueError:
+            logger.warning(
+                "Replan produced cyclic DAG after edge rewiring — "
+                "falling back to skip for node %s (#1060)",
+                failed_id,
+            )
+            # Undo: restore old DAG, mark failed node as skipped.
+            if failed_id in old_dag.nodes:
+                old_dag.update_node(failed_id, status=NodeStatus.SKIPPED)
+            return old_dag, levels, level_idx, replan_count, False
+
         replan_count += 1
-        levels = dag.topological_levels()
         level_idx = 0
         logger.info(
             "Replan merged: %d total nodes, %d levels (#718)",
