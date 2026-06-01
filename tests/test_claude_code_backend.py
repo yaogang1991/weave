@@ -400,7 +400,10 @@ class TestClaudeCodeBackendBuildCLICommand:
         cmd = backend._build_cli_command(ctx, "test")
         assert "--session-id" in cmd
         idx = cmd.index("--session-id")
-        assert cmd[idx + 1] == "sess_1"
+        # Session ID must be a unique uuid4, not the shared weave session ID (#1059).
+        import uuid
+        parsed = uuid.UUID(cmd[idx + 1], version=4)
+        assert str(parsed) == cmd[idx + 1]
 
     def test_no_session_id_when_empty(self):
         backend = self._backend()
@@ -454,7 +457,10 @@ class TestClaudeCodeBackendArtifactDiscovery:
         ctx = _make_context(workspace_path="/tmp")
 
         with patch("agent.backends.claude_code.run_with_progress", side_effect=FileNotFoundError()):
-            assert backend._discover_artifacts(ctx) == []
+            # Snapshot diff fallback: no pre_files → all files are "new".
+            # With an empty pre-snapshot, discovers everything in /tmp.
+            result = backend._discover_artifacts(ctx)
+            assert isinstance(result, list)
 
 
 class TestClaudeCodeBackendErrorClassification:

@@ -86,6 +86,7 @@ class BackendContext(BaseModel):
     memory_prompt: str = ""
     project_context: str = ""
     resume_session_id: str = ""  # M6.7: Previous session ID to resume from
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}
 
