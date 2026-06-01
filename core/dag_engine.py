@@ -157,8 +157,13 @@ class DAGExecutionEngine:
         self.max_replans = cfg.max_replans
         self.max_parallel = cfg.max_parallel
         self.max_dag_nodes = cfg.max_dag_nodes
-        # #900: Provider health tracker
-        self._provider_health = provider_health or ProviderHealthTracker()
+        # #900/#1056: Provider health tracker — disabled for third-party APIs.
+        _health_disabled = bool(
+            llm_config and getattr(llm_config, "base_url", None)
+        )
+        self._provider_health = provider_health or ProviderHealthTracker(
+            disabled=_health_disabled,
+        )
         # #910: LLM config for provider/model extraction
         self._llm_config = llm_config
         # Note: evaluator is stored in NodeExecutor (created below).
@@ -241,6 +246,18 @@ class DAGExecutionEngine:
             model = getattr(self._llm_config, "model", "")
             return provider, model
         return "anthropic", ""
+
+    def _should_track_health(self) -> bool:
+        """Skip provider health tracking for third-party API endpoints (#1056).
+
+        Custom base URLs (e.g., ZhipuAI) have different failure patterns
+        than the official Anthropic API. Health checks designed for the
+        official API cause false positives that skip eval/replan nodes.
+        """
+        if self._llm_config is None:
+            return True
+        base_url = getattr(self._llm_config, "base_url", None)
+        return not base_url
 
     def on_event(self, handler: EventHandler) -> None:
         """Register an event handler for execution monitoring."""
