@@ -326,16 +326,27 @@ class SessionStore:
     def _maybe_snapshot(self, session_id: str) -> None:
         """Auto-snapshot when event count reaches interval (#510).
 
-        Creates a snapshot and truncates the log to keep file size bounded.
-        Skips if session has too few events or snapshot fails.
+        Creates a snapshot for crash recovery WITHOUT truncating the event
+        log. Truncation is deferred to explicit checkpoint calls (e.g. at
+        session end) so the full event history is preserved during replan
+        and other mid-run scenarios (#1072).
         """
         count = self._event_counts.get(session_id, 0)
         if count < self._snapshot_interval or count % self._snapshot_interval != 0:
             return
         try:
-            self.checkpoint(session_id, label="auto")
-            # Reset counter after truncation — remaining events start from 0
-            self._event_counts[session_id] = 0
+            state = self.restore_state(session_id)
+            line_count = self._count_lines(session_id)
+            snapshot = SessionSnapshot(
+                state=state,
+                event_index=line_count,
+                timestamp=datetime.now(timezone.utc),
+            )
+            self._save_snapshot(session_id, snapshot)
+            logger.info(
+                "Session %s auto-snapshot at event %d (no truncate) (#1072)",
+                session_id, line_count,
+            )
         except Exception as exc:
             logger.debug("Auto-snapshot failed for session %s: %s", session_id, exc)
 
