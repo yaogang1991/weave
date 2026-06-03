@@ -888,13 +888,12 @@ class NodeExecutor:
     def _get_activity_timeout(self, agent_type: str) -> float:
         """Get semantic inactivity timeout in seconds (M6.6).
 
-        Defaults to 600s (10 min).  Override via
-        ``NodeTimeoutConfig.activity_timeout`` if configured.
+        Uses ``NodeTimeoutConfig.activity_timeout`` (env: WEAVE_ACTIVITY_TIMEOUT)
+        which defaults to 600s. Third-party LLM users should increase this
+        to 1800+ to account for higher API latency (#1068).
         """
         if self._node_timeout_config is not None:
-            return getattr(
-                self._node_timeout_config, "activity_timeout", 600.0,
-            )
+            return float(self._node_timeout_config.activity_timeout)
         return 600.0
 
     def _collect_input_artifacts(
