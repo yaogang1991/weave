@@ -191,8 +191,8 @@ class TestAutoSnapshot:
 
         assert not store._snapshot_file(sid).exists()
 
-    def test_event_counter_resets_after_snapshot(self, tmp_path):
-        """Event counter resets after auto-snapshot, enabling next cycle."""
+    def test_event_counter_preserves_after_snapshot(self, tmp_path):
+        """Auto-snapshot no longer truncates — counter keeps accumulating (#1072)."""
         store = SessionStore(
             base_path=str(tmp_path / "events"),
             snapshot_interval=3,
@@ -200,16 +200,16 @@ class TestAutoSnapshot:
         sid = "test-reset"
         store.create_session(sid, "test")  # 1 event
 
-        # Emit 2 more → total 3 → snapshot triggered, counter resets to 0
+        # Emit 2 more → total 3 → snapshot triggered, counter stays at 3
         for i in range(2):
             store.emit_event(
                 sid, EventType.AGENT_MESSAGE,
                 {"role": "assistant", "content": f"batch1-{i}"},
             )
         assert store._snapshot_file(sid).exists()
-        assert store._event_counts[sid] == 0  # Reset after snapshot
+        assert store._event_counts[sid] == 3  # No longer reset (#1072)
 
-        # Emit 3 more → counter goes to 3 → second snapshot
+        # Emit 3 more → counter goes to 6 → second snapshot at next interval
         store._snapshot_file(sid).unlink()  # Remove first snapshot
         for i in range(3):
             store.emit_event(
