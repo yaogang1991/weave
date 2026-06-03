@@ -1054,18 +1054,18 @@ class DAGExecutionEngine:
         except Exception as e:
             logger.error(
                 "Replan handler failed for node %s: %s. "
-                "Falling back to skip (#718).",
+                "Falling back to skip (#718 #1073).",
                 failed_id, e,
             )
-            return dag, levels, level_idx, replan_count, False
+            return dag, levels, level_idx, replan_count + 1, False
 
         if new_dag is None:
             logger.error(
                 "Replan handler returned None for node %s. "
-                "Falling back to skip (#829).",
+                "Falling back to skip (#829 #1073).",
                 failed_id,
             )
-            return dag, levels, level_idx, replan_count, False
+            return dag, levels, level_idx, replan_count + 1, False
 
         logger.info(
             "Replan produced %d nodes (was %d) (#718)",
