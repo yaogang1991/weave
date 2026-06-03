@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 import shutil
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -744,11 +745,32 @@ class ClaudeCodeBackend(AgentBackend):
         Strategy: try ``git diff`` first (fast, accurate in repos).
         If the workspace is not a git repo, fall back to listing all
         files recursively and diffing against a pre-execution snapshot.
+
+        #1071: Retries once after a short delay to account for async
+        file writes that may not have flushed when the CLI process exits.
         """
         workspace = context.workspace_path
         if not workspace:
             return []
 
+        artifacts = self._discover_artifacts_once(workspace, context)
+        if artifacts:
+            return artifacts
+
+        # #1071: Retry once after a brief delay for async file writes.
+        time.sleep(1.0)
+        artifacts = self._discover_artifacts_once(workspace, context)
+        if artifacts:
+            logger.info(
+                "Discovered %d artifacts on retry (async write flush) (#1071)",
+                len(artifacts),
+            )
+        return artifacts
+
+    def _discover_artifacts_once(
+        self, workspace: str, context: BackendContext,
+    ) -> list[str]:
+        """Single-pass artifact discovery."""
         # Strategy 1: git diff (works in git repos with pre-existing HEAD)
         try:
             result = run_with_progress(
