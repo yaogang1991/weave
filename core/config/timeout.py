@@ -137,6 +137,14 @@ class NodeTimeoutConfig(BaseModel):
         default_factory=GeneratorStallScaleConfig,
     )
 
+    # M6.6: Semantic inactivity timeout (seconds) for stream-json backends.
+    # Third-party LLM APIs (e.g. glm-5.1) have much higher latency than
+    # native Anthropic API.  Set WEAVE_ACTIVITY_TIMEOUT=1800 for 30 min.
+    activity_timeout: int = Field(
+        default=int(os.getenv("WEAVE_ACTIVITY_TIMEOUT", "600")),
+        description="Semantic inactivity timeout in seconds for CLI backends",
+    )
+
     def timeout_for(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
