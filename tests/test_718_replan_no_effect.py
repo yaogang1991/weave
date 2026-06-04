@@ -51,7 +51,7 @@ class TestReplanErrorHandling:
         )
 
         assert initiated is False
-        assert result_count == 0  # Not incremented on failure
+        assert result_count == 1  # Incremented even on failure (#1073)
         assert result_dag is dag  # Original DAG preserved
 
     @pytest.mark.asyncio

@@ -662,7 +662,10 @@ class NodeExecutor:
         def _on_progress() -> None:
             try:
                 loop.call_soon_threadsafe(node.record_heartbeat)
-                activity_detector.record_activity()
+                # activity_detector is NOT reset here — meaningful event
+                # filtering is handled inside _stream_cli_output (#1079).
+                # Blindly resetting on every message prevented semantic
+                # timeout from firing on non-meaningful stream events.
                 tracker.report("heartbeat")
             except RuntimeError:
                 pass
@@ -766,7 +769,37 @@ class NodeExecutor:
             )
 
         try:
+            import time as _time
+            _wall_start = _time.monotonic()
+            _wall_max = self._get_node_timeout(
+                node.agent_type,
+                artifact_count=len(input_artifacts),
+            )
             while not task.done():
+                # #1079: Hard wall-clock timeout — kills the node regardless
+                # of stall/activity state. Prevents indefinite hangs when all
+                # other detection mechanisms fail to fire.
+                _wall_elapsed = _time.monotonic() - _wall_start
+                if _wall_elapsed >= _wall_max:
+                    cancel_event.set()
+                    if not task.done():
+                        task.cancel()
+                    logger.warning(
+                        "Node %s (%s) killed: wall-clock timeout "
+                        "(%.0fs >= %ds) (#1079)",
+                        node.id, node.agent_type,
+                        _wall_elapsed, _wall_max,
+                    )
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                    raise NodeTimeoutError(
+                        node_id=node.id,
+                        agent_type=node.agent_type,
+                        timeout=_wall_max,
+                    )
+
                 # Check if watchdog flagged this node (UNHEALTHY or DEAD)
                 if node.health_status in (NodeHealth.UNHEALTHY, NodeHealth.DEAD):
                     cancel_event.set()
