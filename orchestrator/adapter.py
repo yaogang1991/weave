@@ -11,6 +11,7 @@ from typing import Any
 
 from core.models import DAG, FailureDecision, OrchestratorPlan
 from core.agent_registry import AgentRegistry
+from core.exceptions import RateLimitError
 from core.llm_client import LLMClient
 from orchestrator.llm_utils import (
     prune_messages_for_size,
@@ -150,7 +151,29 @@ class Adapter:
                 ),
             })
 
-        response = self.llm.call(messages, tools=[], max_tokens_override=_PLANNER_MAX_TOKENS)
+        try:
+            response = self.llm.call(
+                messages, tools=[], max_tokens_override=_PLANNER_MAX_TOKENS,
+            )
+        except RateLimitError as exc:
+            logger.warning(
+                "adapt_to_failure LLM call rate-limited, falling back: %s (#1080)",
+                exc,
+            )
+            if failed_node.retry_count < failed_node.max_retries:
+                return FailureDecision(
+                    action="retry",
+                    reasoning=f"Rate limit error, will retry: {exc}",
+                )
+            if has_only_soft_dependents and dependents:
+                return FailureDecision(
+                    action="skip",
+                    reasoning=f"Rate limit error; soft deps only, skipping: {exc}",
+                )
+            return FailureDecision(
+                action="abort",
+                reasoning=f"Rate limit error, max retries reached: {exc}",
+            )
 
         try:
             decision_data = extract_json(response.get("content", ""))
@@ -215,9 +238,16 @@ class Adapter:
         plan_data = None
         for attempt in range(max_retries + 1):
             messages = self._prune_messages(messages)
-            response = self.llm.call(
-                messages, tools=[], max_tokens_override=_PLANNER_MAX_TOKENS,
-            )
+            try:
+                response = self.llm.call(
+                    messages, tools=[], max_tokens_override=_PLANNER_MAX_TOKENS,
+                )
+            except RateLimitError as exc:
+                logger.warning(
+                    "Replan LLM call rate-limited on attempt %d, aborting replan (#1080): %s",
+                    attempt, exc,
+                )
+                return dag
             plan_data = extract_json(response.get("content", ""))
             if plan_data is not None:
                 break
