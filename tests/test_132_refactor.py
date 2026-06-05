@@ -18,7 +18,6 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from control_plane.models import JobStatus, Run, RunStatus  # noqa: E402
 from control_plane.repository import JobRepository  # noqa: E402

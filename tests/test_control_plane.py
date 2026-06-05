@@ -53,6 +53,25 @@ def sample_job() -> Job:
 
 
 @pytest.fixture
+def make_job():
+    """Factory fixture for creating Job instances with custom fields."""
+    def _make(**overrides):
+        now = datetime.now(timezone.utc)
+        defaults = dict(
+            id="job_test_001",
+            requirement="Implement a todo API",
+            status=JobStatus.QUEUED,
+            project_path="/tmp/proj",
+            retry_policy=RetryPolicy(max_attempts=3, backoff_sec=5),
+            created_at=now,
+            updated_at=now,
+        )
+        defaults.update(overrides)
+        return Job(**defaults)
+    return _make
+
+
+@pytest.fixture
 def sample_run() -> Run:
     now = datetime.now(timezone.utc)
     return Run(
@@ -64,6 +83,25 @@ def sample_run() -> Run:
         created_at=now,
         updated_at=now,
     )
+
+
+@pytest.fixture
+def make_run():
+    """Factory fixture for creating Run instances with custom fields."""
+    def _make(**overrides):
+        now = datetime.now(timezone.utc)
+        defaults = dict(
+            id="run_test_001",
+            job_id="job_test_001",
+            session_id="sess_001",
+            status=RunStatus.RUNNING,
+            started_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+        defaults.update(overrides)
+        return Run(**defaults)
+    return _make
 
 
 # =============================================================================
@@ -97,12 +135,12 @@ class TestModelInstantiation:
         assert not sample_job.is_terminal()
         assert sample_job.is_active()
 
-    def test_job_is_terminal(self, sample_job: Job):
+    def test_job_is_terminal(self, make_job):
         for status in (JobStatus.SUCCEEDED, JobStatus.FAILED,
                        JobStatus.CANCELED, JobStatus.DEAD_LETTER):
-            sample_job.status = status
-            assert sample_job.is_terminal()
-            assert not sample_job.is_active()
+            job = make_job(status=status)
+            assert job.is_terminal()
+            assert not job.is_active()
 
     def test_job_bump_attempt(self, sample_job: Job):
         sample_job.bump_attempt()
@@ -123,11 +161,11 @@ class TestModelInstantiation:
         assert sample_run.dag_result == {}
         assert not sample_run.is_terminal()
 
-    def test_run_terminal_states(self, sample_run: Run):
+    def test_run_terminal_states(self, make_run):
         for status in (RunStatus.SUCCEEDED, RunStatus.FAILED,
                        RunStatus.ABORTED, RunStatus.TIMED_OUT):
-            sample_run.status = status
-            assert sample_run.is_terminal()
+            run = make_run(status=status)
+            assert run.is_terminal()
 
     def test_run_model_dump(self, sample_run: Run):
         data = sample_run.model_dump(mode="json")

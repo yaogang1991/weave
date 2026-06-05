@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import PersonalGuardrailPolicy  # noqa: E402
 from guardrails.policy import PersonalGuardrails  # noqa: E402

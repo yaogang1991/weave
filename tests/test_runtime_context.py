@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, str(Path(__file__).parent.parent))  # noqa: E402
 
 from tools.registry import ToolRegistry  # noqa: E402
 

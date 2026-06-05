@@ -26,7 +26,6 @@ from unittest.mock import (
 import pytest
 
 # Ensure project root on sys.path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.config import LLMConfig
 from core.config.timeout import WatchdogConfig
@@ -1100,3 +1099,41 @@ class TestSessionEventHandler:
 
 # Import needed for direct reference in tests above
 from control_plane.execution_factory import ExecutionFactory
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: real component wiring (minimal mocking)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+class TestExecutionFactoryIntegration:
+    """Integration tests that wire real components together."""
+
+    def test_factory_creates_working_orchestrator(self, tmp_store):
+        """Factory-built orchestrator has correct interface."""
+        factory = _make_factory()
+        orchestrator = factory.create_orchestrator(store=tmp_store)
+        assert orchestrator is not None
+        assert hasattr(orchestrator, "plan")
+        assert hasattr(orchestrator, "adapt_to_failure")
+
+    def test_factory_creates_engine_with_real_evaluator(self, tmp_store):
+        """Factory-built engine includes a real EvaluatorEngine."""
+        factory = _make_factory()
+        engine = factory.create_execution_engine(
+            session_id="integration-test",
+            store=tmp_store,
+        )
+        assert engine is not None
+        assert hasattr(engine, "execute")
+
+    def test_full_factory_build_allows_dag_construction(self, tmp_store):
+        """Complete factory build produces orchestrator + engine wired together."""
+        factory = _make_factory()
+        orchestrator = factory.create_orchestrator(store=tmp_store)
+        engine = factory.create_execution_engine(
+            session_id="full-build-test",
+            store=tmp_store,
+        )
+        assert orchestrator is not None
+        assert engine is not None

@@ -17,7 +17,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.agent_pool import WorkerAgent, AgentPool, ExecutionContext  # noqa: E402
 from core.models import AgentCapability, ToolResult  # noqa: E402

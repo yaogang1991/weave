@@ -137,7 +137,7 @@ class TestEvaluatorIntegration:
         ))
         engine = DAGExecutionEngine(
             exec_with_artifacts, _noop_failure_handler,
-            evaluator=mock_eval, work_dir="/tmp/test_workdir"
+            evaluator=mock_eval, work_dir="."
         )
         result = await engine.execute(dag)
         assert result.nodes["a"].status == NodeStatus.SUCCESS
@@ -162,7 +162,7 @@ class TestEvaluatorIntegration:
 
         engine = DAGExecutionEngine(
             exec_fn, retry_handler,
-            evaluator=mock_eval, work_dir="/tmp/test_workdir"
+            evaluator=mock_eval, work_dir="."
         )
         result = await engine.execute(dag)
         # First attempt fails eval -> RETRYING, retry also fails eval.

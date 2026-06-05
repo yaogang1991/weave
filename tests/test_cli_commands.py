@@ -20,7 +20,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 # Ensure project root is importable
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def _ns(**kwargs):
@@ -1096,3 +1095,57 @@ class TestCmdIssueStatus:
         assert "PR created" in output
         assert "failed" in output
         assert "queued" in output
+
+
+# ---------------------------------------------------------------------------
+# Integration tests: real component interaction without deep mocking
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+class TestCLIApprovalIntegration:
+    """Integration tests for approval CLI with real components."""
+
+    def test_approval_repository_round_trip(self):
+        """Create, list, approve, and reject tickets using real repository."""
+        from control_plane.approval import ApprovalRepository
+        repo = ApprovalRepository()
+
+        ticket = repo.create_ticket(
+            job_id="job-int-1",
+            tool_name="bash",
+            args={"command": "rm -rf /test"},
+            risk_level="high",
+        )
+        assert ticket.id
+        assert ticket.status.value == "pending"
+
+        pending = repo.get_pending_for_job("job-int-1")
+        assert any(t.id == ticket.id for t in pending)
+
+        approved = repo.approve_ticket(ticket.id)
+        assert approved.status.value == "approved"
+
+        ticket2 = repo.create_ticket(
+            job_id="job-int-2",
+            tool_name="bash",
+            args={"command": "rm -rf /test2"},
+            risk_level="high",
+        )
+        rejected = repo.reject_ticket(ticket2.id)
+        assert rejected.status.value == "rejected"
+
+    def test_session_store_event_lifecycle(self, tmp_store):
+        """SessionStore emits and replays events correctly."""
+        sid = "integration-session"
+        tmp_store.create_session(sid, "integration_test")
+
+        tmp_store.emit_event(sid, "session.dag", {"nodes": []})
+        tmp_store.emit_event(sid, "workflow.stage_start", {"node_id": "n1"})
+        tmp_store.emit_event(sid, "workflow.stage_end", {"node_id": "n1"})
+        tmp_store.emit_event(sid, "session.status_end", {"summary": {"ok": True}})
+
+        events = tmp_store.get_events(sid)
+        assert len(events) >= 4
+        types = [e.type for e in events]
+        assert "session.dag" in types
+        assert "session.status_end" in types

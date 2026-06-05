@@ -22,7 +22,6 @@ from unittest.mock import MagicMock
 import pytest
 
 # Ensure project root is on sys.path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # ------------------------------------------------------------------------------
 # Mock heavy LLM dependencies before importing main
