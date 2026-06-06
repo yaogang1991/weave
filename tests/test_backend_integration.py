@@ -18,7 +18,6 @@ from unittest.mock import patch
 import pytest
 
 # Ensure project root is on sys.path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.local import LocalBackend  # noqa: E402
 from backend.worktree import WorktreeBackend  # noqa: E402

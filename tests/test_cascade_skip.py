@@ -11,7 +11,6 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.dag_engine import DAGExecutionEngine, DAGEngineConfig  # noqa: E402
 from core.models import (  # noqa: E402

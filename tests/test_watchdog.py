@@ -20,7 +20,6 @@ from pathlib import Path
 import pytest
 
 # Ensure project root is on sys.path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from core.models import (  # noqa: E402
     DAG,

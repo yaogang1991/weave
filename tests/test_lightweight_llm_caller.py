@@ -21,7 +21,6 @@ import pytest
 
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from agent.lightweight_llm_caller import LightweightLLMCaller
 from core.config import LLMConfig

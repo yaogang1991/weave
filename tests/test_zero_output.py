@@ -39,7 +39,7 @@ class TestZeroOutputFastFail:
 
         engine = DAGExecutionEngine(
             no_output_executor, _noop_failure_handler,
-            work_dir="/tmp/test_workdir"
+            work_dir="."
         )
         result = await engine.execute(dag)
         assert result.nodes["gen1"].status == NodeStatus.FAILED
@@ -64,7 +64,7 @@ class TestZeroOutputFastFail:
 
         engine = DAGExecutionEngine(
             no_output_executor, _noop_failure_handler, evaluator=mock_eval,
-            work_dir="/tmp/test_workdir",
+            work_dir=".",
         )
         result = await engine.execute(dag)
         assert result.nodes["gen1"].status == NodeStatus.FAILED
@@ -155,7 +155,7 @@ class TestZeroOutputFastFail:
 
         engine = DAGExecutionEngine(
             no_output_executor, _noop_failure_handler,
-            work_dir="/tmp/test_workdir"
+            work_dir="."
         )
         result = await engine.execute(dag)
         assert result.nodes["worker1"].status == NodeStatus.FAILED
@@ -180,7 +180,7 @@ class TestZeroOutputFastFail:
 
         engine = DAGExecutionEngine(
             no_output_executor, _noop_failure_handler,
-            work_dir="/tmp/test_workdir"
+            work_dir="."
         )
         engine.on_event(event_handler)
         await engine.execute(dag)

@@ -24,7 +24,6 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 # Ensure project root is on sys.path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from control_plane.models import Job, JobStatus, Run, RunStatus, RetryPolicy  # noqa: E402
 from control_plane.repository import JobRepository  # noqa: E402

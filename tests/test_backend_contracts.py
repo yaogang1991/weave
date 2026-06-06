@@ -15,7 +15,6 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from backend.base import WorkspaceIsolation  # noqa: E402
 from backend.local import LocalBackend  # noqa: E402

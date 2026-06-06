@@ -12,7 +12,6 @@ from unittest.mock import patch
 import pytest
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.subprocess_runner import SubprocessResult  # noqa: E402
 from evaluator.engine import EvaluatorEngine  # noqa: E402

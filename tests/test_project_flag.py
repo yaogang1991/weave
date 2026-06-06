@@ -11,7 +11,6 @@ import sys
 from pathlib import Path
 
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def _parse_args(argv):
