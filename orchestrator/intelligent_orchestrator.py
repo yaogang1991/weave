@@ -31,7 +31,6 @@ from orchestrator.llm_utils import (
     prune_messages_for_size,
     prune_messages_for_tokens,
     extract_json,
-    is_response_truncated,
     repair_truncated_json,
 )
 from orchestrator.plan_validator import PlanValidator
@@ -163,10 +162,6 @@ class IntelligentOrchestrator:
     @staticmethod
     def _count_features(task_description: str) -> int:
         return PlanValidator._estimate_feature_count(task_description)
-
-    @staticmethod
-    def _is_response_truncated(content: str) -> bool:
-        return is_response_truncated(content)
 
     def _plan_structured_output(self, messages: list[dict]) -> dict | None:
         return self._planner._plan_structured_output(messages)

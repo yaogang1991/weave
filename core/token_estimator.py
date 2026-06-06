@@ -17,7 +17,7 @@ import anthropic
 from pydantic import BaseModel, Field
 
 from core.config import TokenEstimationConfig
-from orchestrator.llm_utils import estimate_tokens as heuristic_estimate
+from core.token_utils import estimate_tokens as heuristic_estimate
 
 
 class _CountTokensUnavailable(Exception):

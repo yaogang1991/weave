@@ -16,7 +16,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
 from core.models import (
     DAG,
@@ -29,12 +29,14 @@ from core.models import (
 from core.config import NodeTimeoutConfig
 from core.exceptions import PendingApprovalError
 from core.exceptions import BudgetExhaustedError
-from backend.lifecycle import BackendManager
-from memory.manager import MemoryManager
-from evaluator.engine import EvaluatorEngine
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
+from core.protocols import (
+    BackendRegistryProto,
+    SessionStoreProto,
+    NodeGuardrailsProto,
+)
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor, NodeExecutorConfig
 from core.budget_manager import BudgetManager
@@ -44,6 +46,11 @@ from core.dag_checkpoint import CheckpointManager
 from monitoring.otel import (
     start_span, start_run_span, start_node_span,  # optional OTel (#509)
 )
+
+if TYPE_CHECKING:
+    from backend.lifecycle import BackendManager
+    from memory.manager import MemoryManager
+    from evaluator.engine import EvaluatorEngine
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
@@ -136,18 +143,18 @@ class DAGExecutionEngine:
         evaluator: EvaluatorEngine | None = None,
         memory_manager: MemoryManager | None = None,
         backend_manager: BackendManager | None = None,
-        backend_registry: Any | None = None,
+        backend_registry: BackendRegistryProto | None = None,
         budget_manager: BudgetManager | None = None,
         provider_health: ProviderHealthTracker | None = None,
-        llm_config: Any | None = None,
+        llm_config: Any | None = None,  # TODO (#1087): LLMConfig Protocol
         project_config: ProjectConfig | None = None,
         # Identifiers and workspace
         work_dir: str | None = None,
         session_id: str | None = None,
         job_id: str = "",
         run_id: str = "",
-        session_store: Any | None = None,
-        node_guardrails: Any | None = None,
+        session_store: SessionStoreProto | None = None,
+        node_guardrails: NodeGuardrailsProto | None = None,
     ):
         cfg = config or DAGEngineConfig()
         # Note: agent_executor is stored in NodeExecutor (created below).
@@ -1278,87 +1285,17 @@ class DAGExecutionEngine:
         return levels
 
     def get_execution_summary(self, dag: DAG) -> dict[str, Any]:
-        """Generate a summary of DAG execution results."""
-        total = len(dag.nodes)
-        success = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SUCCESS)
-        partial_pass = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.PARTIAL_PASS)
-        warned = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.WARNED)
-        failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
-        skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
-        # #676: Evaluator failures are non-critical (informational only).
-        # Exclude them from all_succeeded so implementation success
-        # is not masked by evaluation timeouts.
-        non_eval_failed = sum(
-            1 for n in dag.nodes.values()
-            if n.status == NodeStatus.FAILED and n.agent_type != "evaluator"
-        )
+        """Generate a summary of DAG execution results.
 
-        summary = {
-            "total_nodes": total,
-            "success": success,
-            "partial_pass": partial_pass,
-            "warned": warned,
-            "failed": failed,
-            "skipped": skipped,
-            "all_succeeded": (
-                non_eval_failed == 0
-                and skipped == 0
-                and partial_pass == 0
-            ),
-        }
+        Delegates to core.dag_summary.compute_dag_summary (#1084 #1089).
+        """
+        from core.dag_summary import compute_dag_summary
 
-        # #724: Break down success by agent role so the summary
-        # distinguishes planning (plan output) from implementation
-        # (file artifacts).  A planner with output_count=0 is fine,
-        # but a generator with output_count=0 should not inflate the
-        # success count.
-        impl_types = {"generator", "worker"}
-        summary["implementation_success"] = sum(
-            1 for n in dag.nodes.values()
-            if n.status == NodeStatus.SUCCESS
-            and n.agent_type in impl_types
-        )
-        summary["implementation_total"] = sum(
-            1 for n in dag.nodes.values()
-            if n.agent_type in impl_types
-        )
-
-        summary["node_details"] = {
-                nid: {
-                    "status": n.status.value,
-                    "agent": n.agent_type,
-                    "duration_ms": (
-                        (n.completed_at - n.started_at).total_seconds() * 1000
-                        if n.completed_at and n.started_at else None
-                    ),
-                    **(
-                        {"eval_feedback": n.eval_feedback}
-                        if n.eval_feedback else {}
-                    ),
-                }
-                for nid, n in dag.nodes.items()
-            }
-
-        # M4.2: Token usage aggregation
-        total_input = 0
-        total_output = 0
-        for n in dag.nodes.values():
-            tu = n.token_usage if hasattr(n, "token_usage") else {}
-            total_input += tu.get("input_tokens", 0)
-            total_output += tu.get("output_tokens", 0)
-        summary["token_usage"] = {
-            "total_input_tokens": total_input,
-            "total_output_tokens": total_output,
-            "total_tokens": total_input + total_output,
-        }
-        # M4.6: Aggregate actual_tokens
-        actual_total = sum(
-            n.actual_tokens for n in dag.nodes.values()
-            if hasattr(n, "actual_tokens")
-        )
-        if actual_total > 0:
-            summary["token_usage"]["actual_tokens_total"] = actual_total
+        budget_dict = None
         if self._budget_manager and not self._budget_manager.config.is_unlimited:
-            summary["budget"] = self._budget_manager.to_dict()
+            budget_dict = self._budget_manager.to_dict()
 
-        return summary
+        return compute_dag_summary(
+            dag,
+            budget_dict=budget_dict,
+        )
