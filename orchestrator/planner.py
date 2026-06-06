@@ -380,7 +380,7 @@ class Planner:
                 owned_files=node_def.get("owned_files", []),
                 backend=node_def.get("backend"),
             )
-            dag.add_node(node)
+            dag = dag.add_node(node)
 
         for edge_def in plan.edges:
             dep_type_str = edge_def.get("dependency_type", "hard")
@@ -388,7 +388,7 @@ class Planner:
                 DependencyType.SOFT if dep_type_str == "soft"
                 else DependencyType.HARD
             )
-            dag.add_edge(edge_def["from"], edge_def["to"], dependency_type=dep_type)
+            dag = dag.add_edge(edge_def["from"], edge_def["to"], dependency_type=dep_type)
 
         if not plan.edges:
             dag = _infer_fallback_edges(dag)
@@ -430,7 +430,7 @@ def _infer_fallback_edges(dag: DAG) -> DAG:
     for pid in planner_ids:
         for nid, node in dag.nodes.items():
             if nid != pid and node.agent_type != "planner" and (pid, nid) not in existing:
-                dag.add_edge(pid, nid)
+                dag = dag.add_edge(pid, nid)
                 existing.add((pid, nid))
 
     non_gen_non_plan = [nid for nid, n in dag.nodes.items()
@@ -438,13 +438,13 @@ def _infer_fallback_edges(dag: DAG) -> DAG:
     for gid in generator_ids:
         for tid in non_gen_non_plan:
             if (gid, tid) not in existing:
-                dag.add_edge(gid, tid)
+                dag = dag.add_edge(gid, tid)
                 existing.add((gid, tid))
 
     for gid in generator_ids:
         for eid in evaluator_ids:
             if (gid, eid) not in existing:
-                dag.add_edge(gid, eid)
+                dag = dag.add_edge(gid, eid)
                 existing.add((gid, eid))
 
     if existing:
@@ -457,8 +457,12 @@ def _infer_fallback_edges(dag: DAG) -> DAG:
 
 
 def _apply_rename_map(dag: DAG, rename_map: dict[str, str]) -> None:
-    """Update criterion paths and task descriptions on stdlib rename (#422)."""
-    for node in dag.nodes.values():
+    """Update criterion paths and task descriptions on stdlib rename (#422).
+
+    Uses dag.update_node() to preserve immutability — original DAGNode
+    instances are not modified.
+    """
+    for node_id, node in dag.nodes.items():
         updated: list[str | SuccessCriterion] = []
         for crit in node.success_criteria:
             if isinstance(crit, SuccessCriterion):
@@ -482,21 +486,22 @@ def _apply_rename_map(dag: DAG, rename_map: dict[str, str]) -> None:
                 updated.append(s)
             else:
                 updated.append(crit)
-        node.success_criteria = updated
 
+        new_desc = node.task_description
         for old, new in rename_map.items():
-            task = node.task_description
             result, i, target = [], 0, f"{old}.py"
-            while i < len(task):
-                pos = task.find(target, i)
+            while i < len(new_desc):
+                pos = new_desc.find(target, i)
                 if pos == -1:
-                    result.append(task[i:])
+                    result.append(new_desc[i:])
                     break
-                if pos == 0 or not (task[pos - 1].isalnum() or task[pos - 1] == '_'):
-                    result.append(task[i:pos])
+                if pos == 0 or not (new_desc[pos - 1].isalnum() or new_desc[pos - 1] == '_'):
+                    result.append(new_desc[i:pos])
                     result.append(f"{new}.py")
                     i = pos + len(target)
                 else:
-                    result.append(task[i:pos + len(target)])
+                    result.append(new_desc[i:pos + len(target)])
                     i = pos + len(target)
-            node.task_description = "".join(result)
+            new_desc = "".join(result)
+
+        dag.update_node(node_id, success_criteria=updated, task_description=new_desc)
