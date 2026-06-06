@@ -349,30 +349,6 @@ class TestIsWhitelisted:
         gr = PersonalGuardrails(policy, mock_tool_registry)
         # Falls back to prefix matching — command starting with "[invalid(regex"
         assert gr._is_whitelisted("[invalid(regex here") is True
-
-
-# ---------------------------------------------------------------------------
-# Inherited guarded_execute
-# ---------------------------------------------------------------------------
-
-
-class TestInheritedGuardedExecute:
-    """The inherited guarded_execute method should also work correctly."""
-
-    def test_low_risk_via_guarded_execute(self, guardrails, mock_tool_registry):
-        """LOW risk tools execute directly through guarded_execute."""
-        result = guardrails.guarded_execute("read", {"file_path": "/tmp/test.txt"})
-        assert isinstance(result, ToolResult)
-        assert result.success is True
-        mock_tool_registry.execute.assert_called_with("read", {"file_path": "/tmp/test.txt"})
-
-    def test_high_risk_denied_via_guarded_execute(self, guardrails, mock_tool_registry):
-        """HIGH risk tools are blocked by guarded_execute (no confirmation flow)."""
-        result = guardrails.guarded_execute("bash", {"command": "curl http://example.com"})
-        assert isinstance(result, ToolResult)
-        assert result.success is False
-        assert "Blocked by guardrails" in result.error
-        # Tool registry should NOT be called
         mock_tool_registry.execute.assert_not_called()
 
 

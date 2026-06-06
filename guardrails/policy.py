@@ -98,8 +98,7 @@ class Guardrails:
     Defense-in-depth guardrail system with a unified execution entry-point.
 
     All tool calls flow through :meth:`check_and_execute`, which returns a
-    tri-state :class:`GuardrailResult`.  Legacy ``guarded_execute`` is kept
-    as a thin backward-compatibility wrapper.
+    tri-state :class:`GuardrailResult`.
 
     Tiers:
     - Tier 1: Safe, non-state-modifying (Read, Grep, Glob)  → LOW
@@ -413,53 +412,6 @@ class Guardrails:
 
         return result
 
-    # -- legacy backward-compatibility wrappers -----------------------
-
-    def guarded_execute(
-        self,
-        tool_name: str,
-        arguments: dict,
-        *,
-        job_id: str = "",
-        run_id: str | None = None,
-        approval_repo: ApprovalRepository | None = None,
-    ) -> ToolResult:
-        """DEPRECATED — Use :meth:`check_and_execute` instead.
-
-        Kept for backward compatibility.  Wraps ``check_and_execute`` and
-        coerces a :class:`GuardrailResult` back into an error
-        :class:`ToolResult`.
-        """
-        warnings.warn(
-            "guarded_execute() is deprecated; use check_and_execute() instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = self.check_and_execute(
-            tool_name,
-            arguments,
-            job_id=job_id,
-            run_id=run_id,
-            approval_repo=approval_repo,
-        )
-        if isinstance(result, GuardrailResult):
-            if result.decision == "pending_approval":
-                ticket = f" (ticket: {result.ticket_id})" if result.ticket_id else ""
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    error=(
-                        f"Blocked by guardrails: Pending approval required: "
-                        f"{result.reason}{ticket}"
-                    ),
-                )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                error=f"Blocked by guardrails: {result.reason}",
-            )
-        return result
-
     # -- session limits -----------------------------------------------
 
     def check_session_limits(self, iteration: int, errors: list) -> tuple[bool, str]:
@@ -636,42 +588,3 @@ class PersonalGuardrails(Guardrails):
 
         print(f"\nTimeout ({timeout}s). Action denied.")
         return False
-
-    # -- legacy backward-compatibility wrapper ------------------------
-
-    def guarded_execute_with_confirmation(
-        self, tool_name: str, arguments: dict
-    ) -> ToolResult:
-        """DEPRECATED — Use :meth:`check_and_execute` instead.
-
-        Kept for backward compatibility.  Translates the tri-state result
-        back into a :class:`ToolResult`, optionally falling back to the
-        interactive confirmation flow when the unified evaluator returns
-        ``pending_approval``.
-        """
-        warnings.warn(
-            "guarded_execute_with_confirmation() is deprecated; "
-            "use check_and_execute() instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        result = self.check_and_execute(tool_name, arguments)
-
-        if isinstance(result, ToolResult):
-            return result
-
-        if result.decision == "pending_approval":
-            # Legacy: fall back to interactive confirmation
-            if self.request_confirmation(tool_name, arguments):
-                return self.tool_registry.execute(tool_name, arguments)
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                error=f"Guardrails: Action '{tool_name}' denied by user. Reason: {result.reason}",
-            )
-
-        return ToolResult(
-            tool_call_id="",
-            success=False,
-            error=f"Guardrails: {result.reason}",
-        )
