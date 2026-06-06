@@ -16,7 +16,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
 from core.models import (
     DAG,
@@ -29,9 +29,6 @@ from core.models import (
 from core.config import NodeTimeoutConfig
 from core.exceptions import PendingApprovalError
 from core.exceptions import BudgetExhaustedError
-from backend.lifecycle import BackendManager
-from memory.manager import MemoryManager
-from evaluator.engine import EvaluatorEngine
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
@@ -49,6 +46,11 @@ from core.dag_checkpoint import CheckpointManager
 from monitoring.otel import (
     start_span, start_run_span, start_node_span,  # optional OTel (#509)
 )
+
+if TYPE_CHECKING:
+    from backend.lifecycle import BackendManager
+    from memory.manager import MemoryManager
+    from evaluator.engine import EvaluatorEngine
 
 
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
