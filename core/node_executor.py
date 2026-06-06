@@ -668,7 +668,8 @@ class NodeExecutor:
                 # timeout from firing on non-meaningful stream events.
                 tracker.report("heartbeat")
             except RuntimeError:
-                pass
+                # tracker.report() raises if event loop is closing — benign
+                logger.debug("Heartbeat report skipped (event loop closing)")
 
         if self._backend_registry is not None:
             # Resolve backend name first to avoid double injection.

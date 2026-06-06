@@ -173,8 +173,8 @@ class RetryPolicyEngine:
                 if os.path.isfile(path):
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         snapshot[art] = f.read()
-            except OSError:
-                pass
+            except OSError as _exc:
+                logger.debug("Failed to read artifact %s for snapshot: %s", path, _exc)
         return snapshot
 
     @staticmethod
