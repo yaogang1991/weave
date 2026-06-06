@@ -35,6 +35,11 @@ from evaluator.engine import EvaluatorEngine
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
 from core.retry_policy import RetryPolicyEngine
+from core.protocols import (
+    BackendRegistryProto,
+    SessionStoreProto,
+    NodeGuardrailsProto,
+)
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor, NodeExecutorConfig
 from core.budget_manager import BudgetManager
@@ -136,18 +141,18 @@ class DAGExecutionEngine:
         evaluator: EvaluatorEngine | None = None,
         memory_manager: MemoryManager | None = None,
         backend_manager: BackendManager | None = None,
-        backend_registry: Any | None = None,
+        backend_registry: BackendRegistryProto | None = None,
         budget_manager: BudgetManager | None = None,
         provider_health: ProviderHealthTracker | None = None,
-        llm_config: Any | None = None,
+        llm_config: Any | None = None,  # TODO (#1087): LLMConfig Protocol
         project_config: ProjectConfig | None = None,
         # Identifiers and workspace
         work_dir: str | None = None,
         session_id: str | None = None,
         job_id: str = "",
         run_id: str = "",
-        session_store: Any | None = None,
-        node_guardrails: Any | None = None,
+        session_store: SessionStoreProto | None = None,
+        node_guardrails: NodeGuardrailsProto | None = None,
     ):
         cfg = config or DAGEngineConfig()
         # Note: agent_executor is stored in NodeExecutor (created below).
