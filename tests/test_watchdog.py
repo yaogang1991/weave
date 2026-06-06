@@ -76,7 +76,7 @@ class TestNodeHealth:
         node.started_at = datetime.now(timezone.utc)
         node.status = NodeStatus.RUNNING
 
-        node.record_heartbeat()
+        node = node.record_heartbeat()
         assert node.last_heartbeat_at is not None
         assert node.heartbeat_count == 1
 
@@ -85,7 +85,7 @@ class TestNodeHealth:
         node.missed_heartbeats = 3
         node.health_status = NodeHealth.MISSED
 
-        node.record_heartbeat()
+        node = node.record_heartbeat()
         assert node.missed_heartbeats == 0
         assert node.health_status == NodeHealth.HEALTHY
 
@@ -96,7 +96,7 @@ class TestNodeHealth:
         node.status = NodeStatus.RUNNING
         # No heartbeat sent
 
-        health = node.check_health(heartbeat_interval_sec=0.1, miss_threshold=3)
+        health, _updated = node.check_health(heartbeat_interval_sec=0.1, miss_threshold=3)
         # Should be MISSED or UNHEALTHY depending on timing
         assert health in (NodeHealth.MISSED, NodeHealth.UNHEALTHY)
 
@@ -106,7 +106,7 @@ class TestNodeHealth:
         node.started_at = datetime(2024, 1, 1, tzinfo=timezone.utc)  # Old start
         node.status = NodeStatus.RUNNING
 
-        health = node.check_health(heartbeat_interval_sec=1.0, miss_threshold=3)
+        health, _updated = node.check_health(heartbeat_interval_sec=1.0, miss_threshold=3)
         assert health == NodeHealth.UNHEALTHY
 
     def test_health_recovery(self):
@@ -115,7 +115,7 @@ class TestNodeHealth:
         node.health_status = NodeHealth.MISSED
         node.missed_heartbeats = 2
 
-        node.record_heartbeat()
+        node = node.record_heartbeat()
         assert node.health_status == NodeHealth.HEALTHY
         assert node.missed_heartbeats == 0
 
@@ -125,7 +125,7 @@ class TestNodeHealth:
         node.status = NodeStatus.PENDING
         node.health_status = NodeHealth.HEALTHY
 
-        health = node.check_health(heartbeat_interval_sec=1.0, miss_threshold=3)
+        health, _updated = node.check_health(heartbeat_interval_sec=1.0, miss_threshold=3)
         assert health == NodeHealth.HEALTHY
 
     def test_health_enum_values(self):
@@ -188,7 +188,7 @@ class TestWatchdog:
         async def healthy_executor(node, artifacts, **kwargs):
             # Send heartbeats during execution
             for _ in range(5):
-                node.record_heartbeat()
+                node = node.record_heartbeat()
                 await asyncio.sleep(0.05)
             return {"summary": "ok"}
 
@@ -368,7 +368,7 @@ class TestHeartbeatRecord:
         node.status = NodeStatus.RUNNING
 
         for i in range(1, 6):
-            node.record_heartbeat()
+            node = node.record_heartbeat()
             assert node.heartbeat_count == i
 
     def test_missed_heartbeats_tracking(self):
@@ -378,9 +378,9 @@ class TestHeartbeatRecord:
 
         # With 1-second interval and threshold of 3, starting from Jan 2024
         # should produce many missed beats
-        node.check_health(heartbeat_interval_sec=1.0, miss_threshold=3)
-        assert node.missed_heartbeats >= 3
-        assert node.health_status == NodeHealth.UNHEALTHY
+        health, updated = node.check_health(heartbeat_interval_sec=1.0, miss_threshold=3)
+        assert updated.missed_heartbeats >= 3
+        assert updated.health_status == NodeHealth.UNHEALTHY
 
     def test_dead_state_is_final(self):
         """DEAD 状态不应被覆盖"""
@@ -389,7 +389,7 @@ class TestHeartbeatRecord:
 
         # Even recording a heartbeat should not change DEAD state
         # (DEAD is terminal, recovery should not happen)
-        node.record_heartbeat()
+        node = node.record_heartbeat()
         # Note: record_heartbeat will change it to HEALTHY - this is a design
         # choice. In practice DEAD nodes are not re-checked.
 
@@ -398,7 +398,7 @@ class TestHeartbeatRecord:
         node.started_at = datetime.now(timezone.utc)
         node.status = NodeStatus.RUNNING
 
-        node.record_heartbeat()
+        node = node.record_heartbeat()
         assert node.last_heartbeat_at is not None
         assert node.last_heartbeat_at.tzinfo is not None
 

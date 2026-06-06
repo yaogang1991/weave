@@ -187,6 +187,8 @@ class NodeExecutor:
                         dag.nodes[node_id],
                         prep.input_artifacts,
                         workspace_path=prep.workspace_path,
+                        dag=dag,
+                        node_id=node_id,
                     )
                     # M6.2: Post-check guardrail for external backends
                     if (
@@ -452,14 +454,16 @@ class NodeExecutor:
             started_at=datetime.now(timezone.utc),
             health_status=NodeHealth.HEALTHY,
         )
-        node.record_heartbeat()
+        new_node = node.record_heartbeat()
+        dag.nodes[node_id] = new_node
+        node = new_node
 
         logger.info(
             "Node %s (%s) starting — attempt %d/%d",
             node_id, node.agent_type, node.retry_count + 1, node.max_retries,
         )
 
-        self._watchdog.register(node_id, node)
+        self._watchdog.register(node_id, node, dag=dag)
         current_task = asyncio.current_task()
         if current_task:
             self._running_tasks[node_id] = current_task
@@ -637,6 +641,9 @@ class NodeExecutor:
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
         workspace_path: str | None = None,
+        *,
+        dag: DAG | None = None,
+        node_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a node with progress-driven timeout (M4.5).
 
@@ -661,7 +668,18 @@ class NodeExecutor:
 
         def _on_progress() -> None:
             try:
-                loop.call_soon_threadsafe(node.record_heartbeat)
+                if dag is not None and node_id is not None:
+                    def _hb():
+                        nonlocal node
+                        node = node.record_heartbeat()
+                        dag.nodes[node_id] = node
+                    loop.call_soon_threadsafe(_hb)
+                else:
+                    # Fallback: just update local variable (no DAG write-back)
+                    def _hb():
+                        nonlocal node
+                        node = node.record_heartbeat()
+                    loop.call_soon_threadsafe(_hb)
                 # activity_detector is NOT reset here — meaningful event
                 # filtering is handled inside _stream_cli_output (#1079).
                 # Blindly resetting on every message prevented semantic
@@ -800,7 +818,11 @@ class NodeExecutor:
                         timeout=_wall_max,
                     )
 
-                # Check if watchdog flagged this node (UNHEALTHY or DEAD)
+                # Check if watchdog flagged this node (UNHEALTHY or DEAD).
+                # Re-read from DAG to pick up watchdog's health assessment,
+                # since watchdog updates _running_nodes independently (#1093).
+                if dag is not None and node_id is not None:
+                    node = dag.nodes.get(node_id, node)
                 if node.health_status in (NodeHealth.UNHEALTHY, NodeHealth.DEAD):
                     cancel_event.set()
                     if not task.done():
@@ -856,7 +878,9 @@ class NodeExecutor:
                         timeout=int(activity_detector.timeout_seconds),
                     )
                 if tracker.has_recent_progress():
-                    node.record_heartbeat()
+                    node = node.record_heartbeat()
+                    if dag is not None and node_id is not None:
+                        dag.nodes[node_id] = node
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(task), timeout=5.0,
