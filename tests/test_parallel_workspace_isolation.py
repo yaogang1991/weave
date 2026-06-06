@@ -51,7 +51,7 @@ class TestAutoSerialization:
 
         # Call auto-serialize
         levels = dag.topological_levels()
-        result_levels = engine._auto_serialize_parallel_generators(dag, levels)
+        _, result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
         # Should still have parallel generators (same level)
         assert len(result_levels[0]) == 2  # g1 and g2 at same level
@@ -74,7 +74,7 @@ class TestAutoSerialization:
         )
 
         levels = dag.topological_levels()
-        result_levels = engine._auto_serialize_parallel_generators(dag, levels)
+        _, result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
         # Should be serialized (different levels)
         assert len(result_levels) == 2  # Two separate levels
@@ -98,7 +98,7 @@ class TestAutoSerialization:
         )
 
         levels = dag.topological_levels()
-        result_levels = engine._auto_serialize_parallel_generators(dag, levels)
+        _, result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
         # Should be fully serialized (3 separate levels, one node each)
         assert len(result_levels) == 3
@@ -122,7 +122,7 @@ class TestAutoSerialization:
         )
 
         levels = dag.topological_levels()
-        result_levels = engine._auto_serialize_parallel_generators(dag, levels)
+        _, result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
         # g1 has contract → stays parallel
         # g2 and g3 are standalone without contracts → serialized
@@ -154,7 +154,7 @@ class TestAutoSerialization:
         )
 
         levels = dag.topological_levels()
-        result_levels = engine._auto_serialize_parallel_generators(dag, levels)
+        _, result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
         # No change needed
         assert len(result_levels) == 2  # g1 and e1 at separate levels
@@ -176,7 +176,7 @@ class TestAutoSerialization:
         )
 
         levels = dag.topological_levels()
-        result_levels = engine._auto_serialize_parallel_generators(dag, levels)
+        _, result_levels = engine._auto_serialize_parallel_generators(dag, levels)
 
         # Already sequential
         assert len(result_levels) == 2

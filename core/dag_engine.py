@@ -68,6 +68,11 @@ ReplanHandler = Callable[[DAG, str], Awaitable[DAG]]
 logger = logging.getLogger(__name__)
 
 
+# Backward-compat re-export
+_classify_failure = classify_failure
+
+
+
 
 
 class DAGEngineConfig:

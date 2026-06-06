@@ -267,6 +267,7 @@ class TestCriticalAlwaysRequiresConfirmation:
         assert "CRITICAL" in reason
 
 
+
 # ---------------------------------------------------------------------------
 # _is_whitelisted helper
 # ---------------------------------------------------------------------------
