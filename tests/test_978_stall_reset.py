@@ -51,7 +51,7 @@ class TestOnProgressIntegration:
 
         def _on_progress():
             try:
-                loop.call_soon_threadsafe(mock_node.record_heartbeat)
+                loop.call_soon_threadsafe(lambda: mock_node.record_heartbeat())
                 mock_activity.record_activity()
                 tracker.report("heartbeat")
             except RuntimeError:

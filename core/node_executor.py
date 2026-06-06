@@ -452,7 +452,9 @@ class NodeExecutor:
             started_at=datetime.now(timezone.utc),
             health_status=NodeHealth.HEALTHY,
         )
-        node.record_heartbeat()
+        new_node = node.record_heartbeat()
+        dag.nodes[node_id] = new_node
+        node = new_node
 
         logger.info(
             "Node %s (%s) starting — attempt %d/%d",
@@ -661,7 +663,10 @@ class NodeExecutor:
 
         def _on_progress() -> None:
             try:
-                loop.call_soon_threadsafe(node.record_heartbeat)
+                def _hb():
+                    new = node.record_heartbeat()
+                    dag.nodes[node_id] = new
+                loop.call_soon_threadsafe(_hb)
                 # activity_detector is NOT reset here — meaningful event
                 # filtering is handled inside _stream_cli_output (#1079).
                 # Blindly resetting on every message prevented semantic
@@ -856,7 +861,7 @@ class NodeExecutor:
                         timeout=int(activity_detector.timeout_seconds),
                     )
                 if tracker.has_recent_progress():
-                    node.record_heartbeat()
+                    node = node.record_heartbeat()
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(task), timeout=5.0,

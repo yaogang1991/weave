@@ -212,47 +212,57 @@ class DAGNode(BaseModel):
     heartbeat_count: int = 0                         # Total heartbeats received
     missed_heartbeats: int = 0                       # Consecutive missed beats
 
-    def record_heartbeat(self) -> None:
-        """Record a heartbeat from the executing agent."""
-        self.last_heartbeat_at = datetime.now(timezone.utc)
-        self.heartbeat_count += 1
+    def record_heartbeat(self) -> DAGNode:
+        """Record a heartbeat from the executing agent.
+
+        Returns a new DAGNode instance with updated heartbeat fields.
+        The original instance is not modified (immutability convention).
+        """
+        updates: dict[str, Any] = {
+            "last_heartbeat_at": datetime.now(timezone.utc),
+            "heartbeat_count": self.heartbeat_count + 1,
+        }
         if self.missed_heartbeats > 0:
-            self.missed_heartbeats = 0  # Reset on successful heartbeat
+            updates["missed_heartbeats"] = 0
         if self.health_status in (NodeHealth.MISSED, NodeHealth.UNHEALTHY):
-            self.health_status = NodeHealth.HEALTHY  # Recovery
+            updates["health_status"] = NodeHealth.HEALTHY
+        return self.model_copy(update=updates)
 
     def check_health(self, heartbeat_interval_sec: float = 5.0,
-                     miss_threshold: int = 3) -> NodeHealth:
+                     miss_threshold: int = 3) -> tuple[NodeHealth, DAGNode]:
         """
         Check current health based on last heartbeat.
 
         Returns:
-            HEALTHY: Last heartbeat within interval
-            MISSED: 1+ missed beats but below threshold
-            UNHEALTHY: miss_threshold exceeded -> should be killed
+            (health_status, new_node) tuple. The new_node has updated
+            health fields. The original instance is not modified.
         """
         if self.status != NodeStatus.RUNNING:
-            return self.health_status  # Only check running nodes
+            return self.health_status, self  # Only check running nodes
 
         if self.last_heartbeat_at is None:
             # Never sent heartbeat since starting
             if self.started_at is None:
-                return self.health_status
+                return self.health_status, self
             elapsed = (datetime.now(timezone.utc) - self.started_at).total_seconds()
         else:
             elapsed = (datetime.now(timezone.utc) - self.last_heartbeat_at).total_seconds()
 
         missed = int(elapsed / heartbeat_interval_sec)
-        self.missed_heartbeats = max(self.missed_heartbeats, missed)
+        new_missed = max(self.missed_heartbeats, missed)
 
         if missed >= miss_threshold:
-            self.health_status = NodeHealth.UNHEALTHY
+            new_health = NodeHealth.UNHEALTHY
         elif missed >= 1:
-            self.health_status = NodeHealth.MISSED
+            new_health = NodeHealth.MISSED
         else:
-            self.health_status = NodeHealth.HEALTHY
+            new_health = NodeHealth.HEALTHY
 
-        return self.health_status
+        updated = self.model_copy(update={
+            "missed_heartbeats": new_missed,
+            "health_status": new_health,
+        })
+        return new_health, updated
 
     def model_post_init(self, __context: Any) -> None:
         if not self.id:

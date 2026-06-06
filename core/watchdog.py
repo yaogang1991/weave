@@ -126,7 +126,9 @@ class WatchdogService:
                 interval, threshold = self.get_heartbeat_settings(
                     node.agent_type,
                 )
-                health = node.check_health(interval, threshold)
+                health, updated_node = node.check_health(interval, threshold)
+                # Update stored node reference with new health state
+                self._running_nodes[node_id] = updated_node
                 alert_min = self.get_alert_threshold(node.agent_type)
 
                 if health == NodeHealth.MISSED:
