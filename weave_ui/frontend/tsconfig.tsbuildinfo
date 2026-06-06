@@ -1,0 +1,1 @@
+{"root":["./src/env.d.ts","./src/main.ts","./src/composables/usewebsocket.ts","./src/router/index.ts","./src/app.vue","./src/layouts/mainlayout.vue","./src/views/dashboardview.vue","./src/views/historyview.vue","./src/views/settingsview.vue","./src/views/tasksview.vue"],"version":"5.7.3"}

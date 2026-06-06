@@ -169,7 +169,7 @@ async def cmd_recover(args):
 
 async def cmd_console(args):
     """Launch the Web Console (FastAPI server)."""
-    from visualizer.server import run_server
+    from weave_ui.server import run_server
     print(f"Weave Console: http://{args.host}:{args.port}/console")
     print(f"Visualizer: http://{args.host}:{args.port}/")
     await run_server(host=args.host, port=args.port)
