@@ -371,8 +371,11 @@ class EvaluationPipeline:
                         "(auto-corrected known pattern) (#767)",
                         rel_path,
                     )
-                except OSError:
-                    pass
+                except OSError as _exc:
+                    logger.debug(
+                        "Failed to write fixed pyproject.toml %s: %s",
+                        rel_path, _exc,
+                    )
 
     @classmethod
     def _rewrite_build_backend(cls, content: str) -> str | None:

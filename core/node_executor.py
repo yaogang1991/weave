@@ -686,7 +686,8 @@ class NodeExecutor:
                 # timeout from firing on non-meaningful stream events.
                 tracker.report("heartbeat")
             except RuntimeError:
-                pass
+                # loop.call_soon_threadsafe() raises if event loop is closing
+                logger.debug("Heartbeat call_soon_threadsafe failed (event loop closing)")
 
         if self._backend_registry is not None:
             # Resolve backend name first to avoid double injection.
