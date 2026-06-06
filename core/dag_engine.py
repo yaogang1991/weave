@@ -40,6 +40,9 @@ from core.dag_replan import (
     check_planner_circuit_break,
     auto_serialize_parallel_generators,
 )
+
+# Backward-compat re-export for tests that import _classify_failure
+_classify_failure = classify_failure
 from core.retry_policy import RetryPolicyEngine
 from core.protocols import (
     BackendManagerProto,

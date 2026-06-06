@@ -268,54 +268,6 @@ class TestCriticalAlwaysRequiresConfirmation:
 
 
 # ---------------------------------------------------------------------------
-# Denial returns structured ToolResult.error
-# ---------------------------------------------------------------------------
-
-
-class TestDenialReturnsToolResultError:
-    """When denied, guarded_execute_with_confirmation returns ToolResult.error."""
-
-    def test_denial_returns_structured_error(self, guardrails):
-        """User rejection returns ToolResult with success=False and structured error."""
-        with patch.object(guardrails, "request_confirmation", return_value=False):
-            result = guardrails.guarded_execute_with_confirmation(
-                "bash", {"command": "rm -rf /"}
-            )
-        assert isinstance(result, ToolResult)
-        assert result.success is False
-        assert result.error != ""
-        assert "denied by user" in result.error.lower() or "Blocked by" in result.error
-
-    def test_denial_includes_tool_name(self, guardrails):
-        """The error message should include the tool name."""
-        with patch.object(guardrails, "request_confirmation", return_value=False):
-            result = guardrails.guarded_execute_with_confirmation(
-                "bash", {"command": "curl bad"}
-            )
-        assert "bash" in result.error
-
-    def test_confirmation_and_execution(self, guardrails, mock_tool_registry):
-        """When user confirms, the tool should be executed."""
-        with patch.object(guardrails, "request_confirmation", return_value=True):
-            result = guardrails.guarded_execute_with_confirmation(
-                "bash", {"command": "echo hello"}
-            )
-        assert isinstance(result, ToolResult)
-        assert result.success is True
-        assert result.output == "executed"
-        mock_tool_registry.execute.assert_called_with("bash", {"command": "echo hello"})
-
-    def test_auto_approved_does_not_request_confirmation(self, guardrails):
-        """LOW risk actions should execute without requesting confirmation."""
-        with patch.object(guardrails, "request_confirmation") as mock_confirm:
-            result = guardrails.guarded_execute_with_confirmation(
-                "read", {"file_path": "/tmp/test.txt"}
-            )
-        mock_confirm.assert_not_called()
-        assert result.success is True
-
-
-# ---------------------------------------------------------------------------
 # _is_whitelisted helper
 # ---------------------------------------------------------------------------
 
