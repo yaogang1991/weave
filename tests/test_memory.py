@@ -57,15 +57,15 @@ def sample_entry():
 def simple_dag():
     """Create a simple 2-node DAG with edge."""
     dag = DAG(reasoning="Test DAG")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="node_a", agent_type="planner",
         task_description="Plan the API structure for user management",
     ))
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="node_b", agent_type="generator",
         task_description="Implement user API endpoints and routes",
     ))
-    dag.add_edge("node_a", "node_b")
+    dag = dag.add_edge("node_a", "node_b")
     return dag
 
 

@@ -29,7 +29,7 @@ def _make_pipeline(work_dir=None):
 def _make_dag_with_generator(artifacts):
     """Create a DAG with a generator node having given output artifacts."""
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="impl_1",
         agent_type="generator",
         task_description="Create project",
@@ -124,7 +124,7 @@ def test_non_generator_node_skipped():
         pipeline = _make_pipeline(work_dir=tmpdir)
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1",
             agent_type="evaluator",
             task_description="Evaluate",

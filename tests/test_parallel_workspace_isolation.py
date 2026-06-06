@@ -25,9 +25,9 @@ def _make_dag(nodes, edges=None):
             task_description=task,
             owned_files=owned,
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
     for from_id, to_id, dep_type in (edges or []):
-        dag.add_edge(from_id, to_id, dependency_type=dep_type)
+        dag = dag.add_edge(from_id, to_id, dependency_type=dep_type)
     return dag
 
 

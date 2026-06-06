@@ -67,8 +67,8 @@ def _make_dag_with_artifacts():
     node_failed.status = NodeStatus.FAILED
     node_failed.error = "zero output artifacts"
 
-    dag.add_node(node_success)
-    dag.add_node(node_failed)
+    dag = dag.add_node(node_success)
+    dag = dag.add_node(node_failed)
     return dag
 
 
@@ -133,8 +133,8 @@ async def test_replan_works_without_artifacts():
     node_failed.status = NodeStatus.FAILED
     node_failed.error = "timeout"
 
-    dag.add_node(node_success)
-    dag.add_node(node_failed)
+    dag = dag.add_node(node_success)
+    dag = dag.add_node(node_failed)
 
     replan_response = {
         "reasoning": "Retry",

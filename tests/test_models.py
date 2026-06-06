@@ -36,11 +36,11 @@ class TestDAGNode:
 class TestDAG:
     def _make_linear_dag(self):
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-        dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
-        dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
-        dag.add_edge("a", "b")
-        dag.add_edge("b", "c")
+        dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
+        dag = dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("b", "c")
         return dag
 
     def test_topological_levels(self):
@@ -50,14 +50,14 @@ class TestDAG:
 
     def test_topological_levels_parallel(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-        dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl1"))
-        dag.add_node(DAGNode(id="c", agent_type="generator", task_description="impl2"))
-        dag.add_node(DAGNode(id="d", agent_type="evaluator", task_description="eval"))
-        dag.add_edge("a", "b")
-        dag.add_edge("a", "c")
-        dag.add_edge("b", "d")
-        dag.add_edge("c", "d")
+        dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl1"))
+        dag = dag.add_node(DAGNode(id="c", agent_type="generator", task_description="impl2"))
+        dag = dag.add_node(DAGNode(id="d", agent_type="evaluator", task_description="eval"))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("a", "c")
+        dag = dag.add_edge("b", "d")
+        dag = dag.add_edge("c", "d")
         levels = dag.topological_levels()
         assert levels[0] == ["a"]
         assert set(levels[1]) == {"b", "c"}
@@ -65,10 +65,10 @@ class TestDAG:
 
     def test_cycle_detection(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="generator", task_description="a"))
-        dag.add_node(DAGNode(id="b", agent_type="generator", task_description="b"))
-        dag.add_edge("a", "b")
-        dag.add_edge("b", "a")
+        dag = dag.add_node(DAGNode(id="a", agent_type="generator", task_description="a"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="generator", task_description="b"))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("b", "a")
         with pytest.raises(ValueError, match="Cycle"):
             dag.topological_levels()
 
@@ -165,7 +165,7 @@ class TestDAGNodeTokenBudget:
     def test_model_copy_updates(self):
         dag = DAG()
         node = DAGNode(id="test", agent_type="generator", task_description="t")
-        dag.add_node(node)
+        dag = dag.add_node(node)
         updated = dag.update_node(
             "test", estimated_tokens=3500, actual_tokens=4200,
         )
@@ -196,16 +196,16 @@ class TestDAGTokenBudget:
 
     def test_total_token_budget_default(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="gen", task_description="t"))
-        dag.add_node(DAGNode(id="b", agent_type="gen", task_description="t"))
+        dag = dag.add_node(DAGNode(id="a", agent_type="gen", task_description="t"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="gen", task_description="t"))
         assert dag.total_token_budget == 16384
 
     def test_total_token_budget_mixed(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="a", agent_type="gen", task_description="t", token_budget=4096,
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="b", agent_type="gen", task_description="t", token_budget=8192,
         ))
         assert dag.total_token_budget == 12288

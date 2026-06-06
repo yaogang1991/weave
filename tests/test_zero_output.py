@@ -28,7 +28,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_generator_zero_output_fails_without_evaluator(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1", agent_type="generator",
             task_description="implement parser.py",
             success_criteria=["tests pass"],
@@ -48,7 +48,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_generator_zero_output_fails_with_evaluator(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1", agent_type="generator",
             task_description="implement parser.py",
             success_criteria=["tests pass"],
@@ -74,7 +74,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_generator_with_artifacts_succeeds(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1", agent_type="generator",
             task_description="implement parser.py",
             success_criteria=["tests pass"],
@@ -90,7 +90,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_planner_zero_output_still_succeeds(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan1", agent_type="planner",
             task_description="plan the architecture",
             success_criteria=["tests pass"],
@@ -106,7 +106,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_evaluator_zero_output_still_succeeds(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval1", agent_type="evaluator",
             task_description="evaluate results",
             success_criteria=["tests pass"],
@@ -122,7 +122,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_generator_no_criteria_zero_output_succeeds(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1", agent_type="generator",
             task_description="analyze codebase",
             success_criteria=[],
@@ -138,7 +138,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_file_exists_criteria_zero_output_fails(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="worker1", agent_type="worker",
             task_description="create config file",
             success_criteria=[
@@ -164,7 +164,7 @@ class TestZeroOutputFastFail:
     @pytest.mark.asyncio
     async def test_zero_output_emits_failed_event(self):
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1", agent_type="generator",
             task_description="implement feature",
             success_criteria=["tests pass"],

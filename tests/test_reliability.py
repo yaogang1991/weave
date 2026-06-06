@@ -84,7 +84,7 @@ def _prepare_job_for_run(repo: JobRepository, job_id: str) -> None:
 
 def _make_linear_dag(criteria=None):
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="a", agent_type="generator", task_description="impl",
         success_criteria=criteria or [],
     ))
@@ -93,11 +93,11 @@ def _make_linear_dag(criteria=None):
 
 def _make_three_node_dag():
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-    dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
-    dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
-    dag.add_edge("a", "b")
-    dag.add_edge("b", "c")
+    dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+    dag = dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
+    dag = dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
+    dag = dag.add_edge("a", "b")
+    dag = dag.add_edge("b", "c")
     return dag
 
 
@@ -346,11 +346,11 @@ class TestReplanClosedLoop:
         # New DAG: a (fresh) -> b2 (new impl) -> c2 (new eval)
         # Note: node "a" exists in both - should be preserved from old
         new_dag = DAG(reasoning="replan")
-        new_dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-        new_dag.add_node(DAGNode(id="b2", agent_type="generator", task_description="impl v2"))
-        new_dag.add_node(DAGNode(id="c2", agent_type="evaluator", task_description="eval v2"))
-        new_dag.add_edge("a", "b2")
-        new_dag.add_edge("b2", "c2")
+        new_dag = new_dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+        new_dag = new_dag.add_node(DAGNode(id="b2", agent_type="generator", task_description="impl v2"))
+        new_dag = new_dag.add_node(DAGNode(id="c2", agent_type="evaluator", task_description="eval v2"))
+        new_dag = new_dag.add_edge("a", "b2")
+        new_dag = new_dag.add_edge("b2", "c2")
 
         engine = DAGExecutionEngine(_noop_executor, _noop_failure_handler)
         merged = engine._merge_dag_results(old_dag, new_dag)

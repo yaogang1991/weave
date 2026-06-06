@@ -29,13 +29,13 @@ def _make_engine(replan_handler):
 
 def _make_dag(reasoning="test reasoning"):
     dag = DAG(reasoning=reasoning)
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="plan", agent_type="planner", task_description="plan",
     ))
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1", agent_type="generator", task_description="impl",
     ))
-    dag.add_edge("plan", "gen_1")
+    dag = dag.add_edge("plan", "gen_1")
     return dag
 
 
