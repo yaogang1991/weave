@@ -55,6 +55,7 @@ class WatchdogService:
         self._emit_func = emit_func
         self._task: asyncio.Task | None = None
         self._running_nodes: dict[str, DAGNode] = {}
+        self._dag_refs: dict[str, DAG] = {}  # node_id → DAG for write-back
 
     def get_heartbeat_settings(self, agent_type: str) -> tuple[float, int]:
         """Return (interval_sec, miss_threshold) for the given agent type."""
@@ -68,17 +69,26 @@ class WatchdogService:
             return self._alert_thresholds[agent_type]
         return 2
 
-    def register(self, node_id: str, node: DAGNode) -> None:
-        """Register a running node for heartbeat monitoring."""
+    def register(self, node_id: str, node: DAGNode,
+                 dag: DAG | None = None) -> None:
+        """Register a running node for heartbeat monitoring.
+
+        If dag is provided, health check updates are written back to
+        dag.nodes[node_id] so the executor's poll loop can see them (#1093).
+        """
         self._running_nodes[node_id] = node
+        if dag is not None:
+            self._dag_refs[node_id] = dag
 
     def unregister(self, node_id: str) -> None:
         """Remove a node from heartbeat monitoring."""
         self._running_nodes.pop(node_id, None)
+        self._dag_refs.pop(node_id, None)
 
     def clear(self) -> None:
         """Remove all registered nodes."""
         self._running_nodes.clear()
+        self._dag_refs.clear()
 
     @property
     def running_nodes(self) -> dict[str, DAGNode]:
@@ -129,6 +139,9 @@ class WatchdogService:
                 health, updated_node = node.check_health(interval, threshold)
                 # Update stored node reference with new health state
                 self._running_nodes[node_id] = updated_node
+                # Write back to DAG so executor's poll loop can see it (#1093)
+                if node_id in self._dag_refs:
+                    self._dag_refs[node_id].nodes[node_id] = updated_node
                 node = updated_node  # rebind to new immutable instance
                 alert_min = self.get_alert_threshold(node.agent_type)
 

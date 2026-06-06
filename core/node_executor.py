@@ -463,7 +463,7 @@ class NodeExecutor:
             node_id, node.agent_type, node.retry_count + 1, node.max_retries,
         )
 
-        self._watchdog.register(node_id, node)
+        self._watchdog.register(node_id, node, dag=dag)
         current_task = asyncio.current_task()
         if current_task:
             self._running_tasks[node_id] = current_task
@@ -818,7 +818,11 @@ class NodeExecutor:
                         timeout=_wall_max,
                     )
 
-                # Check if watchdog flagged this node (UNHEALTHY or DEAD)
+                # Check if watchdog flagged this node (UNHEALTHY or DEAD).
+                # Re-read from DAG to pick up watchdog's health assessment,
+                # since watchdog updates _running_nodes independently (#1093).
+                if dag is not None and node_id is not None:
+                    node = dag.nodes.get(node_id, node)
                 if node.health_status in (NodeHealth.UNHEALTHY, NodeHealth.DEAD):
                     cancel_event.set()
                     if not task.done():
