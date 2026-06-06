@@ -241,8 +241,8 @@ def inject_token_estimator(
                     api_key=api_key,
                     base_url=base_url or None,
                 )
-            except Exception:
-                pass
+            except Exception as _exc:
+                logger.debug("Token estimator client creation failed: %s", _exc)
 
         estimator = TokenEstimator(
             config=config,

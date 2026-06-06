@@ -144,7 +144,7 @@ class LLMClient:
                 if isinstance(parsed, dict):
                     return parsed
             except (json.JSONDecodeError, ValueError):
-                pass
+                pass  # Try next strategy
 
         # Strategy 2: find any JSON object in the text (nested-safe).
         decoder = json.JSONDecoder()
@@ -474,7 +474,7 @@ class LLMClient:
                 wait = (reset_dt - datetime.now(timezone.utc)).total_seconds()
                 return max(wait, 0)
             except ValueError:
-                pass
+                pass  # Fallback to numeric retry-after parsing
 
         # Pattern: "retry after N seconds" or "retry-after: N"
         num_match = re.search(

@@ -253,8 +253,11 @@ class QualityGate:
                                 "not in best attempt",
                                 node_id, artifact,
                             )
-                    except OSError:
-                        pass
+                    except OSError as _exc:
+                        logger.debug(
+                            "Failed to remove artifact %s during rollback: %s",
+                            path, _exc,
+                        )
             restored_artifacts = best.get("artifacts")
 
         # Build retry feedback with regression awareness

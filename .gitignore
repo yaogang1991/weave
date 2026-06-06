@@ -10,3 +10,7 @@ dist/
 build/
 .pytest_cache/
 output/
+weave_ui/static/
+weave_ui/frontend/node_modules/
+.claude/worktrees/
+.coverage
