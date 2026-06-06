@@ -24,6 +24,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Coroutine
 
+from core.config import NodeTimeoutConfig
+from core.project_config import ProjectConfig
+from core.protocols import (
+    BackendRegistryProto,
+    MemoryManagerProto,
+    SessionStoreProto,
+    NodeGuardrailsProto,
+)
 from core.models import (
     DAG,
     DAGNode,
@@ -60,25 +68,25 @@ class NodeExecutorConfig:
     emit_func, watchdog) remain as direct constructor parameters.
     """
 
-    evaluator: Any | None = None
+    evaluator: EvaluationPipeline | None = None
     artifact_path: str = "./data/artifacts"
     work_dir: str | None = None
     quality_gate: QualityGate | None = None
     artifact_handoff: ArtifactHandoffService | None = None
-    node_timeout_config: Any | None = None
-    backend_manager: Any | None = None
+    node_timeout_config: NodeTimeoutConfig | None = None
+    backend_manager: Any | None = None  # TODO (#1087): BackendManager Protocol
     job_id: str = ""
     run_id: str = ""
     backoff_base: float = 2.0
     backoff_cap: float = 60.0
-    backend_registry: Any | None = None
+    backend_registry: BackendRegistryProto | None = None
     session_id: str = ""
     budget_manager: BudgetManager | None = None
-    memory_manager: Any | None = None
-    project_config: Any | None = None
+    memory_manager: MemoryManagerProto | None = None
+    project_config: ProjectConfig | None = None
     default_agent_backend: str = "claude_code"
-    session_store: Any | None = None
-    node_guardrails: Any | None = None
+    session_store: SessionStoreProto | None = None
+    node_guardrails: NodeGuardrailsProto | None = None
 
 
 @dataclass
