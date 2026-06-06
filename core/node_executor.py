@@ -187,6 +187,8 @@ class NodeExecutor:
                         dag.nodes[node_id],
                         prep.input_artifacts,
                         workspace_path=prep.workspace_path,
+                        dag=dag,
+                        node_id=node_id,
                     )
                     # M6.2: Post-check guardrail for external backends
                     if (
@@ -639,6 +641,9 @@ class NodeExecutor:
         node: DAGNode,
         input_artifacts: list[HandoffArtifact],
         workspace_path: str | None = None,
+        *,
+        dag: DAG | None = None,
+        node_id: str | None = None,
     ) -> dict[str, Any]:
         """Execute a node with progress-driven timeout (M4.5).
 
@@ -663,10 +668,18 @@ class NodeExecutor:
 
         def _on_progress() -> None:
             try:
-                def _hb():
-                    new = node.record_heartbeat()
-                    dag.nodes[node_id] = new
-                loop.call_soon_threadsafe(_hb)
+                if dag is not None and node_id is not None:
+                    def _hb():
+                        nonlocal node
+                        node = node.record_heartbeat()
+                        dag.nodes[node_id] = node
+                    loop.call_soon_threadsafe(_hb)
+                else:
+                    # Fallback: just update local variable (no DAG write-back)
+                    def _hb():
+                        nonlocal node
+                        node = node.record_heartbeat()
+                    loop.call_soon_threadsafe(_hb)
                 # activity_detector is NOT reset here — meaningful event
                 # filtering is handled inside _stream_cli_output (#1079).
                 # Blindly resetting on every message prevented semantic
@@ -862,6 +875,8 @@ class NodeExecutor:
                     )
                 if tracker.has_recent_progress():
                     node = node.record_heartbeat()
+                    if dag is not None and node_id is not None:
+                        dag.nodes[node_id] = node
                 try:
                     await asyncio.wait_for(
                         asyncio.shield(task), timeout=5.0,

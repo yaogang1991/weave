@@ -129,6 +129,7 @@ class WatchdogService:
                 health, updated_node = node.check_health(interval, threshold)
                 # Update stored node reference with new health state
                 self._running_nodes[node_id] = updated_node
+                node = updated_node  # rebind to new immutable instance
                 alert_min = self.get_alert_threshold(node.agent_type)
 
                 if health == NodeHealth.MISSED:
