@@ -186,43 +186,33 @@ class TestExtractJsonWithTruncation:
 class TestTruncationDetection:
     def test_truncated_json_detected(self):
         """Response starting with { but not ending with } is truncated."""
-        from orchestrator.intelligent_orchestrator import (
-            IntelligentOrchestrator,
-        )
-        assert IntelligentOrchestrator._is_response_truncated(
+        from orchestrator.llm_utils import is_response_truncated
+        assert is_response_truncated(
             '{"nodes": [{"id": "a"'
         ) is True
 
     def test_complete_json_not_truncated(self):
         """Complete JSON (starts and ends with braces) is not truncated."""
-        from orchestrator.intelligent_orchestrator import (
-            IntelligentOrchestrator,
-        )
-        assert IntelligentOrchestrator._is_response_truncated(
+        from orchestrator.llm_utils import is_response_truncated
+        assert is_response_truncated(
             '{"nodes": []}'
         ) is False
 
     def test_empty_not_truncated(self):
         """Empty content is not truncated."""
-        from orchestrator.intelligent_orchestrator import (
-            IntelligentOrchestrator,
-        )
-        assert IntelligentOrchestrator._is_response_truncated("") is False
+        from orchestrator.llm_utils import is_response_truncated
+        assert is_response_truncated("") is False
 
     def test_non_json_not_truncated(self):
         """Content not starting with { is not truncated."""
-        from orchestrator.intelligent_orchestrator import (
-            IntelligentOrchestrator,
-        )
-        assert IntelligentOrchestrator._is_response_truncated(
+        from orchestrator.llm_utils import is_response_truncated
+        assert is_response_truncated(
             "Here is the plan"
         ) is False
 
     def test_uneven_braces_truncated(self):
         """More opens than closes indicates truncation."""
-        from orchestrator.intelligent_orchestrator import (
-            IntelligentOrchestrator,
-        )
+        from orchestrator.llm_utils import is_response_truncated
         content = '{"nodes": [{"id": "a"}, {"id": "b"'
-        assert IntelligentOrchestrator._is_response_truncated(content) is True
+        assert is_response_truncated(content) is True
 

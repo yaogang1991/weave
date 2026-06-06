@@ -117,37 +117,16 @@ def _utc_now() -> datetime:
 def _compute_summary(dag: DAG | None) -> dict[str, Any]:
     """Compute DAG execution summary from node statuses.
 
-    Replaces the redundant engine re-creation that was previously used
-    solely to call ``engine.get_execution_summary()``.
+    Delegates to core.dag_summary.compute_dag_summary (#1089).
     """
     if dag is None:
         return {}
-    total = len(dag.nodes)
-    success = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SUCCESS)
-    partial_pass = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.PARTIAL_PASS)
-    warned = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.WARNED)
-    failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
-    skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
-    return {
-        "total_nodes": total,
-        "success": success,
-        "partial_pass": partial_pass,
-        "warned": warned,
-        "failed": failed,
-        "skipped": skipped,
-        "all_succeeded": failed == 0 and skipped == 0 and partial_pass == 0,
-        "node_details": {
-            nid: {
-                "status": n.status.value,
-                "agent": n.agent_type,
-                "duration_ms": (
-                    (n.completed_at - n.started_at).total_seconds() * 1000
-                    if n.completed_at and n.started_at else None
-                ),
-            }
-            for nid, n in dag.nodes.items()
-        },
-    }
+    from core.dag_summary import compute_dag_summary
+    return compute_dag_summary(
+        dag,
+        include_implementation_breakdown=False,
+        include_token_usage=False,
+    )
 
 
 def _extract_dag_errors(dag: DAG | None) -> tuple[str, str]:
