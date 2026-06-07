@@ -23,7 +23,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
 from starlette.requests import Request  # noqa: E402
@@ -401,13 +401,12 @@ async def api_retry_job(job_id: str):
             detail=f"Cannot retry job in status {job.status.value}",
         )
 
-    job.status = JobStatus.QUEUED
-    job.attempt = 0
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.QUEUED)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     job.last_error = ""
     job.error_category = ""
-    job.lease_owner = None
-    job.lease_expires_at = None
-    job.updated_at = datetime.now(timezone.utc)
     repo.update_job(job)
     return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
 
@@ -855,10 +854,10 @@ async def api_job_summary(job_id: str):
             events = store.get_events(run.session_id)
             # Look for the final summary event
             for evt in reversed(events):
-                payload = evt if isinstance(evt, dict) else {}
-                etype = payload.get("event_type", "")
-                if "end" in etype or "summary" in etype or "result" in etype:
-                    data = payload.get("payload", payload)
+                evt_type = evt.type.value if hasattr(evt, "type") else str(evt)
+                evt_payload = evt.payload if hasattr(evt, "payload") else {}
+                if "end" in evt_type or "summary" in evt_type or "result" in evt_type:
+                    data = evt_payload if isinstance(evt_payload, dict) else {}
                     return {
                         "title": data.get("title", f"Run {run.id} completed"),
                         "content": data.get("content", data.get("result", "")),
@@ -907,7 +906,7 @@ async def api_update_notif_prefs(prefs: dict):
 
 
 @app.get("/api/search")
-async def api_search(q: str = "", status: str | None = None, from_: str | None = None, to: str | None = None):
+async def api_search(q: str = "", status: str | None = None, from_: str | None = Query(None, alias="from"), to: str | None = None):
     """Full-text search across jobs."""
     repo = JobRepository()
     all_jobs = repo.list_jobs()
@@ -957,6 +956,11 @@ def _ensure_dir(p: Path) -> None:
     p.mkdir(parents=True, exist_ok=True)
 
 
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a user-supplied filename to prevent path traversal."""
+    return "".join(c for c in name if c.isalnum() or c in "-_ ")
+
+
 @app.get("/api/task-templates")
 async def api_list_task_templates():
     _ensure_dir(_TASK_TEMPLATES_DIR)
@@ -997,7 +1001,8 @@ async def api_create_task_template(body: dict):
 
 @app.put("/api/task-templates/{name}")
 async def api_update_task_template(name: str, body: dict):
-    filepath = _TASK_TEMPLATES_DIR / f"{name}.yaml"
+    safe_name = _sanitize_filename(name)
+    filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Template not found")
     import yaml
@@ -1007,7 +1012,8 @@ async def api_update_task_template(name: str, body: dict):
 
 @app.delete("/api/task-templates/{name}")
 async def api_delete_task_template(name: str):
-    filepath = _TASK_TEMPLATES_DIR / f"{name}.yaml"
+    safe_name = _sanitize_filename(name)
+    filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Template not found")
     filepath.unlink()
@@ -1016,7 +1022,8 @@ async def api_delete_task_template(name: str):
 
 @app.get("/api/jobs/{job_id}/annotations")
 async def api_get_annotations(job_id: str):
-    filepath = _ANNOTATIONS_DIR / f"{job_id}.json"
+    safe_id = _sanitize_filename(job_id)
+    filepath = _ANNOTATIONS_DIR / f"{safe_id}.json"
     if not filepath.exists():
         return {"job_id": job_id, "tags": [], "notes": "", "rating": 0, "updated_at": ""}
     return json.loads(filepath.read_text(encoding="utf-8"))
@@ -1025,7 +1032,8 @@ async def api_get_annotations(job_id: str):
 @app.put("/api/jobs/{job_id}/annotations")
 async def api_update_annotations(job_id: str, body: dict):
     _ensure_dir(_ANNOTATIONS_DIR)
-    filepath = _ANNOTATIONS_DIR / f"{job_id}.json"
+    safe_id = _sanitize_filename(job_id)
+    filepath = _ANNOTATIONS_DIR / f"{safe_id}.json"
     existing = {}
     if filepath.exists():
         try:
