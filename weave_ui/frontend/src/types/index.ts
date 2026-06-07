@@ -72,3 +72,16 @@ export interface SubmitJobRequest {
   template?: string
   priority?: number
 }
+
+export interface NotificationPrefs {
+  on_succeeded: boolean
+  on_failed: boolean
+  on_stuck: boolean
+  on_pending_approval: boolean
+}
+
+export interface SearchResult {
+  jobs: Job[]
+  highlights: Record<string, string>
+  count: number
+}

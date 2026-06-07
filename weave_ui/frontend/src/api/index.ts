@@ -1,4 +1,4 @@
-import type { Job, ApprovalTicket, Session, Template, Workspace, SubmitJobRequest } from "../types"
+import type { Job, ApprovalTicket, Session, Template, Workspace, SubmitJobRequest, NotificationPrefs, SearchResult } from "../types"
 
 const BASE = "/api"
 
@@ -34,5 +34,12 @@ export const addWorkspace = (path: string, label: string) => request<Workspace>(
 // Summary
 export const getJobSummary = (id: string) => request<{ title: string; content: string }>("/jobs/" + id + "/summary")
 
-// Search (M8.3 placeholder)
-export const searchJobs = (q: string) => request<Job[]>("/search?q=" + encodeURIComponent(q))
+// Search (M8.3)
+export const searchJobs = (params: { q?: string; status?: string; from?: string; to?: string }) => {
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v)).toString()
+  return request<SearchResult>("/search?" + qs)
+}
+
+// Notification Preferences (M8.3)
+export const getNotificationPrefs = () => request<NotificationPrefs>("/notification-preferences")
+export const updateNotificationPrefs = (prefs: NotificationPrefs) => request<NotificationPrefs>("/notification-preferences", { method: "PUT", body: JSON.stringify(prefs) })
