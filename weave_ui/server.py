@@ -401,13 +401,13 @@ async def api_retry_job(job_id: str):
             detail=f"Cannot retry job in status {job.status.value}",
         )
 
-    job.status = JobStatus.QUEUED
-    job.attempt = 0
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.QUEUED)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Reset retry fields for fresh start
     job.last_error = ""
     job.error_category = ""
-    job.lease_owner = None
-    job.lease_expires_at = None
-    job.updated_at = datetime.now(timezone.utc)
     repo.update_job(job)
     return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
 
@@ -855,10 +855,10 @@ async def api_job_summary(job_id: str):
             events = store.get_events(run.session_id)
             # Look for the final summary event
             for evt in reversed(events):
-                payload = evt if isinstance(evt, dict) else {}
-                etype = payload.get("event_type", "")
-                if "end" in etype or "summary" in etype or "result" in etype:
-                    data = payload.get("payload", payload)
+                evt_type = evt.type.value if hasattr(evt, "type") else str(evt)
+                evt_payload = evt.payload if hasattr(evt, "payload") else {}
+                if "end" in evt_type or "summary" in evt_type or "result" in evt_type:
+                    data = evt_payload if isinstance(evt_payload, dict) else {}
                     return {
                         "title": data.get("title", f"Run {run.id} completed"),
                         "content": data.get("content", data.get("result", "")),
