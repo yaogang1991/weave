@@ -27,7 +27,7 @@ def _make_dag_with_failed_node(max_retries=2, retry_count=2):
     node.retry_count = retry_count
     node.status = NodeStatus.FAILED
     node.error = "timeout after 300s"
-    dag.add_node(node)
+    dag = dag.add_node(node)
     return dag
 
 

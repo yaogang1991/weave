@@ -39,10 +39,10 @@ def _make_dag(nodes=None, edges=None) -> DAG:
     dag = DAG()
     if nodes:
         for n in nodes:
-            dag.add_node(n)
+            dag = dag.add_node(n)
     if edges:
         for from_id, to_id in edges:
-            dag.add_edge(from_id, to_id)
+            dag = dag.add_edge(from_id, to_id)
     return dag
 
 

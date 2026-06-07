@@ -10,11 +10,11 @@ from core.evaluation_pipeline import EvaluationPipeline
 def _make_linear_dag():
     """Create DAG: A -> B -> C (all hard edges)."""
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(id="A", agent_type="generator", task_description="step A"))
-    dag.add_node(DAGNode(id="B", agent_type="generator", task_description="step B"))
-    dag.add_node(DAGNode(id="C", agent_type="evaluator", task_description="step C"))
-    dag.add_edge("A", "B")
-    dag.add_edge("B", "C")
+    dag = dag.add_node(DAGNode(id="A", agent_type="generator", task_description="step A"))
+    dag = dag.add_node(DAGNode(id="B", agent_type="generator", task_description="step B"))
+    dag = dag.add_node(DAGNode(id="C", agent_type="evaluator", task_description="step C"))
+    dag = dag.add_edge("A", "B")
+    dag = dag.add_edge("B", "C")
     return dag
 
 
@@ -41,9 +41,9 @@ class TestCollectUpstreamArtifacts:
     def test_mixed_hard_soft_deps(self):
         """Collects from both hard and soft dependency predecessors."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(id="gen", agent_type="generator", task_description="gen"))
-        dag.add_node(DAGNode(id="util", agent_type="generator", task_description="util"))
-        dag.add_node(DAGNode(id="eval", agent_type="evaluator", task_description="eval"))
+        dag = dag.add_node(DAGNode(id="gen", agent_type="generator", task_description="gen"))
+        dag = dag.add_node(DAGNode(id="util", agent_type="generator", task_description="util"))
+        dag = dag.add_node(DAGNode(id="eval", agent_type="evaluator", task_description="eval"))
 
         dag.edges.append(DAGEdge(
             from_node="gen", to_node="eval",

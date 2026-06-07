@@ -291,14 +291,20 @@ class DAG(BaseModel):
     edges: list[DAGEdge] = Field(default_factory=list)
     reasoning: str = ""  # Orchestrator's reasoning for this plan
 
-    def add_node(self, node: DAGNode) -> None:
-        self.nodes[node.id] = node
+    def add_node(self, node: DAGNode) -> DAG:
+        """Return a new DAG with the node added (immutability convention)."""
+        new_nodes = {**self.nodes, node.id: node}
+        return self.model_copy(update={"nodes": new_nodes})
 
     def update_node(self, node_id: str, **updates) -> DAGNode:
         """Create a new DAGNode with updated fields and replace in nodes dict.
 
-        Uses model_copy for immutability — original node is not modified (#486).
-        Returns the new node for convenience.
+        Uses model_copy for the node (original node is not modified).
+        Note: the DAG's nodes dict is updated in-place; this method is
+        reserved for the hot execution loop where threading a new DAG
+        through every call site is impractical.  For construction-phase
+        mutations, prefer ``add_node`` / ``add_edge`` which return new
+        DAG instances.
         """
         old_node = self.nodes[node_id]
         new_node = old_node.model_copy(update=updates)
@@ -306,11 +312,13 @@ class DAG(BaseModel):
         return new_node
 
     def add_edge(self, from_id: str, to_id: str,
-                 dependency_type: DependencyType = DependencyType.HARD) -> None:
-        self.edges.append(DAGEdge(
+                 dependency_type: DependencyType = DependencyType.HARD) -> DAG:
+        """Return a new DAG with the edge added (immutability convention)."""
+        new_edge = DAGEdge(
             from_node=from_id, to_node=to_id,
             dependency_type=dependency_type,
-        ))
+        )
+        return self.model_copy(update={"edges": [*self.edges, new_edge]})
 
     def get_dependencies(self, node_id: str) -> list[str]:
         """Get all predecessor nodes."""

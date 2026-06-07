@@ -19,11 +19,11 @@ class TestCLIDAGRenderer:
     @pytest.fixture
     def sample_dag(self):
         dag = DAG(reasoning="test plan")
-        dag.add_node(DAGNode(id="n1", agent_type="planner", task_description="Plan the work"))
-        dag.add_node(DAGNode(id="n2", agent_type="generator", task_description="Generate code"))
-        dag.add_node(DAGNode(id="n3", agent_type="evaluator", task_description="Evaluate results"))
-        dag.add_edge("n1", "n2")
-        dag.add_edge("n2", "n3")
+        dag = dag.add_node(DAGNode(id="n1", agent_type="planner", task_description="Plan the work"))
+        dag = dag.add_node(DAGNode(id="n2", agent_type="generator", task_description="Generate code"))
+        dag = dag.add_node(DAGNode(id="n3", agent_type="evaluator", task_description="Evaluate results"))
+        dag = dag.add_edge("n1", "n2")
+        dag = dag.add_edge("n2", "n3")
         return dag
 
     def test_handle_started_event(self, renderer):

@@ -65,7 +65,7 @@ async def test_initial_path_remaps_retry_to_replan_when_exhausted():
 
     # Node already exhausted retries
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1",
         agent_type="generator",
         task_description="implement feature",
@@ -105,7 +105,7 @@ async def test_initial_path_remaps_retry_to_skip_when_no_replan():
     engine._emit = capture_emit
 
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1",
         agent_type="generator",
         task_description="implement feature",
@@ -145,7 +145,7 @@ async def test_no_remap_when_retries_remain():
     engine._emit = capture_emit
 
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1",
         agent_type="generator",
         task_description="implement feature",
