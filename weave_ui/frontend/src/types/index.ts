@@ -85,3 +85,19 @@ export interface SearchResult {
   highlights: Record<string, string>
   count: number
 }
+
+export interface TaskTemplate {
+  name: string
+  description: string
+  category: string
+  prompt: string
+  variables: { name: string; description: string; required: boolean }[]
+}
+
+export interface Annotation {
+  job_id: string
+  tags: string[]
+  notes: string
+  rating: number
+  updated_at: string
+}

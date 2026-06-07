@@ -1,4 +1,4 @@
-import type { Job, ApprovalTicket, Session, Template, Workspace, SubmitJobRequest, NotificationPrefs, SearchResult } from "../types"
+import type { Job, ApprovalTicket, Session, Template, Workspace, SubmitJobRequest, NotificationPrefs, SearchResult, TaskTemplate, Annotation } from "../types"
 
 const BASE = "/api"
 
@@ -43,3 +43,17 @@ export const searchJobs = (params: { q?: string; status?: string; from?: string;
 // Notification Preferences (M8.3)
 export const getNotificationPrefs = () => request<NotificationPrefs>("/notification-preferences")
 export const updateNotificationPrefs = (prefs: NotificationPrefs) => request<NotificationPrefs>("/notification-preferences", { method: "PUT", body: JSON.stringify(prefs) })
+
+// Task Templates (M8.4)
+export const getTaskTemplates = () => request<{ templates: TaskTemplate[] }>("/task-templates")
+export const createTaskTemplate = (tpl: Omit<TaskTemplate, 'variables'> & { variables?: TaskTemplate['variables'] }) =>
+  request<TaskTemplate>("/task-templates", { method: "POST", body: JSON.stringify(tpl) })
+export const updateTaskTemplate = (name: string, tpl: Partial<TaskTemplate>) =>
+  request<TaskTemplate>("/task-templates/" + encodeURIComponent(name), { method: "PUT", body: JSON.stringify(tpl) })
+export const deleteTaskTemplate = (name: string) =>
+  request<any>("/task-templates/" + encodeURIComponent(name), { method: "DELETE" })
+
+// Annotations (M8.4)
+export const getAnnotations = (jobId: string) => request<Annotation>("/jobs/" + jobId + "/annotations")
+export const updateAnnotations = (jobId: string, data: Partial<Annotation>) =>
+  request<Annotation>("/jobs/" + jobId + "/annotations", { method: "PUT", body: JSON.stringify(data) })

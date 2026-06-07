@@ -9,8 +9,15 @@
         <n-card title="Requirement" size="small" style="margin-bottom: 12px">
           <n-text>{{ jobStore.currentJob.job?.requirement }}</n-text>
         </n-card>
-        <n-card title="Events" size="small">
-          <EventTimeline :events="events" />
+        <n-card size="small" style="margin-bottom: 12px">
+          <template #header>
+            <n-space>
+              <span>Events</span>
+              <n-button v-if="events.length" size="tiny" @click="showReplay = !showReplay">{{ showReplay ? 'Timeline' : 'Replay' }}</n-button>
+            </n-space>
+          </template>
+          <ReplayView v-if="showReplay" :events="events" />
+          <EventTimeline v-else :events="events" />
         </n-card>
       </n-gi>
       <n-gi :span="8">
@@ -20,7 +27,8 @@
             <n-button v-if="canRetry" block type="info" @click="doRetry">Retry Job</n-button>
           </n-space>
         </n-card>
-        <TicketList />
+        <TicketList style="margin-bottom: 12px" />
+        <AnnotationPanel :job-id="route.params.id as string" />
       </n-gi>
     </n-grid>
   </div>
@@ -33,12 +41,15 @@ import { NPageHeader, NGrid, NGi, NCard, NText, NButton, NSpace, NSpin, useMessa
 import { useJobStore } from '../stores/job'
 import StatusTag from '../components/StatusTag.vue'
 import EventTimeline from '../components/EventTimeline.vue'
+import ReplayView from '../components/ReplayView.vue'
 import TicketList from '../components/TicketList.vue'
+import AnnotationPanel from '../components/AnnotationPanel.vue'
 import * as api from '../api'
 import type { SessionEvent } from '../types'
 
 const router = useRouter(), route = useRoute(), msg = useMessage(), jobStore = useJobStore()
 const events = ref<SessionEvent[]>([])
+const showReplay = ref(false)
 const jobId = computed(() => (route.params.id as string || '').slice(0, 16))
 const status = computed(() => jobStore.currentJob?.job?.status)
 const canCancel = computed(() => ['queued','running','leased','pending_approval'].includes(status.value))

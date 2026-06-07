@@ -946,6 +946,100 @@ async def api_search(q: str = "", status: str | None = None, from_: str | None =
     return {"jobs": results, "highlights": highlights, "count": len(results)}
 
 
+# ── Task Templates & Annotations APIs (M8.4) ──────────────────────
+
+
+_TASK_TEMPLATES_DIR = Path("./data/task_templates")
+_ANNOTATIONS_DIR = Path("./data/annotations")
+
+
+def _ensure_dir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+
+
+@app.get("/api/task-templates")
+async def api_list_task_templates():
+    _ensure_dir(_TASK_TEMPLATES_DIR)
+    templates = []
+    for f in sorted(_TASK_TEMPLATES_DIR.glob("*.yaml")):
+        try:
+            import yaml
+            data = yaml.safe_load(f.read_text(encoding="utf-8"))
+            if data:
+                data["filename"] = f.stem
+                templates.append(data)
+        except Exception:
+            pass
+    from templates.library import TemplateRegistry
+    try:
+        registry = TemplateRegistry()
+        for t in registry.list_templates():
+            templates.append({"name": t.name, "description": t.description, "category": "dag", "filename": t.name})
+    except Exception:
+        pass
+    return {"templates": templates, "count": len(templates)}
+
+
+@app.post("/api/task-templates")
+async def api_create_task_template(body: dict):
+    _ensure_dir(_TASK_TEMPLATES_DIR)
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Template name is required")
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ")
+    filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
+    if filepath.exists():
+        raise HTTPException(status_code=409, detail="Template already exists")
+    import yaml
+    filepath.write_text(yaml.dump(body, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return body
+
+
+@app.put("/api/task-templates/{name}")
+async def api_update_task_template(name: str, body: dict):
+    filepath = _TASK_TEMPLATES_DIR / f"{name}.yaml"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+    import yaml
+    filepath.write_text(yaml.dump(body, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return body
+
+
+@app.delete("/api/task-templates/{name}")
+async def api_delete_task_template(name: str):
+    filepath = _TASK_TEMPLATES_DIR / f"{name}.yaml"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+    filepath.unlink()
+    return {"deleted": name}
+
+
+@app.get("/api/jobs/{job_id}/annotations")
+async def api_get_annotations(job_id: str):
+    filepath = _ANNOTATIONS_DIR / f"{job_id}.json"
+    if not filepath.exists():
+        return {"job_id": job_id, "tags": [], "notes": "", "rating": 0, "updated_at": ""}
+    return json.loads(filepath.read_text(encoding="utf-8"))
+
+
+@app.put("/api/jobs/{job_id}/annotations")
+async def api_update_annotations(job_id: str, body: dict):
+    _ensure_dir(_ANNOTATIONS_DIR)
+    filepath = _ANNOTATIONS_DIR / f"{job_id}.json"
+    existing = {}
+    if filepath.exists():
+        try:
+            existing = json.loads(filepath.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    existing.update({"job_id": job_id, "updated_at": datetime.now(timezone.utc).isoformat()})
+    for key in ("tags", "notes", "rating"):
+        if key in body:
+            existing[key] = body[key]
+    filepath.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    return existing
+
+
 # ── Integration helpers ──────────────────────────────────────────────
 
 def get_event_bridge() -> WebSocketEventBridge:
