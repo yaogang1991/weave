@@ -23,7 +23,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
 from starlette.requests import Request  # noqa: E402
@@ -104,6 +104,12 @@ class SubmitJobRequest(PydanticModel):
 class AddWorkspaceRequest(PydanticModel):
     path: str
     label: str = ""
+
+class NotificationPrefsUpdate(PydanticModel):
+    on_succeeded: bool | None = None
+    on_failed: bool | None = None
+    on_stuck: bool | None = None
+    on_pending_approval: bool | None = None
 
 
 # Static files
@@ -401,13 +407,12 @@ async def api_retry_job(job_id: str):
             detail=f"Cannot retry job in status {job.status.value}",
         )
 
-    job.status = JobStatus.QUEUED
-    job.attempt = 0
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.QUEUED)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     job.last_error = ""
     job.error_category = ""
-    job.lease_owner = None
-    job.lease_expires_at = None
-    job.updated_at = datetime.now(timezone.utc)
     repo.update_job(job)
     return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
 
@@ -855,10 +860,10 @@ async def api_job_summary(job_id: str):
             events = store.get_events(run.session_id)
             # Look for the final summary event
             for evt in reversed(events):
-                payload = evt if isinstance(evt, dict) else {}
-                etype = payload.get("event_type", "")
-                if "end" in etype or "summary" in etype or "result" in etype:
-                    data = payload.get("payload", payload)
+                evt_type = evt.type.value if hasattr(evt, "type") else str(evt)
+                evt_payload = evt.payload if hasattr(evt, "payload") else {}
+                if "end" in evt_type or "summary" in evt_type or "result" in evt_type:
+                    data = evt_payload if isinstance(evt_payload, dict) else {}
                     return {
                         "title": data.get("title", f"Run {run.id} completed"),
                         "content": data.get("content", data.get("result", "")),
@@ -900,14 +905,14 @@ async def api_get_notif_prefs():
 
 
 @app.put("/api/notification-preferences")
-async def api_update_notif_prefs(prefs: dict):
+async def api_update_notif_prefs(prefs: NotificationPrefsUpdate):
     saved = _load_notif_prefs()
-    saved.update({k: v for k, v in prefs.items() if k in _DEFAULT_NOTIF_PREFS})
+    saved.update({k: v for k, v in prefs.model_dump(exclude_none=True).items() if k in _DEFAULT_NOTIF_PREFS})
     return _save_notif_prefs(saved)
 
 
 @app.get("/api/search")
-async def api_search(q: str = "", status: str | None = None, from_: str | None = None, to: str | None = None):
+async def api_search(q: str = "", status: str | None = None, from_: str | None = Query(None, alias="from"), to: str | None = None):
     """Full-text search across jobs."""
     repo = JobRepository()
     all_jobs = repo.list_jobs()
