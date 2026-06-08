@@ -400,3 +400,111 @@ class TestAgentRegistrySpecIntegration:
         spec = registry.get_spec("legacy_agent")
         assert spec is not None
         assert "old_skill" in spec.capability.skills
+
+
+class TestLLMRouterSpecIntegration:
+    """Verify LLMRouter can route based on BrainSpec."""
+
+    def test_get_client_for_spec_quality_tier(self):
+        from core.config import LLMConfig, ModelRoutingConfig
+        from core.llm_router import LLMRouter
+        config = LLMConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="test-key",
+            base_url="https://api.anthropic.com",
+            timeout=120,
+        )
+        routing = ModelRoutingConfig()
+        router = LLMRouter(routing, config)
+
+        spec = AgentSpec(
+            name="test",
+            brain=BrainSpec(quality_tier=QualityTier.BALANCED),
+        )
+        client = router.get_client_for_spec(spec)
+        assert client is not None
+
+    def test_get_client_for_spec_model_override(self):
+        from core.config import LLMConfig, ModelRoutingConfig
+        from core.llm_router import LLMRouter
+        config = LLMConfig(
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            api_key="test-key",
+            base_url="https://api.anthropic.com",
+            timeout=120,
+        )
+        routing = ModelRoutingConfig()
+        router = LLMRouter(routing, config)
+
+        spec = AgentSpec(
+            name="test",
+            brain=BrainSpec(model_id="claude-haiku-4-5-20251001"),
+        )
+        client = router.get_client_for_spec(spec)
+        assert client is not None
+
+
+class TestCallerInvocationInterface:
+    """Test the 1-required + 3-optional-tighten invocation interface."""
+
+    def test_invoke_returns_spec(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            registry.invoke("planner", "Build a REST API")
+        )
+        assert result is not None
+        assert isinstance(result, AgentSpec)
+
+    def test_invoke_with_timeout_tighten(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            registry.invoke(
+                "planner", "Build API",
+                overrides=InvocationOverrides(timeout=60),
+            )
+        )
+        assert result.boundary.timeout == 60  # tightened from 300
+
+    def test_invoke_timeout_cannot_loosen(self):
+        """Caller timeout > spec timeout should be ignored."""
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            registry.invoke(
+                "planner", "Build API",
+                overrides=InvocationOverrides(timeout=9999),
+            )
+        )
+        # Should NOT be updated — 9999 > 300 (spec timeout)
+        assert result.boundary.timeout == 300
+
+    def test_invoke_unknown_agent_raises(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        import asyncio
+        with pytest.raises(ValueError, match="not registered"):
+            asyncio.get_event_loop().run_until_complete(
+                registry.invoke("nonexistent", "task")
+            )
+
+    def test_invoke_with_budget_override(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            registry.invoke(
+                "generator", "Write code",
+                overrides=InvocationOverrides(
+                    budget=ResourceBudget(max_tokens=50000),
+                ),
+            )
+        )
+        assert result.boundary.resource_budget is not None
+        assert result.boundary.resource_budget.max_tokens == 50000

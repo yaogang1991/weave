@@ -26,6 +26,7 @@ from core.agent_spec import (
     ContractSpec,
     ErrorPolicy,
     ErrorStrategy,
+    InvocationOverrides,
     LifecycleSpec,
     QualityTier,
 )
@@ -221,6 +222,74 @@ class AgentRegistry:
     def has_agent(self, agent_id: str) -> bool:
         """Check if an agent is registered."""
         return agent_id in self._specs
+
+    # ------------------------------------------------------------------
+    # Caller Invocation Interface
+    # ------------------------------------------------------------------
+
+    async def invoke(
+        self,
+        agent_name: str,
+        task: str,
+        overrides: InvocationOverrides | None = None,
+    ) -> AgentSpec:
+        """Invoke an agent with optional caller overrides.
+
+        This is the primary caller interface: 1 required (task) + 3 optional tighten.
+        If a factory is registered, delegates to factory. Otherwise returns resolved spec.
+
+        Args:
+            agent_name: Name of the registered agent.
+            task: Task description (required).
+            overrides: Optional tighten-only overrides (success/budget/timeout).
+
+        Returns:
+            Resolved AgentSpec (with overrides applied), or factory result.
+
+        Raises:
+            ValueError: If agent_name is not registered.
+        """
+        from core.agent_spec import InvocationOverrides
+
+        spec = self._specs.get(agent_name)
+        if spec is None:
+            raise ValueError(f"Agent '{agent_name}' not registered")
+
+        effective = spec
+        if overrides:
+            effective = self._apply_overrides(spec, overrides)
+
+        factory = self._factories.get(agent_name)
+        if factory:
+            return await factory(task, effective)
+
+        return effective
+
+    @staticmethod
+    def _apply_overrides(spec: AgentSpec, overrides: InvocationOverrides) -> AgentSpec:
+        """Apply caller overrides (tighten-only) to an AgentSpec."""
+        from core.agent_spec import InvocationOverrides
+
+        updates: dict = {}
+
+        if overrides.timeout is not None:
+            # Tighten: caller timeout must be <= spec boundary timeout (or spec has no timeout)
+            if spec.boundary.timeout is None or overrides.timeout <= spec.boundary.timeout:
+                updates["boundary"] = spec.boundary.model_copy(update={"timeout": overrides.timeout})
+
+        if overrides.budget is not None:
+            boundary = updates.get("boundary", spec.boundary)
+            updates["boundary"] = boundary.model_copy(update={"resource_budget": overrides.budget})
+
+        if overrides.success_criteria is not None:
+            updates["contract"] = spec.contract.model_copy(
+                update={"success_criteria": overrides.success_criteria}
+            )
+
+        if not updates:
+            return spec
+
+        return spec.model_copy(update=updates)
 
     def register_factory(self, agent_id: str, factory: Callable) -> None:
         """Register a factory function that creates agent instances."""
