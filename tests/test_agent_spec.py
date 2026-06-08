@@ -277,3 +277,126 @@ class TestInvocationOverrides:
         """Overrides with timeout=0 should be valid (tighten to immediate)."""
         overrides = InvocationOverrides(timeout=0)
         assert overrides.timeout == 0
+
+
+class TestAgentRegistrySpecIntegration:
+    """Verify AgentRegistry supports AgentSpec registration and lookup."""
+
+    def test_register_spec(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        spec = AgentSpec(
+            name="reviewer",
+            description="Reviews code quality",
+            brain=BrainSpec(quality_tier=QualityTier.BALANCED),
+            capability=CapabilitySpec(skills=["code_review"]),
+        )
+        registry.register_spec(spec)
+        assert registry.has_agent("reviewer")
+
+    def test_get_spec(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        spec = registry.get_spec("planner")
+        assert spec is not None
+        assert isinstance(spec, AgentSpec)
+        assert spec.name == "planner"
+        assert "planning" in spec.capability.skills
+
+    def test_get_returns_backward_compat_capability(self):
+        from core.agent_registry import AgentRegistry
+        from core.dag_models import AgentCapability
+        registry = AgentRegistry()
+        result = registry.get("planner")
+        assert isinstance(result, AgentCapability)
+        assert result.id == "planner"
+
+    def test_list_agents_returns_capabilities(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        caps = registry.list_agents()
+        assert len(caps) >= 3
+        ids = [c.id for c in caps]
+        assert "planner" in ids
+        assert "generator" in ids
+        assert "evaluator" in ids
+
+    def test_list_specs(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        specs = registry.list_specs()
+        assert len(specs) >= 3
+        names = [s.name for s in specs]
+        assert "planner" in names
+
+    def test_default_agents_are_full_specs(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        for name in ("planner", "generator", "evaluator"):
+            spec = registry.get_spec(name)
+            assert spec is not None
+            assert spec.contract.input_schema, f"{name} missing input_schema"
+            assert spec.capability.skills, f"{name} missing skills"
+            assert spec.boundary.timeout is not None, f"{name} missing timeout"
+
+    def test_to_prompt_description_unchanged(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        desc = registry.to_prompt_description()
+        assert "planner" in desc
+        assert "generator" in desc
+        assert "evaluator" in desc
+        assert "requirement_analysis" in desc
+
+    def test_register_spec_overwrite(self):
+        from core.agent_registry import AgentRegistry
+        registry = AgentRegistry()
+        spec = AgentSpec(name="planner", description="Custom planner")
+        registry.register_spec(spec)
+        result = registry.get_spec("planner")
+        assert result.description == "Custom planner"
+
+    def test_load_from_yaml_new_format(self, tmp_path):
+        from core.agent_registry import AgentRegistry
+        yaml_content = (
+            "agents:\n"
+            "  - name: custom_agent\n"
+            "    description: 'A custom agent'\n"
+            "    brain:\n"
+            "      quality_tier: fast\n"
+            "      system_prompt: 'Custom prompt'\n"
+            "    capability:\n"
+            "      skills: ['custom_skill']\n"
+            "      tools: ['read']\n"
+            "    boundary:\n"
+            "      timeout: 120\n"
+            "      max_retries: 2\n"
+            "    lifecycle:\n"
+            "      memory_enabled: false\n"
+        )
+        yaml_file = tmp_path / "agents.yaml"
+        yaml_file.write_text(yaml_content)
+        registry = AgentRegistry()
+        registry.load_from_yaml(yaml_file)
+        spec = registry.get_spec("custom_agent")
+        assert spec is not None
+        assert spec.brain.quality_tier == QualityTier.FAST
+        assert spec.boundary.timeout == 120
+        assert spec.lifecycle.memory_enabled is False
+
+    def test_load_from_yaml_legacy_format(self, tmp_path):
+        from core.agent_registry import AgentRegistry
+        yaml_content = (
+            "agents:\n"
+            "  - id: legacy_agent\n"
+            "    name: Legacy Agent\n"
+            "    description: 'Old format'\n"
+            "    skills: ['old_skill']\n"
+        )
+        yaml_file = tmp_path / "legacy.yaml"
+        yaml_file.write_text(yaml_content)
+        registry = AgentRegistry()
+        registry.load_from_yaml(yaml_file)
+        spec = registry.get_spec("legacy_agent")
+        assert spec is not None
+        assert "old_skill" in spec.capability.skills
