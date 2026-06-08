@@ -87,6 +87,7 @@ class NodeExecutorConfig:
     default_agent_backend: str = "claude_code"
     session_store: SessionStoreProto | None = None
     node_guardrails: NodeGuardrailsProto | None = None
+    agent_registry: Any | None = None  # AgentRegistry for AgentSpec lookup
 
 
 @dataclass
@@ -139,6 +140,7 @@ class NodeExecutor:
         self._default_agent_backend = cfg.default_agent_backend
         self._session_store = cfg.session_store
         self._node_guardrails = cfg.node_guardrails
+        self._agent_registry = cfg.agent_registry if config else None
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
         self._owns_executor = True
         self._running_tasks: dict[str, asyncio.Task] = {}
@@ -550,7 +552,7 @@ class NodeExecutor:
             node_id, retry_count=new_count,
         )
 
-        if node.retry_count < node.max_retries:
+        if node.retry_count < self._get_max_retries(node.agent_type):
             dag.update_node(node_id, status=NodeStatus.RETRYING)
             await self._emit(ExecutionEvent(
                 node_id=node_id,
@@ -912,9 +914,26 @@ class NodeExecutor:
     # Helpers
     # ------------------------------------------------------------------
 
+    def _get_agent_spec(self, agent_type: str) -> Any | None:
+        """Look up AgentSpec for the given agent_type."""
+        if self._agent_registry is not None:
+            return self._agent_registry.get_spec(agent_type)
+        return None
+
+    def _get_max_retries(self, agent_type: str) -> int:
+        """Get max retries for agent_type, preferring AgentSpec boundary."""
+        spec = self._get_agent_spec(agent_type)
+        if spec and spec.boundary.max_retries is not None:
+            return spec.boundary.max_retries
+        return 3  # fallback default
+
     def _get_node_timeout(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
+        """Get timeout for agent_type, preferring AgentSpec boundary."""
+        spec = self._get_agent_spec(agent_type)
+        if spec and spec.boundary.timeout is not None:
+            return spec.boundary.timeout
         if self._node_timeout_config is not None:
             return self._node_timeout_config.timeout_for(
                 agent_type, artifact_count=artifact_count,
@@ -927,7 +946,10 @@ class NodeExecutor:
     def _get_stall_timeout(
         self, agent_type: str, node: DAGNode | None = None,
     ) -> int:
-        """Return dynamic stall timeout (M4.5)."""
+        """Return dynamic stall timeout, preferring AgentSpec boundary."""
+        spec = self._get_agent_spec(agent_type)
+        if spec and spec.boundary.stall_timeout is not None:
+            return spec.boundary.stall_timeout
         if self._node_timeout_config is not None:
             from core.node_utils import (
                 estimate_feature_count,
