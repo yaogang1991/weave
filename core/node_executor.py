@@ -927,7 +927,7 @@ class NodeExecutor:
             return node.max_retries
         # Fallback to AgentSpec boundary
         spec = self._get_agent_spec(node.agent_type if hasattr(node, 'agent_type') else '')
-        if spec and spec.boundary.max_retries is not None:
+        if spec:
             return spec.boundary.max_retries
         return 3  # fallback default
 

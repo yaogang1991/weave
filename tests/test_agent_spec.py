@@ -453,9 +453,7 @@ class TestCallerInvocationInterface:
         from core.agent_registry import AgentRegistry
         registry = AgentRegistry()
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            registry.invoke("planner", "Build a REST API")
-        )
+        result = asyncio.run(registry.invoke("planner", "Build a REST API"))
         assert result is not None
         assert isinstance(result, AgentSpec)
 
@@ -463,12 +461,10 @@ class TestCallerInvocationInterface:
         from core.agent_registry import AgentRegistry
         registry = AgentRegistry()
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            registry.invoke(
-                "planner", "Build API",
-                overrides=InvocationOverrides(timeout=60),
-            )
-        )
+        result = asyncio.run(registry.invoke(
+            "planner", "Build API",
+            overrides=InvocationOverrides(timeout=60),
+        ))
         assert result.boundary.timeout == 60  # tightened from 300
 
     def test_invoke_timeout_cannot_loosen(self):
@@ -476,12 +472,10 @@ class TestCallerInvocationInterface:
         from core.agent_registry import AgentRegistry
         registry = AgentRegistry()
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            registry.invoke(
-                "planner", "Build API",
-                overrides=InvocationOverrides(timeout=9999),
-            )
-        )
+        result = asyncio.run(registry.invoke(
+            "planner", "Build API",
+            overrides=InvocationOverrides(timeout=9999),
+        ))
         # Should NOT be updated — 9999 > 300 (spec timeout)
         assert result.boundary.timeout == 300
 
@@ -490,21 +484,17 @@ class TestCallerInvocationInterface:
         registry = AgentRegistry()
         import asyncio
         with pytest.raises(ValueError, match="not registered"):
-            asyncio.get_event_loop().run_until_complete(
-                registry.invoke("nonexistent", "task")
-            )
+            asyncio.run(registry.invoke("nonexistent", "task"))
 
     def test_invoke_with_budget_override(self):
         from core.agent_registry import AgentRegistry
         registry = AgentRegistry()
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
-            registry.invoke(
-                "generator", "Write code",
-                overrides=InvocationOverrides(
-                    budget=ResourceBudget(max_tokens=50000),
-                ),
-            )
-        )
+        result = asyncio.run(registry.invoke(
+            "generator", "Write code",
+            overrides=InvocationOverrides(
+                budget=ResourceBudget(max_tokens=50000),
+            ),
+        ))
         assert result.boundary.resource_budget is not None
         assert result.boundary.resource_budget.max_tokens == 50000

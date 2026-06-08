@@ -132,13 +132,11 @@ agents:
     def test_invoke_chain(self):
         """Verify invoke() with overrides resolves correctly."""
         registry = AgentRegistry()
-        result = asyncio.get_event_loop().run_until_complete(
-            registry.invoke(
-                "generator",
-                "Write a function",
-                overrides=InvocationOverrides(timeout=300),
-            )
-        )
+        result = asyncio.run(registry.invoke(
+            "generator",
+            "Write a function",
+            overrides=InvocationOverrides(timeout=300),
+        ))
         assert result.boundary.timeout == 300  # tightened from 600
 
     def test_planner_boundary_config(self):

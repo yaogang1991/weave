@@ -232,7 +232,7 @@ class AgentRegistry:
         agent_name: str,
         task: str,
         overrides: InvocationOverrides | None = None,
-    ) -> AgentSpec:
+    ) -> Any:
         """Invoke an agent with optional caller overrides.
 
         This is the primary caller interface: 1 required (task) + 3 optional tighten.
@@ -249,8 +249,6 @@ class AgentRegistry:
         Raises:
             ValueError: If agent_name is not registered.
         """
-        from core.agent_spec import InvocationOverrides
-
         spec = self._specs.get(agent_name)
         if spec is None:
             raise ValueError(f"Agent '{agent_name}' not registered")
@@ -268,8 +266,6 @@ class AgentRegistry:
     @staticmethod
     def _apply_overrides(spec: AgentSpec, overrides: InvocationOverrides) -> AgentSpec:
         """Apply caller overrides (tighten-only) to an AgentSpec."""
-        from core.agent_spec import InvocationOverrides
-
         updates: dict = {}
 
         if overrides.timeout is not None:
@@ -344,7 +340,7 @@ class AgentRegistry:
         for spec in self._specs.values():
             cap = spec.capability
             contract = spec.contract
-            lines.append(f"\n### {spec.name}: {spec.name}")
+            lines.append(f"\n### {spec.name}")
             lines.append(f"Description: {spec.description}")
             lines.append(f"Skills: {', '.join(cap.skills)}")
             input_items = list(contract.input_schema.keys()) if contract.input_schema else []
