@@ -552,7 +552,7 @@ class NodeExecutor:
             node_id, retry_count=new_count,
         )
 
-        if node.retry_count < self._get_max_retries(node.agent_type):
+        if node.retry_count < self._get_max_retries(node):
             dag.update_node(node_id, status=NodeStatus.RETRYING)
             await self._emit(ExecutionEvent(
                 node_id=node_id,
@@ -920,9 +920,13 @@ class NodeExecutor:
             return self._agent_registry.get_spec(agent_type)
         return None
 
-    def _get_max_retries(self, agent_type: str) -> int:
-        """Get max retries for agent_type, preferring AgentSpec boundary."""
-        spec = self._get_agent_spec(agent_type)
+    def _get_max_retries(self, node: Any) -> int:
+        """Get max retries, preferring node-level value, then AgentSpec boundary."""
+        # Node-level max_retries always takes precedence
+        if hasattr(node, 'max_retries') and node.max_retries is not None:
+            return node.max_retries
+        # Fallback to AgentSpec boundary
+        spec = self._get_agent_spec(node.agent_type if hasattr(node, 'agent_type') else '')
         if spec and spec.boundary.max_retries is not None:
             return spec.boundary.max_retries
         return 3  # fallback default
