@@ -934,14 +934,19 @@ class NodeExecutor:
     def _get_node_timeout(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
-        """Get timeout for agent_type, preferring AgentSpec boundary."""
-        spec = self._get_agent_spec(agent_type)
-        if spec and spec.boundary.timeout is not None:
-            return spec.boundary.timeout
+        """Get timeout for agent_type.
+
+        Priority: NodeTimeoutConfig (supports dynamic artifact_count scaling)
+                  → AgentSpec boundary (static fallback)
+                  → heartbeat-based default
+        """
         if self._node_timeout_config is not None:
             return self._node_timeout_config.timeout_for(
                 agent_type, artifact_count=artifact_count,
             )
+        spec = self._get_agent_spec(agent_type)
+        if spec and spec.boundary.timeout is not None:
+            return spec.boundary.timeout
         interval, threshold = self._watchdog.get_heartbeat_settings(
             agent_type,
         )
@@ -950,10 +955,12 @@ class NodeExecutor:
     def _get_stall_timeout(
         self, agent_type: str, node: DAGNode | None = None,
     ) -> int:
-        """Return dynamic stall timeout, preferring AgentSpec boundary."""
-        spec = self._get_agent_spec(agent_type)
-        if spec and spec.boundary.stall_timeout is not None:
-            return spec.boundary.stall_timeout
+        """Return dynamic stall timeout.
+
+        Priority: NodeTimeoutConfig (supports dynamic complexity scaling)
+                  → AgentSpec boundary (static fallback)
+                  → _get_node_timeout (heartbeat-based)
+        """
         if self._node_timeout_config is not None:
             from core.node_utils import (
                 estimate_feature_count,
@@ -975,6 +982,9 @@ class NodeExecutor:
                 dep_count=dep_count,
                 feature_count=feature_count,
             )
+        spec = self._get_agent_spec(agent_type)
+        if spec and spec.boundary.stall_timeout is not None:
+            return spec.boundary.stall_timeout
         return self._get_node_timeout(agent_type)
 
     def _get_activity_timeout(self, agent_type: str) -> float:

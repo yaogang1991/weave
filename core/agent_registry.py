@@ -340,7 +340,7 @@ class AgentRegistry:
         for spec in self._specs.values():
             cap = spec.capability
             contract = spec.contract
-            lines.append(f"\n### {spec.name}")
+            lines.append(f"\n### {spec.name}: {spec.resolved_display_name}")
             lines.append(f"Description: {spec.description}")
             lines.append(f"Skills: {', '.join(cap.skills)}")
             input_items = list(contract.input_schema.keys()) if contract.input_schema else []

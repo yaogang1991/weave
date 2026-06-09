@@ -150,6 +150,7 @@ class DAGExecutionEngine:
         run_id: str = "",
         session_store: SessionStoreProto | None = None,
         node_guardrails: NodeGuardrailsProto | None = None,
+        agent_registry: Any | None = None,
     ):
         cfg = config or DAGEngineConfig()
         # Note: agent_executor is stored in NodeExecutor (created below).
@@ -225,6 +226,7 @@ class DAGExecutionEngine:
                 default_agent_backend=cfg.default_agent_backend,
                 session_store=session_store,
                 node_guardrails=node_guardrails,
+                agent_registry=agent_registry,
             ),
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)

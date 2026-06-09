@@ -171,7 +171,8 @@ class Planner:
 
         validator = PlanValidator(auto_fix=True)
         try:
-            fixed_plan_data = validator.validate(plan.model_dump())
+            fixed_plan_data = validator.validate(
+                    plan.model_dump(), agent_registry=self.agent_registry)
         except PlanValidationError as e:
             err_msg = str(e)
             if "nodes" in err_msg.lower() and "maximum" in err_msg.lower():
@@ -204,7 +205,8 @@ class Planner:
                     )
                 plan = OrchestratorPlan(**plan_data)
                 self._validate_agents(plan)
-                fixed_plan_data = validator.validate(plan.model_dump())
+                fixed_plan_data = validator.validate(
+                    plan.model_dump(), agent_registry=self.agent_registry)
             else:
                 raise
 

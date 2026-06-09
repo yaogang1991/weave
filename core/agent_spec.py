@@ -178,6 +178,11 @@ class AgentSpec(BaseModel):
     "one object describes one agent" model.
     """
     name: str
+    display_name: str = Field(
+        default="",
+        description="Human-readable name for prompts (e.g. 'Planner'). "
+                    "Falls back to title-cased name if empty.",
+    )
     version: str = "1.0.0"
     description: str = ""
 
@@ -186,6 +191,15 @@ class AgentSpec(BaseModel):
     capability: CapabilitySpec = Field(default_factory=CapabilitySpec)
     boundary: BoundarySpec = Field(default_factory=BoundarySpec)
     lifecycle: LifecycleSpec = Field(default_factory=LifecycleSpec)
+
+    # -------------------------------------------------------------------
+    # Display name resolution
+    # -------------------------------------------------------------------
+
+    @property
+    def resolved_display_name(self) -> str:
+        """Return display_name if set, else title-cased name."""
+        return self.display_name or self.name.title()
 
     # -------------------------------------------------------------------
     # Backward compatibility: AgentCapability interop
@@ -200,7 +214,7 @@ class AgentSpec(BaseModel):
 
         return AgentCapability(
             id=self.name,
-            name=self.name,
+            name=self.resolved_display_name,
             description=self.description,
             skills=self.capability.skills,
             input_schema=input_items,
@@ -222,6 +236,7 @@ class AgentSpec(BaseModel):
 
         return cls(
             name=capability.id,
+            display_name=capability.name if capability.name != capability.id else "",
             description=capability.description,
             contract=ContractSpec(
                 input_schema=input_schema,

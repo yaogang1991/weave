@@ -268,6 +268,7 @@ class ExecutionFactory:
             project_config=ProjectConfig.load(work_dir),
             session_store=store,
             node_guardrails=node_guardrails,
+            agent_registry=registry,
         )
 
         async def _session_event_handler(event):

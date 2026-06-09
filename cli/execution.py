@@ -413,6 +413,7 @@ def _build_runtime(
         session_id=session_id,
         backend_registry=backend_registry,
         budget_manager=budget_manager,
+        agent_registry=registry,
     )
 
     return {

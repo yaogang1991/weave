@@ -207,6 +207,16 @@ class TestAgentSpec:
         restored = AgentSpec.model_validate_json(json_str)
         assert restored == spec
 
+    def test_display_name_default(self):
+        """display_name defaults to empty, resolved_display_name title-cases name."""
+        spec = AgentSpec(name="code_reviewer")
+        assert spec.display_name == ""
+        assert spec.resolved_display_name == "Code_Reviewer"
+
+    def test_display_name_explicit(self):
+        spec = AgentSpec(name="planner", display_name="Planner")
+        assert spec.resolved_display_name == "Planner"
+
     def test_to_capability_backward_compat(self):
         """AgentSpec can produce backward-compatible AgentCapability."""
         from core.dag_models import AgentCapability
@@ -227,7 +237,7 @@ class TestAgentSpec:
         cap = spec.to_capability()
         assert isinstance(cap, AgentCapability)
         assert cap.id == "planner"
-        assert cap.name == "planner"
+        assert cap.name == "Planner"  # resolved_display_name from title-cased name
         assert "planning" in cap.skills
         assert "No code writing" in cap.constraints
         assert cap.system_prompt == "You plan things."
@@ -248,6 +258,7 @@ class TestAgentSpec:
         )
         spec = AgentSpec.from_capability(cap)
         assert spec.name == "reviewer"
+        assert spec.display_name == "Reviewer"  # preserved from capability.name
         assert "code_review" in spec.capability.skills
         assert spec.capability.constraints == ["Read-only"]
         assert spec.brain.system_prompt == "You review code."
