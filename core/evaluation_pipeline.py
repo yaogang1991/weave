@@ -145,11 +145,7 @@ class EvaluationPipeline:
 
         # Step 6: Determine final status
         node = dag.nodes[node_id]
-        if (
-            self._evaluator
-            and node.success_criteria
-            and node.agent_type == "generator"
-        ):
+        if self._should_run_evaluation(node):
             final_status = QualityGate.eval_status_to_node_status(
                 eval_result.eval_status,
             )
@@ -494,11 +490,7 @@ class EvaluationPipeline:
     ) -> tuple[Any, EvalOutcome | None]:
         node = dag.nodes[node_id]
 
-        if not (
-            self._evaluator
-            and node.success_criteria
-            and node.agent_type == "generator"
-        ):
+        if not self._should_run_evaluation(node):
             return None, None
 
         if not self._work_dir:
@@ -659,6 +651,22 @@ class EvaluationPipeline:
         if self._node_timeout_config is not None:
             return self._node_timeout_config.timeout_for(agent_type)
         return 300
+
+    # ------------------------------------------------------------------
+    # Evaluation gate helper
+    # ------------------------------------------------------------------
+
+    def _should_run_evaluation(self, node: Any) -> bool:
+        """Determine whether to run the evaluator for this node.
+
+        Default: only generator nodes with success_criteria run full evaluation.
+        This can be extended via AgentSpec in future iterations.
+        """
+        if not self._evaluator:
+            return False
+        if not node.success_criteria:
+            return False
+        return node.agent_type == "generator"
 
     # ------------------------------------------------------------------
     # Artifact helpers
