@@ -6,16 +6,37 @@ import { useJobStore } from "./job"
 export const useWebSocketStore = defineStore("websocket", () => {
   const connected = ref(false)
   const lastEventType = ref<string | null>(null)
-  let cleanup: (() => void) | null = null
+  let wsHandle: ReturnType<typeof useWebSocket> | null = null
+  let stopWatchConn: (() => void) | null = null
+  let stopWatchEvent: (() => void) | null = null
 
   function connect() {
-    if (cleanup) return
+    // Clean up previous connection if any
+    disconnect()
+
     const wsProtocol = location.protocol === "https:" ? "wss:" : "ws:"
     const wsUrl = wsProtocol + "//" + location.host + "/ws"
-    const { connected: conn, lastEvent } = useWebSocket(wsUrl)
-    watch(conn, (val) => { connected.value = val }, { immediate: true })
-    watch(lastEvent, (evt) => { if (evt) handleEvent(evt) })
-    cleanup = () => { conn.value = false }
+    wsHandle = useWebSocket(wsUrl)
+
+    stopWatchConn = watch(
+      wsHandle.connected,
+      (val) => { connected.value = val },
+      { immediate: true }
+    )
+    stopWatchEvent = watch(
+      wsHandle.lastEvent,
+      (evt) => { if (evt) handleEvent(evt) }
+    )
+  }
+
+  function disconnect() {
+    stopWatchConn?.()
+    stopWatchEvent?.()
+    stopWatchConn = null
+    stopWatchEvent = null
+    wsHandle?.disconnect()
+    wsHandle = null
+    connected.value = false
   }
 
   function handleEvent(event: any) {
@@ -34,5 +55,5 @@ export const useWebSocketStore = defineStore("websocket", () => {
     }
   }
 
-  return { connected, lastEventType, connect, handleEvent }
-}
+  return { connected, lastEventType, connect, disconnect, handleEvent }
+})

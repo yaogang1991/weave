@@ -19,7 +19,7 @@ export const useJobStore = defineStore('jobs', () => {
     error.value = null
     try {
       const res = await api.getJobs()
-      jobs.value = (res as any).jobs ?? res
+      jobs.value = res.jobs
     } catch (e: any) {
       error.value = e.message
     } finally {

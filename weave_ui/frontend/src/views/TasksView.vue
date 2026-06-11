@@ -60,6 +60,6 @@ async function handleSubmit() {
 
 onMounted(async () => {
   wsStore.fetchWorkspaces()
-  try { const res = await api.getTemplates(); templates.value = (res as any).templates ?? res } catch {}
+  try { const res = await api.getTemplates(); templates.value = res.templates } catch {}
 })
 </script>

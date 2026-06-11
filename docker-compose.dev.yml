@@ -1,4 +1,3 @@
-version: "3.8"
 services:
   weave-ui-backend:
     build: .
@@ -13,7 +12,7 @@ services:
   weave-ui-frontend:
     image: node:20-alpine
     working_dir: /app/weave_ui/frontend
-    command: npx vite --host 0.0.0.0 --port 3000
+    command: sh -c "npm install && npx vite --host 0.0.0.0 --port 3000"
     ports:
       - "3000:3000"
     volumes:

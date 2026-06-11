@@ -30,11 +30,12 @@
 import { ref, onMounted } from 'vue'
 import { NH1, NGrid, NGi, NCard, NTag, NButton, NModal, NInput, NSpace, useMessage } from 'naive-ui'
 import * as api from '../api'
+import type { TaskTemplate } from '../types'
 const msg = useMessage()
-const templates = ref<any[]>([])
+const templates = ref<TaskTemplate[]>([])
 const showForm = ref(false)
 const newTpl = ref({ name: '', description: '', category: 'general', prompt: '' })
-async function load() { try { const r = await api.getTaskTemplates(); templates.value = (r as any).templates || [] } catch {} }
+async function load() { try { const r = await api.getTaskTemplates(); templates.value = r.templates } catch {} }
 onMounted(load)
 async function doCreate() {
   try { await api.createTaskTemplate(newTpl.value); msg.success('Created'); showForm.value = false; await load() } catch (e: any) { msg.error(e.message) }

@@ -37,15 +37,38 @@
   </div>
 </template>
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { NH1, NH2, NGrid, NGi, NSpace, NStatistic, NEmpty } from 'naive-ui'
 import { useJobStore } from '../stores/job'
+import { useWebSocketStore } from '../stores/websocket'
 import JobCard from '../components/JobCard.vue'
 const jobStore = useJobStore()
+const wsStore = useWebSocketStore()
 const router = useRouter()
-let timer: ReturnType<typeof setInterval>
-onMounted(() => { jobStore.fetchJobs(); timer = setInterval(() => jobStore.fetchJobs(), 30000) })
-onUnmounted(() => clearInterval(timer))
+let timer: ReturnType<typeof setInterval> | null = null
+
+function startPolling() {
+  if (timer) return
+  timer = setInterval(() => jobStore.fetchJobs(), 30000)
+}
+
+function stopPolling() {
+  if (timer !== null) { clearInterval(timer); timer = null }
+}
+
+// Poll only when WebSocket is disconnected
+watch(() => wsStore.connected, (isConnected) => {
+  if (isConnected) stopPolling()
+  else startPolling()
+}, { immediate: true })
+
+onMounted(() => {
+  jobStore.fetchJobs()
+  wsStore.connect()
+  // Start polling as fallback if WS isn't connected yet
+  if (!wsStore.connected) startPolling()
+})
+onUnmounted(() => stopPolling())
 function goJob(id: string) { router.push('/jobs/' + id) }
 </script>
