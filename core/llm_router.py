@@ -98,6 +98,30 @@ class LLMRouter:
             max_tokens=route.max_tokens,
         )
 
+    def get_client_for_spec(self, spec: Any) -> LLMClient:
+        """Get an LLMClient configured from an AgentSpec's BrainSpec.
+
+        If BrainSpec.model_id is set, use it directly.
+        Otherwise, fall back to get_client(spec.name) which checks routing config.
+
+        Args:
+            spec: An AgentSpec instance with a brain attribute.
+
+        Returns:
+            LLMClient configured for this agent spec.
+        """
+        brain = spec.brain
+        if brain.model_id:
+            provider = self._resolve_provider(brain.model_id)
+            return self._get_or_create(
+                provider,
+                brain.model_id,
+                temperature=brain.temperature,
+                max_tokens=brain.max_tokens,
+            )
+        # Fall back to agent_type-based routing
+        return self.get_client(spec.name)
+
     def get_fallback_client(self, failed_model: str) -> LLMClient | None:
         """Get the next available fallback client after a model failure.
 

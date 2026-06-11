@@ -44,17 +44,17 @@ class TestRewireReplacementEdges:
         engine = _make_engine()
 
         old_dag = DAG(reasoning="old")
-        old_dag.add_node(_make_node("plan", "planner", "Plan"))
-        old_dag.add_node(_make_node("impl", "generator", "Implement"))
-        old_dag.add_edge("plan", "impl")
+        old_dag = old_dag.add_node(_make_node("plan", "planner", "Plan"))
+        old_dag = old_dag.add_node(_make_node("impl", "generator", "Implement"))
+        old_dag = old_dag.add_edge("plan", "impl")
         old_dag.update_node("plan", status=NodeStatus.FAILED, error="timeout")
 
         new_dag = DAG(reasoning="new")
-        new_dag.add_node(_make_node("plan_v2", "planner", "Plan again"))
-        new_dag.add_node(_make_node("impl", "generator", "Implement"))
+        new_dag = new_dag.add_node(_make_node("plan_v2", "planner", "Plan again"))
+        new_dag = new_dag.add_node(_make_node("impl", "generator", "Implement"))
 
         merged = engine._merge_dag_results(old_dag, new_dag)
-        engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
+        merged = engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
 
         edge_pairs = [(e.from_node, e.to_node) for e in merged.edges]
         assert ("plan_v2", "impl") in edge_pairs
@@ -65,20 +65,20 @@ class TestRewireReplacementEdges:
         engine = _make_engine()
 
         old_dag = DAG(reasoning="old")
-        old_dag.add_node(_make_node("plan", "planner"))
-        old_dag.add_node(_make_node("impl_1", "generator"))
-        old_dag.add_node(_make_node("impl_2", "generator"))
-        old_dag.add_edge("plan", "impl_1")
-        old_dag.add_edge("plan", "impl_2")
+        old_dag = old_dag.add_node(_make_node("plan", "planner"))
+        old_dag = old_dag.add_node(_make_node("impl_1", "generator"))
+        old_dag = old_dag.add_node(_make_node("impl_2", "generator"))
+        old_dag = old_dag.add_edge("plan", "impl_1")
+        old_dag = old_dag.add_edge("plan", "impl_2")
         old_dag.update_node("plan", status=NodeStatus.FAILED, error="timeout")
 
         new_dag = DAG(reasoning="new")
-        new_dag.add_node(_make_node("plan_v2", "planner"))
-        new_dag.add_node(_make_node("impl_1", "generator"))
-        new_dag.add_node(_make_node("impl_2", "generator"))
+        new_dag = new_dag.add_node(_make_node("plan_v2", "planner"))
+        new_dag = new_dag.add_node(_make_node("impl_1", "generator"))
+        new_dag = new_dag.add_node(_make_node("impl_2", "generator"))
 
         merged = engine._merge_dag_results(old_dag, new_dag)
-        engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
+        merged = engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
 
         edge_pairs = [(e.from_node, e.to_node) for e in merged.edges]
         assert ("plan_v2", "impl_1") in edge_pairs
@@ -91,17 +91,17 @@ class TestRewireReplacementEdges:
         engine = _make_engine()
 
         old_dag = DAG(reasoning="old")
-        old_dag.add_node(_make_node("plan", "planner"))
-        old_dag.add_node(_make_node("impl", "generator"))
-        old_dag.add_edge("plan", "impl", DependencyType.HARD)
+        old_dag = old_dag.add_node(_make_node("plan", "planner"))
+        old_dag = old_dag.add_node(_make_node("impl", "generator"))
+        old_dag = old_dag.add_edge("plan", "impl", DependencyType.HARD)
         old_dag.update_node("plan", status=NodeStatus.FAILED, error="x")
 
         new_dag = DAG(reasoning="new")
-        new_dag.add_node(_make_node("plan_v2", "planner"))
-        new_dag.add_node(_make_node("impl", "generator"))
+        new_dag = new_dag.add_node(_make_node("plan_v2", "planner"))
+        new_dag = new_dag.add_node(_make_node("impl", "generator"))
 
         merged = engine._merge_dag_results(old_dag, new_dag)
-        engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
+        merged = engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
 
         edge = next(e for e in merged.edges if e.from_node == "plan_v2")
         assert edge.dependency_type == DependencyType.HARD
@@ -111,17 +111,17 @@ class TestRewireReplacementEdges:
         engine = _make_engine()
 
         old_dag = DAG(reasoning="old")
-        old_dag.add_node(_make_node("plan", "planner"))
-        old_dag.add_node(_make_node("impl", "generator"))
-        old_dag.add_edge("plan", "impl")
+        old_dag = old_dag.add_node(_make_node("plan", "planner"))
+        old_dag = old_dag.add_node(_make_node("impl", "generator"))
+        old_dag = old_dag.add_edge("plan", "impl")
         old_dag.update_node("plan", status=NodeStatus.FAILED, error="x")
 
         new_dag = DAG(reasoning="new")
-        new_dag.add_node(_make_node("impl", "generator"))
+        new_dag = new_dag.add_node(_make_node("impl", "generator"))
 
         merged = engine._merge_dag_results(old_dag, new_dag)
         edges_before = [(e.from_node, e.to_node) for e in merged.edges]
-        engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
+        merged = engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
         edges_after = [(e.from_node, e.to_node) for e in merged.edges]
 
         assert edges_before == edges_after
@@ -131,18 +131,18 @@ class TestRewireReplacementEdges:
         engine = _make_engine()
 
         old_dag = DAG(reasoning="old")
-        old_dag.add_node(_make_node("plan", "planner"))
-        old_dag.add_node(_make_node("impl", "generator"))
-        old_dag.add_edge("plan", "impl")
+        old_dag = old_dag.add_node(_make_node("plan", "planner"))
+        old_dag = old_dag.add_node(_make_node("impl", "generator"))
+        old_dag = old_dag.add_edge("plan", "impl")
         old_dag.update_node("plan", status=NodeStatus.FAILED, error="x")
 
         new_dag = DAG(reasoning="new")
-        new_dag.add_node(_make_node("plan_v2", "planner"))
-        new_dag.add_node(_make_node("impl", "generator"))
-        new_dag.add_edge("plan_v2", "impl")
+        new_dag = new_dag.add_node(_make_node("plan_v2", "planner"))
+        new_dag = new_dag.add_node(_make_node("impl", "generator"))
+        new_dag = new_dag.add_edge("plan_v2", "impl")
 
         merged = engine._merge_dag_results(old_dag, new_dag)
-        engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
+        merged = engine._rewire_replacement_edges(merged, old_dag, new_dag, "plan")
 
         impl_edges = [e for e in merged.edges if e.to_node == "impl"]
         assert len(impl_edges) == 1
@@ -156,7 +156,8 @@ class TestRewireReplacementEdges:
         new_dag = DAG(reasoning="new")
 
         # Should not raise
-        engine._rewire_replacement_edges(new_dag, old_dag, new_dag, "nonexistent")
+        result = engine._rewire_replacement_edges(new_dag, old_dag, new_dag, "nonexistent")
+        assert result is new_dag  # Returned unchanged
 
     async def test_cycle_detection_after_rewire_aborts_replan(self):
         """Replan that produces a cyclic DAG falls back gracefully (#1060).
@@ -167,21 +168,21 @@ class TestRewireReplacementEdges:
         engine = _make_engine()
 
         old_dag = DAG(reasoning="old")
-        old_dag.add_node(_make_node("A", "planner"))
-        old_dag.add_node(_make_node("B", "generator"))
-        old_dag.add_node(_make_node("C", "evaluator"))
-        old_dag.add_edge("A", "B")
-        old_dag.add_edge("B", "C")
+        old_dag = old_dag.add_node(_make_node("A", "planner"))
+        old_dag = old_dag.add_node(_make_node("B", "generator"))
+        old_dag = old_dag.add_node(_make_node("C", "evaluator"))
+        old_dag = old_dag.add_edge("A", "B")
+        old_dag = old_dag.add_edge("B", "C")
         old_dag.update_node("A", status=NodeStatus.SUCCESS)
         old_dag.update_node("B", status=NodeStatus.FAILED, error="x")
 
         # Replan creates B2 (generator) that depends on C, creating a cycle
         # when B's downstream edge to C is rewired to B2.
         new_dag = DAG(reasoning="replan")
-        new_dag.add_node(_make_node("B2", "generator"))
-        new_dag.add_node(_make_node("C", "evaluator"))
-        new_dag.add_edge("B2", "C")
-        new_dag.add_edge("C", "B2")  # Creates cycle: B2 -> C -> B2
+        new_dag = new_dag.add_node(_make_node("B2", "generator"))
+        new_dag = new_dag.add_node(_make_node("C", "evaluator"))
+        new_dag = new_dag.add_edge("B2", "C")
+        new_dag = new_dag.add_edge("C", "B2")  # Creates cycle: B2 -> C -> B2
 
         async def replan_handler(dag, failed_id):
             return new_dag

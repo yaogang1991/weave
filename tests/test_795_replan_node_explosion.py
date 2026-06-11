@@ -24,14 +24,14 @@ class TestMaxDagNodes:
         """Replan that would exceed max_dag_nodes should be rejected."""
         old_dag = DAG(reasoning="old")
         for i in range(10):
-            old_dag.add_node(DAGNode(
+            old_dag = old_dag.add_node(DAGNode(
                 id=f"n{i}", agent_type="generator",
                 task_description=f"task{i}",
             ))
 
         new_dag = DAG(reasoning="new")
         for i in range(20):
-            new_dag.add_node(DAGNode(
+            new_dag = new_dag.add_node(DAGNode(
                 id=f"new_n{i}", agent_type="generator",
                 task_description=f"new task{i}",
             ))
@@ -69,7 +69,7 @@ class TestMaxDagNodes:
 
         dag = DAG(reasoning="test")
         for i in range(30):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"n{i}", agent_type="generator",
                 task_description=f"t{i}",
             ))
@@ -91,7 +91,7 @@ class TestProviderCircuitBreaker:
         engine._planner_timeout_streak = 0
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="n1", agent_type="generator",
             task_description="task",
             error="degeneration: empty args {}",
@@ -111,7 +111,7 @@ class TestProviderCircuitBreaker:
         engine._planner_timeout_streak = 2
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="n1", agent_type="generator",
             task_description="task",
             error="SyntaxError: invalid syntax",
@@ -130,7 +130,7 @@ class TestProviderCircuitBreaker:
         engine._planner_timeout_streak = 2
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan", agent_type="planner",
             task_description="plan",
             error="NodeTimeoutError: timeout after 120s",
@@ -148,7 +148,7 @@ class TestProviderCircuitBreaker:
         engine._planner_timeout_streak = 2
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl", agent_type="generator",
             task_description="impl",
             error="Tool call returned empty args: {}",

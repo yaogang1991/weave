@@ -105,3 +105,50 @@ class GuardrailResultProto(Protocol):
 
     @property
     def is_blocked(self) -> bool: ...
+
+
+# ---------------------------------------------------------------------------
+# BackendManager (backend/lifecycle.py)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class BackendManagerProto(Protocol):
+    """Minimal interface for workspace lifecycle used by NodeExecutor."""
+
+    def setup_node(
+        self,
+        job_id: str,
+        run_id: str,
+        node_id: str,
+        strategy: str = "shared",
+    ) -> object: ...  # Returns NodeWorkspace
+
+    def cleanup_node(
+        self,
+        job_id: str,
+        run_id: str,
+        node_id: str,
+    ) -> None: ...
+
+    def cleanup_node_artifacts(
+        self,
+        job_id: str,
+        run_id: str,
+        node_id: str,
+    ) -> list[str]: ...
+
+
+# ---------------------------------------------------------------------------
+# EvaluatorEngine (evaluator/engine.py)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class EvaluatorEngineProto(Protocol):
+    """Minimal interface for evaluation used by EvaluationPipeline."""
+
+    async def evaluate(
+        self,
+        node: object,  # DAGNode
+        workspace_path: str | None = None,
+        extra_criteria: list | None = None,
+    ) -> object: ...  # Returns EvaluationResult

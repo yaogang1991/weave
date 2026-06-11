@@ -14,7 +14,7 @@ from core.models import NodeStatus
 def _make_dag() -> DAG:
     """Create a minimal DAG with a single generator node."""
     dag = DAG(reasoning="test #717")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1",
         agent_type="generator",
         task_description="implement feature",

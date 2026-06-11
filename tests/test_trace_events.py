@@ -7,7 +7,7 @@ from core.dag_engine import DAGExecutionEngine
 
 def _make_linear_dag():
     dag = DAG(reasoning="test trace")
-    dag.add_node(DAGNode(id="a", agent_type="generator", task_description="impl"))
+    dag = dag.add_node(DAGNode(id="a", agent_type="generator", task_description="impl"))
     return dag
 
 
@@ -96,11 +96,11 @@ class TestTraceEventEmission:
     @pytest.mark.asyncio
     async def test_concurrent_nodes_produce_separate_traces(self):
         dag = DAG(reasoning="parallel")
-        dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-        dag.add_node(DAGNode(id="b1", agent_type="generator", task_description="impl1"))
-        dag.add_node(DAGNode(id="b2", agent_type="generator", task_description="impl2"))
-        dag.add_edge("a", "b1")
-        dag.add_edge("a", "b2")
+        dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+        dag = dag.add_node(DAGNode(id="b1", agent_type="generator", task_description="impl1"))
+        dag = dag.add_node(DAGNode(id="b2", agent_type="generator", task_description="impl2"))
+        dag = dag.add_edge("a", "b1")
+        dag = dag.add_edge("a", "b2")
 
         collected = []
 

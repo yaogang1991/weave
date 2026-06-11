@@ -13,7 +13,7 @@ class TestDAGUpdateNode:
         """update_node returns a new DAGNode, not the original."""
         dag = DAG()
         original = DAGNode(id="n1", agent_type="generator", task_description="test")
-        dag.add_node(original)
+        dag = dag.add_node(original)
 
         updated = dag.update_node("n1", status=NodeStatus.RUNNING)
         assert updated is not original
@@ -23,7 +23,7 @@ class TestDAGUpdateNode:
     def test_update_node_replaces_in_dict(self):
         """dag.nodes reflects the updated node after update_node."""
         dag = DAG()
-        dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="test"))
+        dag = dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="test"))
 
         dag.update_node("n1", status=NodeStatus.SUCCESS, result={"key": "val"})
 
@@ -33,7 +33,7 @@ class TestDAGUpdateNode:
     def test_update_node_multiple_fields(self):
         """Multiple fields updated in single call."""
         dag = DAG()
-        dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="test"))
+        dag = dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="test"))
 
         dag.update_node(
             "n1",
@@ -51,7 +51,7 @@ class TestDAGUpdateNode:
         """Series of updates never touch the original node."""
         dag = DAG()
         original = DAGNode(id="n1", agent_type="generator", task_description="test")
-        dag.add_node(original)
+        dag = dag.add_node(original)
 
         dag.update_node("n1", status=NodeStatus.RUNNING)
         dag.update_node("n1", status=NodeStatus.FAILED, error="oops")

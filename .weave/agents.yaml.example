@@ -1,0 +1,194 @@
+# =============================================================================
+# Weave Agent Configuration — 5-core AgentSpec YAML Format
+# =============================================================================
+#
+# This file demonstrates the YAML format for registering custom agents
+# using the unified 5-core AgentSpec model (M7.4, #1109).
+#
+# Usage:
+#   1. Copy this file to .weave/agents.yaml (remove the .example suffix)
+#   2. Edit the agent definitions to match your project's needs
+#   3. Weave loads .weave/agents.yaml at startup via AgentRegistry.load_from_yaml()
+#
+# The 5 cores are orthogonal — each controls one aspect of agent behavior:
+#   - contract:   What goes in, what comes out, how success is measured
+#   - brain:      Which model, what parameters, what system prompt
+#   - capability: What tools, what skills, what dependencies
+#   - boundary:   How much budget, how long, how many retries
+#   - lifecycle:  What to remember, how to handle errors
+#
+# Default agents (planner, generator, evaluator) are always registered
+# and cannot be removed. Custom agents defined here extend the registry.
+# =============================================================================
+
+agents:
+  # ---------------------------------------------------------------------------
+  # Example: reviewer — a full-featured custom agent showing all 5 cores
+  # ---------------------------------------------------------------------------
+  - name: reviewer
+    version: "1.0.0"
+    description: >
+      Automated code reviewer that performs static analysis, security scanning,
+      style checks, and produces structured review reports with actionable feedback.
+      Runs after the generator produces code artifacts.
+
+    # --- Contract Spec -------------------------------------------------------
+    # Defines the input/output contract and success criteria.
+    # input_schema / output_schema use JSON Schema format (dict, not list).
+    # success_criteria uses structured evaluation criteria.
+    contract:
+      input_schema:
+        code_artifacts:
+          type: object
+          description: "Code files produced by the generator agent"
+        sprint_contract:
+          type: object
+          description: "Original task specification and acceptance criteria"
+        project_context:
+          type: object
+          description: "Project structure, dependencies, and coding standards"
+      output_schema:
+        review_report:
+          type: object
+          description: "Structured review findings with severity ratings"
+        verdict:
+          type: string
+          enum: ["approve", "request_changes", "reject"]
+          description: "Overall review verdict"
+        suggestions:
+          type: array
+          description: "Ordered list of improvement suggestions"
+      success_criteria:
+        - type: file_pattern
+          pattern: "review_report\\.json"
+          description: "Review report file must be produced"
+        - type: pattern_present
+          pattern: "verdict:\\s*(approve|request_changes|reject)"
+          description: "Verdict must be one of the three valid values"
+        - type: custom
+          description: "All critical and high-severity findings must have suggested fixes"
+
+    # --- Brain Spec ----------------------------------------------------------
+    # Controls model selection and reasoning parameters.
+    # quality_tier routes to the appropriate model (fast/balanced/high/premium).
+    # model_id overrides quality_tier routing when set.
+    brain:
+      quality_tier: high          # fast | balanced | high | premium
+      # model_id: claude-sonnet-4-6   # Optional: direct model override
+      temperature: 0.3            # Low temperature for consistent reviews
+      max_tokens: 8192            # Larger context for detailed reports
+      system_prompt: >
+        You are an expert code reviewer. Analyze the provided code artifacts
+        against the sprint contract and project coding standards.
+
+        For each finding, provide:
+        - Severity: critical | high | medium | low | info
+        - Location: file path and line range
+        - Description: what the issue is
+        - Suggestion: concrete fix or improvement
+
+        End with an overall verdict: approve, request_changes, or reject.
+
+    # --- Capability Spec -----------------------------------------------------
+    # Defines tools, skills, dependencies, and constraints.
+    # dependencies declare other agents this agent needs, with optional fallback.
+    capability:
+      skills:
+        - code_review
+        - static_analysis
+        - security_scan
+        - style_check
+        - complexity_analysis
+      tools:
+        - read          # Read source files
+        - grep          # Search for patterns
+        - glob          # Find files by pattern
+        - bash          # Run linters and analyzers
+      dependencies:
+        - agent_name: generator
+          purpose: "Produces code artifacts for review"
+          fallback: planner    # Fall back to planner if generator unavailable
+      constraints:
+        - "Must NOT modify any source code"
+        - "Must produce a structured JSON review report"
+        - "Must provide actionable suggestions for all critical findings"
+        - "Review scope limited to files changed in the current sprint"
+
+    # --- Boundary Spec -------------------------------------------------------
+    # Controls resource limits, time constraints, and retry behavior.
+    # All limits are ceilings; callers can only tighten, never loosen.
+    boundary:
+      timeout: 300                # Maximum execution time in seconds (5 min)
+      stall_timeout: 60           # No-progress timeout in seconds (1 min)
+      max_retries: 2              # Maximum retry attempts
+      resource_budget:
+        max_tokens: 32768         # Token budget per invocation
+        max_cost_usd: 0.50        # Cost ceiling per invocation
+        # max_iterations: 10      # Optional: max internal loop iterations
+      # termination:              # Optional: convergence-based termination
+      #   convergence_threshold: 0.95
+      #   convergence_rounds: 3
+
+    # --- Lifecycle Spec ------------------------------------------------------
+    # Controls memory persistence and error recovery strategy.
+    lifecycle:
+      memory_enabled: true
+      memory_scope: session       # session | global
+      error_policy:
+        strategy: retry_with_backoff  # fail_fast | retry_with_backoff | fallback_agent | circuit_breaker | replan
+        max_retries: 3
+        backoff_base: 2.0         # Initial backoff in seconds
+        backoff_cap: 60.0         # Maximum backoff in seconds
+        # fallback_agent: evaluator  # Used when strategy is fallback_agent
+
+  # ---------------------------------------------------------------------------
+  # Example: sec_scanner — a minimal custom agent (only required fields)
+  # ---------------------------------------------------------------------------
+  # Shows that all 5 cores have sensible defaults; you only need `name`.
+  #
+  # - name: sec_scanner
+  #   description: "Lightweight security vulnerability scanner"
+  #   brain:
+  #     quality_tier: fast
+  #   boundary:
+  #     timeout: 120
+  #     resource_budget:
+  #       max_cost_usd: 0.10
+
+# =============================================================================
+# Notes
+# =============================================================================
+#
+# Default agents (always registered, cannot be removed):
+#
+#   planner:
+#     Skills: requirement_analysis, task_decomposition, architecture_design,
+#             technical_decision, interface_definition, planning
+#     Role: Requirement analysis, task decomposition, architecture design
+#
+#   generator:
+#     Skills: code_writing, file_editing, test_writing, debugging,
+#             git_operations, implementation
+#     Role: Code implementation, file editing, test writing
+#
+#   evaluator:
+#     Skills: test_execution, quality_assessment, code_review,
+#             performance_analysis, security_scan, evaluation
+#     Role: Quality assessment, test verification, pass/fail judgment
+#
+# To override defaults, register an agent with the same name — it will
+# replace the built-in definition while preserving protected status.
+#
+# Quality tier routing (configurable via .weave/config.yaml):
+#   fast     -> lightweight model (e.g., haiku-class)
+#   balanced -> general-purpose model (e.g., sonnet-class)
+#   high     -> high-parameter model (e.g., sonnet-class with higher limits)
+#   premium  -> top-tier model (e.g., opus-class)
+#
+# Error strategies:
+#   fail_fast          -> Stop immediately on first error
+#   retry_with_backoff -> Retry with exponential backoff
+#   fallback_agent     -> Delegate to a fallback agent on failure
+#   circuit_breaker    -> Stop after repeated failures (prevents cascading)
+#   replan             -> Request orchestrator to re-plan the DAG
+# =============================================================================

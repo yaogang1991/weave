@@ -44,7 +44,7 @@ class TestDagEngineWorkDirFastFail:
         from core.models import DAG, DAGNode, NodeStatus
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen",
             agent_type="generator",
             task_description="test",
@@ -75,7 +75,7 @@ class TestDagEngineWorkDirFastFail:
         from core.models import DAG, DAGNode, NodeStatus, EvaluationResult
 
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen",
             agent_type="generator",
             task_description="test",

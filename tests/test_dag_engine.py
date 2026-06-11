@@ -14,7 +14,7 @@ from core.dag_engine import DAGExecutionEngine
 
 def _make_linear_dag(criteria=None):
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="a", agent_type="generator", task_description="impl",
         success_criteria=criteria or [],
     ))
@@ -23,11 +23,11 @@ def _make_linear_dag(criteria=None):
 
 def _make_three_node_dag():
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-    dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
-    dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
-    dag.add_edge("a", "b")
-    dag.add_edge("b", "c")
+    dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+    dag = dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
+    dag = dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
+    dag = dag.add_edge("a", "b")
+    dag = dag.add_edge("b", "c")
     return dag
 
 
@@ -63,14 +63,14 @@ class TestTopologicalExecution:
     @pytest.mark.asyncio
     async def test_parallel_nodes(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-        dag.add_node(DAGNode(id="b1", agent_type="generator", task_description="impl1"))
-        dag.add_node(DAGNode(id="b2", agent_type="generator", task_description="impl2"))
-        dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
-        dag.add_edge("a", "b1")
-        dag.add_edge("a", "b2")
-        dag.add_edge("b1", "c")
-        dag.add_edge("b2", "c")
+        dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+        dag = dag.add_node(DAGNode(id="b1", agent_type="generator", task_description="impl1"))
+        dag = dag.add_node(DAGNode(id="b2", agent_type="generator", task_description="impl2"))
+        dag = dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
+        dag = dag.add_edge("a", "b1")
+        dag = dag.add_edge("a", "b2")
+        dag = dag.add_edge("b1", "c")
+        dag = dag.add_edge("b2", "c")
 
         execution_order = []
 
@@ -196,9 +196,9 @@ class TestHandoffArtifacts:
     @pytest.mark.asyncio
     async def test_artifacts_passed_between_nodes(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="generator", task_description="gen"))
-        dag.add_node(DAGNode(id="b", agent_type="evaluator", task_description="eval"))
-        dag.add_edge("a", "b")
+        dag = dag.add_node(DAGNode(id="a", agent_type="generator", task_description="gen"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="evaluator", task_description="eval"))
+        dag = dag.add_edge("a", "b")
 
         received_artifacts = []
 
@@ -254,9 +254,9 @@ class TestEvaluatorFeedbackPropagation:
             error="Evaluation failed: F811 redefinition",
             eval_feedback="F811 redefinition of unused 'app' from line 8",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("impl_main", "eval_main")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("impl_main", "eval_main")
 
         # Simulate what dag_engine does in the evaluator feedback loop:
         # copy eval_feedback from evaluator to generator before retrying

@@ -213,7 +213,7 @@ class TestAdaptToFailureAutoReplan:
         )
         node.status = NodeStatus.FAILED
         node.error = "Node produced zero output artifacts. Agent type: generator"
-        dag.add_node(node)
+        dag = dag.add_node(node)
         return dag
 
     @pytest.mark.asyncio
@@ -241,7 +241,7 @@ class TestAdaptToFailureAutoReplan:
         )
         node.status = NodeStatus.FAILED
         node.error = "Node produced zero output artifacts."
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         # This will try to call the LLM, which we can't mock easily here.
         # Instead verify the feature count heuristic returns False for simple tasks.

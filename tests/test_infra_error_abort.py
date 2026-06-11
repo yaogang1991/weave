@@ -40,7 +40,7 @@ def _make_dag_with_failed_node(error: str) -> tuple[DAG, str]:
         status=NodeStatus.FAILED,
         error=error,
     )
-    dag.add_node(node)
+    dag = dag.add_node(node)
     return dag, "gen_1"
 
 
@@ -152,7 +152,7 @@ class TestAdaptToFailureInfraAbort:
             task_description="test",
             status=NodeStatus.FAILED,
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         with patch.object(orchestrator.llm, "call") as mock_llm:
             decision = await orchestrator.adapt_to_failure(

@@ -51,7 +51,7 @@ class TestTestFileEnforcement:
         """Generator with TEST_FILE_EXISTS but no test files -> FAILED."""
         node_artifacts = ["parser.py", "lexer.py"]
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="Create a new module and write tests for it",
@@ -75,7 +75,7 @@ class TestTestFileEnforcement:
     async def test_passes_when_test_files_exist(self):
         """Generator with TEST_FILE_EXISTS and test files present -> SUCCESS."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="impl",
@@ -101,7 +101,7 @@ class TestTestFileEnforcement:
     async def test_skips_when_no_test_file_criteria(self):
         """Generator without TEST_FILE_EXISTS criteria -> no test file check."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="impl",
@@ -129,7 +129,7 @@ class TestTestFileEnforcement:
     async def test_skips_when_no_artifacts(self):
         """Generator with no output artifacts -> no test file check."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="impl",
@@ -152,7 +152,7 @@ class TestTestFileEnforcement:
     async def test_feedback_is_actionable(self):
         """Error message tells the agent exactly what to do."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="Create a new library and implement it",
@@ -185,7 +185,7 @@ class TestTestFileEnforcement:
         the enforcement.
         """
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="Create a new library and implement it",
