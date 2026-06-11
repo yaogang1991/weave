@@ -12,25 +12,29 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Ensure project root is on path when running server directly
 _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
 from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel as PydanticModel  # noqa: E402
 
-from visualizer.event_bridge import WebSocketEventBridge  # noqa: E402
+from weave_ui.event_bridge import WebSocketEventBridge  # noqa: E402
 from session.store import SessionStore  # noqa: E402
 from core.config import WeaveConfig  # noqa: E402
 
@@ -39,7 +43,7 @@ from control_plane.repository import JobRepository  # noqa: E402
 from control_plane.approval import ApprovalRepository, TicketStatus  # noqa: E402
 
 
-app = FastAPI(title="Weave Visualizer", version="2.0")
+app = FastAPI(title="Weave UI", version="3.0")
 bridge = WebSocketEventBridge()
 
 
@@ -92,6 +96,47 @@ class MemoryAddRequest(PydanticModel):
     scope: str = "global"
     agent_type: str = "shared"
     keywords: list[str] = []
+
+
+class SubmitJobRequest(PydanticModel):
+    requirement: str
+    workspace: str
+    template: str | None = None
+    priority: int = 0
+
+
+class AddWorkspaceRequest(PydanticModel):
+    path: str
+    label: str = ""
+
+
+class NotificationPrefsUpdate(PydanticModel):
+    on_succeeded: bool | None = None
+    on_failed: bool | None = None
+    on_stuck: bool | None = None
+    on_pending_approval: bool | None = None
+
+
+class TaskTemplateCreate(PydanticModel):
+    model_config = {"extra": "allow"}
+    name: str
+    description: str = ""
+    category: str = "general"
+    prompt: str = ""
+
+
+class TaskTemplateUpdate(PydanticModel):
+    model_config = {"extra": "allow"}
+    name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    prompt: str | None = None
+
+
+class AnnotationUpdate(PydanticModel):
+    tags: list[str] | None = None
+    notes: str | None = None
+    rating: int | None = None
 
 
 # Static files
@@ -389,13 +434,12 @@ async def api_retry_job(job_id: str):
             detail=f"Cannot retry job in status {job.status.value}",
         )
 
-    job.status = JobStatus.QUEUED
-    job.attempt = 0
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.QUEUED)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     job.last_error = ""
     job.error_category = ""
-    job.lease_owner = None
-    job.lease_expires_at = None
-    job.updated_at = datetime.now(timezone.utc)
     repo.update_job(job)
     return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
 
@@ -692,10 +736,8 @@ async def api_learning_status():
 
 
 class TemplateInstantiateRequest(PydanticModel):
+    model_config = {"extra": "forbid"}
     variables: dict[str, str] = {}
-
-    class Config:
-        extra = "forbid"
 
 
 @app.get("/api/templates")
@@ -744,6 +786,321 @@ async def api_instantiate_template(name: str, request: TemplateInstantiateReques
     }
 
 
+# ── Job Submission & Workspace APIs ──────────────────────────────────
+
+
+def _get_run_service() -> "RunService":
+    """Lazily create and cache a RunService singleton."""
+    if not hasattr(app.state, "run_service"):
+        from control_plane.service import RunService
+        weave_config = WeaveConfig.from_env()
+        app.state.run_service = RunService(
+            repository=JobRepository(base_path="./data/jobs"),
+            llm_config=weave_config.llm,
+            default_backend=weave_config.default_backend,
+            backend_base_path=weave_config.backend_base_path,
+            approval_repo=ApprovalRepository(),
+            non_interactive=True,
+            approval_timeout_sec=weave_config.approval_timeout_sec,
+            budget_config=weave_config.budget,
+        )
+    return app.state.run_service
+
+
+@app.post("/api/jobs")
+async def api_submit_job(body: SubmitJobRequest):
+    """Submit a new job via the web UI."""
+    service = _get_run_service()
+    try:
+        job = await service.submit_job(
+            requirement=body.requirement,
+            project_path=body.workspace,
+        )
+    except Exception as exc:
+        logger.exception("Failed to submit job")
+        raise HTTPException(status_code=500, detail="Failed to submit job. Check server logs for details.")
+
+    return {
+        "id": job.id,
+        "status": job.status.value,
+        "requirement": job.requirement,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+    }
+
+
+_WORKSPACES_FILE = Path("./data/workspaces.json")
+_PRESET_WORKSPACES: list[dict] = []
+_workspaces_lock = asyncio.Lock()
+
+
+def _load_workspaces() -> list[dict]:
+    """Load workspaces from presets + user-configured paths."""
+    workspaces = list(_PRESET_WORKSPACES)
+    if _WORKSPACES_FILE.exists():
+        try:
+            custom = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
+            workspaces.extend(custom)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return workspaces
+
+
+@app.get("/api/workspaces")
+async def api_list_workspaces():
+    """List available workspaces (presets + custom)."""
+    return {"workspaces": _load_workspaces()}
+
+
+@app.post("/api/workspaces")
+async def api_add_workspace(body: AddWorkspaceRequest):
+    """Add a custom workspace path."""
+    async with _workspaces_lock:
+        _WORKSPACES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        existing = []
+        if _WORKSPACES_FILE.exists():
+            try:
+                existing = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = []
+        # Avoid duplicates
+        if any(w.get("path") == body.path for w in existing):
+            raise HTTPException(status_code=409, detail="Workspace already exists")
+        entry = {"path": body.path, "label": body.label or body.path}
+        existing.append(entry)
+        _WORKSPACES_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    return entry
+
+
+@app.get("/api/jobs/{job_id}/summary")
+async def api_job_summary(job_id: str):
+    """Get the completion summary for a job."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    runs = repo.list_runs_by_job(job_id)
+    if not runs:
+        return {"title": "No runs yet", "content": ""}
+
+    # Find the latest completed run's session
+    config = WeaveConfig.from_env()
+    store = SessionStore(config.event_store_path)
+    for run in reversed(runs):
+        if run.session_id:
+            events = store.get_events(run.session_id)
+            # Look for the final summary event
+            for evt in reversed(events):
+                evt_type = evt.type.value if hasattr(evt, "type") else str(evt)
+                evt_payload = evt.payload if hasattr(evt, "payload") else {}
+                if "end" in evt_type or "summary" in evt_type or "result" in evt_type:
+                    data = evt_payload if isinstance(evt_payload, dict) else {}
+                    return {
+                        "title": data.get("title", f"Run {run.id} completed"),
+                        "content": data.get("content", data.get("result", "")),
+                    }
+
+    return {"title": f"Job {job_id}", "content": "No summary available"}
+
+
+# ── Notification & Search APIs (M8.3) ──────────────────────────────
+
+
+_NOTIF_PREFS_FILE = Path("./data/notification_preferences.json")
+_DEFAULT_NOTIF_PREFS = {
+    "on_succeeded": True,
+    "on_failed": True,
+    "on_stuck": True,
+    "on_pending_approval": True,
+}
+_notif_lock = asyncio.Lock()
+
+
+def _load_notif_prefs() -> dict:
+    if _NOTIF_PREFS_FILE.exists():
+        try:
+            return {**_DEFAULT_NOTIF_PREFS, **json.loads(_NOTIF_PREFS_FILE.read_text(encoding="utf-8"))}
+        except (json.JSONDecodeError, OSError):
+            pass
+    return dict(_DEFAULT_NOTIF_PREFS)
+
+
+def _save_notif_prefs(prefs: dict) -> dict:
+    _NOTIF_PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _NOTIF_PREFS_FILE.write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+    return prefs
+
+
+@app.get("/api/notification-preferences")
+async def api_get_notif_prefs():
+    return _load_notif_prefs()
+
+
+@app.put("/api/notification-preferences")
+async def api_update_notif_prefs(prefs: NotificationPrefsUpdate):
+    async with _notif_lock:
+        saved = _load_notif_prefs()
+        saved.update({k: v for k, v in prefs.model_dump(exclude_none=True).items() if k in _DEFAULT_NOTIF_PREFS})
+        return _save_notif_prefs(saved)
+
+
+@app.get("/api/search")
+async def api_search(
+    q: str = "",
+    status: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Full-text search across jobs with pagination."""
+    repo = JobRepository()
+    all_jobs = repo.list_jobs()
+    matches = []
+    highlights: dict[str, str] = {}
+    q_lower = q.lower()
+
+    for job in all_jobs:
+        if status and job.status.value != status:
+            continue
+        if from_ and job.created_at and job.created_at.isoformat() < from_:
+            continue
+        if to and job.created_at and job.created_at.isoformat() > to:
+            continue
+        if q_lower:
+            req_lower = job.requirement.lower()
+            if q_lower not in req_lower and q_lower not in job.id.lower():
+                continue
+            idx = req_lower.find(q_lower)
+            start = max(0, idx - 30)
+            end = min(len(job.requirement), idx + len(q_lower) + 30)
+            snippet = job.requirement[start:end]
+            if start > 0:
+                snippet = "..." + snippet
+            if end < len(job.requirement):
+                snippet = snippet + "..."
+            highlights[job.id] = snippet
+        matches.append({
+            "id": job.id,
+            "requirement": job.requirement,
+            "status": job.status.value,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        })
+
+    total = len(matches)
+    page = matches[offset:offset + limit]
+    return {"jobs": page, "highlights": highlights, "count": total}
+
+
+# ── Task Templates & Annotations APIs (M8.4) ──────────────────────
+
+
+_TASK_TEMPLATES_DIR = Path("./data/task_templates")
+_ANNOTATIONS_DIR = Path("./data/annotations")
+_annotations_lock = asyncio.Lock()
+
+
+def _ensure_dir(p: Path) -> None:
+    p.mkdir(parents=True, exist_ok=True)
+
+
+def _sanitize_filename(name: str) -> str:
+    """Sanitize a user-supplied filename to prevent path traversal."""
+    return "".join(c for c in name if c.isalnum() or c in "-_ ")
+
+
+@app.get("/api/task-templates")
+async def api_list_task_templates():
+    _ensure_dir(_TASK_TEMPLATES_DIR)
+    templates = []
+    for f in sorted(_TASK_TEMPLATES_DIR.glob("*.yaml")):
+        try:
+            import yaml
+            data = yaml.safe_load(f.read_text(encoding="utf-8"))
+            if data:
+                data["filename"] = f.stem
+                templates.append(data)
+        except Exception:
+            pass
+    from templates.library import TemplateRegistry
+    try:
+        registry = TemplateRegistry()
+        for t in registry.list_templates():
+            templates.append({"name": t.name, "description": t.description, "category": "dag", "filename": t.name})
+    except Exception:
+        pass
+    return {"templates": templates, "count": len(templates)}
+
+
+@app.post("/api/task-templates")
+async def api_create_task_template(body: TaskTemplateCreate):
+    _ensure_dir(_TASK_TEMPLATES_DIR)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Template name is required")
+    safe_name = _sanitize_filename(name)
+    filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
+    if filepath.exists():
+        raise HTTPException(status_code=409, detail="Template already exists")
+    import yaml
+    filepath.write_text(yaml.dump(body.model_dump(), allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return body.model_dump()
+
+
+@app.put("/api/task-templates/{name}")
+async def api_update_task_template(name: str, body: TaskTemplateUpdate):
+    safe_name = _sanitize_filename(name)
+    filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+    import yaml
+    existing = yaml.safe_load(filepath.read_text(encoding="utf-8")) or {}
+    existing.update({k: v for k, v in body.model_dump(exclude_none=True).items()})
+    filepath.write_text(yaml.dump(existing, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return existing
+
+
+@app.delete("/api/task-templates/{name}")
+async def api_delete_task_template(name: str):
+    safe_name = _sanitize_filename(name)
+    filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Template not found")
+    filepath.unlink()
+    return {"deleted": name}
+
+
+@app.get("/api/jobs/{job_id}/annotations")
+async def api_get_annotations(job_id: str):
+    safe_id = _sanitize_filename(job_id)
+    filepath = _ANNOTATIONS_DIR / f"{safe_id}.json"
+    if not filepath.exists():
+        return {"job_id": job_id, "tags": [], "notes": "", "rating": 0, "updated_at": ""}
+    return json.loads(filepath.read_text(encoding="utf-8"))
+
+
+@app.put("/api/jobs/{job_id}/annotations")
+async def api_update_annotations(job_id: str, body: AnnotationUpdate):
+    _ensure_dir(_ANNOTATIONS_DIR)
+    safe_id = _sanitize_filename(job_id)
+    filepath = _ANNOTATIONS_DIR / f"{safe_id}.json"
+    async with _annotations_lock:
+        existing = {}
+        if filepath.exists():
+            try:
+                existing = json.loads(filepath.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        existing.update({"job_id": job_id, "updated_at": datetime.now(timezone.utc).isoformat()})
+        for key in ("tags", "notes", "rating"):
+            val = getattr(body, key, None)
+            if val is not None:
+                existing[key] = val
+        filepath.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    return existing
+
+
 # ── Integration helpers ──────────────────────────────────────────────
 
 def get_event_bridge() -> WebSocketEventBridge:
@@ -752,7 +1109,7 @@ def get_event_bridge() -> WebSocketEventBridge:
 
 
 async def run_server(host: str = "0.0.0.0", port: int = 8080) -> None:
-    """Run the visualizer server (programmatic entry point)."""
+    """Run the Weave UI server (programmatic entry point)."""
     import uvicorn
     await uvicorn.Server(
         uvicorn.Config(app, host=host, port=port, log_level="info")

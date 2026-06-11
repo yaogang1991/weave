@@ -1,10 +1,10 @@
-"""Tests for visualizer API key authentication (#494)."""
+"""Tests for weave_ui API key authentication (#494)."""
 import os
 
 import pytest
 from fastapi.testclient import TestClient
 
-from visualizer.server import app
+from weave_ui.server import app
 
 
 @pytest.fixture(autouse=True)
