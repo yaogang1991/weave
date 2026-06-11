@@ -37,7 +37,7 @@ class TestTokenEstimationPipeline:
         est = TokenEstimator(cfg, client=None)
         dag = DAG()
         for i in range(5):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"gen_{i}", agent_type="generator",
                 task_description=f"Build module {i} with CRUD",
             ))
@@ -112,7 +112,7 @@ class TestDAGNodeTokenRoundTrip:
         assert node.actual_tokens == 0
 
         dag = DAG()
-        dag.add_node(node)
+        dag = dag.add_node(node)
         dag.update_node("gen", estimated_tokens=4500)
         dag.update_node("gen", actual_tokens=4200, token_usage={
             "input_tokens": 3200, "output_tokens": 1000, "total_tokens": 4200,
@@ -124,8 +124,8 @@ class TestDAGNodeTokenRoundTrip:
 
     def test_dag_total_budget(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="gen", task_description="t", token_budget=4096))
-        dag.add_node(DAGNode(id="b", agent_type="gen", task_description="t"))
+        dag = dag.add_node(DAGNode(id="a", agent_type="gen", task_description="t", token_budget=4096))
+        dag = dag.add_node(DAGNode(id="b", agent_type="gen", task_description="t"))
         assert dag.total_token_budget == 12288
 
 
@@ -133,7 +133,7 @@ class TestCrossComponentIntegration:
     def test_full_pipeline(self):
         dag = DAG()
         for i in range(4):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"gen_{i}", agent_type="generator",
                 task_description=f"Implement module {i} with CRUD and tests",
             ))

@@ -144,8 +144,8 @@ class TestInferFallbackEdges:
     def test_infers_edges_from_agent_types(self):
         from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="plan"))
-        dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="gen"))
+        dag = dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="plan"))
+        dag = dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="gen"))
 
         result = IntelligentOrchestrator._infer_fallback_edges(dag)
         assert len(result.edges) > 0
@@ -155,7 +155,7 @@ class TestApplyRenameMap:
     def test_updates_task_description(self):
         from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="n1",
             agent_type="generator",
             task_description="Create old_module.py with tests",
@@ -270,7 +270,7 @@ class TestCheckPostEstimationBudget:
         node = DAGNode(id="n1", agent_type="generator", task_description="t")
         node.estimated_tokens = 20000
         node.token_budget = 10000
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         with caplog.at_level(logging.WARNING):
             orchestrator._check_post_estimation_budget(dag)
@@ -283,7 +283,7 @@ class TestCheckPostEstimationBudget:
         node = DAGNode(id="n1", agent_type="generator", task_description="t")
         node.estimated_tokens = 5000
         node.token_budget = 10000
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         with caplog.at_level(logging.WARNING):
             orchestrator._check_post_estimation_budget(dag)

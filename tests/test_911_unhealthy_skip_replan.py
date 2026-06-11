@@ -37,13 +37,13 @@ def _make_engine(
 def _make_simple_dag() -> DAG:
     """Two-node linear DAG: planner -> generator."""
     dag = DAG(reasoning="test #911")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="plan", agent_type="planner", task_description="plan",
     ))
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1", agent_type="generator", task_description="implement",
     ))
-    dag.add_edge("plan", "gen_1")
+    dag = dag.add_edge("plan", "gen_1")
     return dag
 
 
@@ -132,7 +132,7 @@ class TestSkipReplanWhenUnhealthy:
         tracker = ProviderHealthTracker(ProviderHealthConfig(failure_threshold=3))
 
         new_dag = DAG(reasoning="replanned")
-        new_dag.add_node(DAGNode(
+        new_dag = new_dag.add_node(DAGNode(
             id="gen_v2", agent_type="generator", task_description="reimplement",
         ))
 

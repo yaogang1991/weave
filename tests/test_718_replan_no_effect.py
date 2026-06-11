@@ -17,7 +17,7 @@ from core.models import NodeStatus
 def _make_dag_with_failure() -> DAG:
     """Create a DAG with a failed node."""
     dag = DAG(reasoning="test #718")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="gen_1", agent_type="generator",
         task_description="implement feature",
     ))
@@ -60,7 +60,7 @@ class TestReplanErrorHandling:
         dag = _make_dag_with_failure()
 
         new_dag = DAG(reasoning="replan")
-        new_dag.add_node(DAGNode(
+        new_dag = new_dag.add_node(DAGNode(
             id="gen_1_v2", agent_type="generator",
             task_description="split implementation",
         ))

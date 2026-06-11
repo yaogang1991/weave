@@ -115,7 +115,7 @@ class TestRegressionRestore:
             status=NodeStatus.PENDING,
             success_criteria=["tests pass"],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         await engine._node_executor.execute_node(dag, "gen_1")
 
@@ -190,7 +190,7 @@ class TestRegressionRestore:
             status=NodeStatus.PENDING,
             success_criteria=["tests pass"],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         await engine._node_executor.execute_node(dag, "gen_1")
 

@@ -61,9 +61,9 @@ class TestAutoEvalHandoff:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -106,9 +106,9 @@ class TestAutoEvalHandoff:
             task_description="more impl",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(gen2_node)
-        dag.add_edge("gen", "gen2")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(gen2_node)
+        dag = dag.add_edge("gen", "gen2")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -145,9 +145,9 @@ class TestAutoEvalHandoff:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -207,9 +207,9 @@ class TestAutoEvalResultAlignment:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -261,9 +261,9 @@ class TestAutoEvalResultAlignment:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -310,9 +310,9 @@ class TestAutoEvalResultAlignment:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -366,9 +366,9 @@ class TestAutoEvalResultAlignment:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -414,9 +414,9 @@ class TestAutoEvalResultAlignment:
             task_description="review",
         )
 
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         async def noop_executor(node, artifacts, **kwargs):
             return {"status": "completed", "summary": "ok", "artifacts": []}
@@ -505,9 +505,9 @@ class TestRegressionRestoreEvalResult:
             agent_type="evaluator",
             task_description="review",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         engine = DAGExecutionEngine(
             counting_executor,
@@ -593,9 +593,9 @@ class TestRegressionRestoreEvalResult:
             agent_type="evaluator",
             task_description="review",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         engine = DAGExecutionEngine(
             counting_executor,

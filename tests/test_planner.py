@@ -564,9 +564,9 @@ class TestPlan:
 class TestInferFallbackEdges:
     def test_infers_planner_to_all_non_planner(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="Plan"))
-        dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
-        dag.add_node(DAGNode(id="e1", agent_type="evaluator", task_description="Eval"))
+        dag = dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="Plan"))
+        dag = dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
+        dag = dag.add_node(DAGNode(id="e1", agent_type="evaluator", task_description="Eval"))
 
         result = _infer_fallback_edges(dag)
         edge_pairs = {(e.from_node, e.to_node) for e in result.edges}
@@ -576,8 +576,8 @@ class TestInferFallbackEdges:
 
     def test_infers_generator_to_evaluator(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
-        dag.add_node(DAGNode(id="e1", agent_type="evaluator", task_description="Eval"))
+        dag = dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
+        dag = dag.add_node(DAGNode(id="e1", agent_type="evaluator", task_description="Eval"))
 
         result = _infer_fallback_edges(dag)
         edge_pairs = {(e.from_node, e.to_node) for e in result.edges}
@@ -585,8 +585,8 @@ class TestInferFallbackEdges:
 
     def test_infers_generator_to_non_gen_non_plan(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
-        dag.add_node(DAGNode(id="e1", agent_type="evaluator", task_description="Eval"))
+        dag = dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
+        dag = dag.add_node(DAGNode(id="e1", agent_type="evaluator", task_description="Eval"))
 
         result = _infer_fallback_edges(dag)
         edge_pairs = {(e.from_node, e.to_node) for e in result.edges}
@@ -594,8 +594,8 @@ class TestInferFallbackEdges:
 
     def test_no_edges_for_all_same_type(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="A"))
-        dag.add_node(DAGNode(id="g2", agent_type="generator", task_description="B"))
+        dag = dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="A"))
+        dag = dag.add_node(DAGNode(id="g2", agent_type="generator", task_description="B"))
 
         result = _infer_fallback_edges(dag)
         # All generators, no planner/evaluator: no fallback edges needed
@@ -603,9 +603,9 @@ class TestInferFallbackEdges:
 
     def test_does_not_duplicate_existing_edges(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="Plan"))
-        dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
-        dag.add_edge("p1", "g1")
+        dag = dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="Plan"))
+        dag = dag.add_node(DAGNode(id="g1", agent_type="generator", task_description="Gen"))
+        dag = dag.add_edge("p1", "g1")
 
         result = _infer_fallback_edges(dag)
         # Should not add duplicate (p1, g1)
@@ -619,8 +619,8 @@ class TestInferFallbackEdges:
 
     def test_planner_to_planner_not_added(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="Plan A"))
-        dag.add_node(DAGNode(id="p2", agent_type="planner", task_description="Plan B"))
+        dag = dag.add_node(DAGNode(id="p1", agent_type="planner", task_description="Plan A"))
+        dag = dag.add_node(DAGNode(id="p2", agent_type="planner", task_description="Plan B"))
 
         result = _infer_fallback_edges(dag)
         edge_pairs = {(e.from_node, e.to_node) for e in result.edges}
@@ -646,7 +646,7 @@ class TestApplyRenameMap:
                 ),
             ],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {"json": "app_json"})
         crit = dag.nodes["n1"].success_criteria[0]
@@ -661,7 +661,7 @@ class TestApplyRenameMap:
             task_description="Create json.py module",
             success_criteria=["File /json.py should exist"],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {"json": "app_json"})
         crit = dag.nodes["n1"].success_criteria[0]
@@ -676,7 +676,7 @@ class TestApplyRenameMap:
             task_description="Implement json.py for data serialization",
             success_criteria=[],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {"json": "app_json"})
         assert "app_json.py" in dag.nodes["n1"].task_description
@@ -693,7 +693,7 @@ class TestApplyRenameMap:
             task_description="Implement user auth",
             success_criteria=["tests pass"],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {"json": "app_json"})
         assert dag.nodes["n1"].task_description == "Implement user auth"
@@ -712,7 +712,7 @@ class TestApplyRenameMap:
             task_description="Do work",
             success_criteria=[42],  # not str or SuccessCriterion
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         # After DAGNode validation, 42 becomes "42"
         assert dag.nodes["n1"].success_criteria == ["42"]
@@ -734,7 +734,7 @@ class TestApplyRenameMap:
                 ),
             ],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {"config": "app_config"})
         crit = dag.nodes["n1"].success_criteria[0]
@@ -750,7 +750,7 @@ class TestApplyRenameMap:
             task_description="Use ajson.py parser",
             success_criteria=[],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {"json": "app_json"})
         # 'ajson.py' has 'json.py' preceded by 'a' (alnum), so it should NOT be renamed
@@ -764,7 +764,7 @@ class TestApplyRenameMap:
             task_description="Build json.py",
             success_criteria=["json.py exists"],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         _apply_rename_map(dag, {})
         assert dag.nodes["n1"].task_description == "Build json.py"
@@ -778,7 +778,7 @@ class TestPlanFromTemplate:
     @pytest.mark.asyncio
     async def test_template_with_valid_agents(self, planner):
         mock_dag = DAG(reasoning="template")
-        mock_dag.add_node(DAGNode(
+        mock_dag = mock_dag.add_node(DAGNode(
             id="n1", agent_type="generator", task_description="Build",
         ))
         with patch("templates.library.TemplateRegistry") as MockRegistry:
@@ -790,7 +790,7 @@ class TestPlanFromTemplate:
     @pytest.mark.asyncio
     async def test_template_with_unregistered_agent_raises(self, planner):
         mock_dag = DAG(reasoning="template")
-        mock_dag.add_node(DAGNode(
+        mock_dag = mock_dag.add_node(DAGNode(
             id="n1", agent_type="unknown_agent", task_description="???",
         ))
         with patch("templates.library.TemplateRegistry") as MockRegistry:
@@ -807,7 +807,7 @@ class TestEstimateDagTokens:
     @pytest.mark.asyncio
     async def test_returns_dag_unchanged_when_no_estimator(self, planner):
         dag = DAG()
-        dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="Do work"))
+        dag = dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="Do work"))
         result = await planner._estimate_dag_tokens(dag)
         assert result is dag
         assert result.nodes["n1"].estimated_tokens == 0
@@ -823,8 +823,8 @@ class TestEstimateDagTokens:
         planner._token_estimator = estimator
 
         dag = DAG()
-        dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="A"))
-        dag.add_node(DAGNode(id="n2", agent_type="evaluator", task_description="B"))
+        dag = dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="A"))
+        dag = dag.add_node(DAGNode(id="n2", agent_type="evaluator", task_description="B"))
 
         with patch("core.token_estimator.build_node_context", return_value="ctx"), \
              patch("agent.prompts.SYSTEM_PROMPTS", {"generator": "sys"}):

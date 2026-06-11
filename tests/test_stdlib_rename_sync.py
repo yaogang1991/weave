@@ -79,7 +79,7 @@ class TestApplyRenameMap:
                 ),
             ],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         IntelligentOrchestrator._apply_rename_map(dag, {"models": "app_models"})
 
@@ -100,7 +100,7 @@ class TestApplyRenameMap:
                 ),
             ],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         IntelligentOrchestrator._apply_rename_map(dag, {"models": "app_models"})
 
@@ -116,7 +116,7 @@ class TestApplyRenameMap:
             task_description="build types",
             success_criteria=["file_exists: exam_app/types/base.py"],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         IntelligentOrchestrator._apply_rename_map(dag, {"types": "app_types"})
 
@@ -135,7 +135,7 @@ class TestApplyRenameMap:
                 ),
             ],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         IntelligentOrchestrator._apply_rename_map(dag, {"models": "app_models"})
 
@@ -156,7 +156,7 @@ class TestApplyRenameMap:
                 ),
             ],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         IntelligentOrchestrator._apply_rename_map(dag, {"numbers": "app_numbers"})
 
@@ -178,7 +178,7 @@ class TestApplyRenameMap:
             task_description="implement app_numbers.py module",
             success_criteria=[],
         )
-        dag.add_node(node)
+        dag = dag.add_node(node)
 
         IntelligentOrchestrator._apply_rename_map(dag, {"numbers": "app_numbers"})
 

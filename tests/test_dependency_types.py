@@ -77,16 +77,16 @@ class TestDependencyTypeModel:
 
     def test_dag_add_edge_default_hard(self):
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b")
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b")
         assert dag.edges[0].dependency_type == DependencyType.HARD
 
     def test_dag_add_edge_soft(self):
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
         assert dag.edges[0].dependency_type == DependencyType.SOFT
 
 
@@ -95,11 +95,11 @@ class TestDAGDependencyQueries:
 
     def _make_dag(self) -> DAG:
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
-        dag.add_edge("c", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_edge("c", "b", dependency_type=DependencyType.SOFT)
         return dag
 
     def test_get_dependencies_returns_all(self):
@@ -116,27 +116,27 @@ class TestDAGDependencyQueries:
 
     def test_no_dependencies(self):
         dag = DAG()
-        dag.add_node(_make_node("x"))
+        dag = dag.add_node(_make_node("x"))
         assert dag.get_hard_dependencies("x") == []
         assert dag.get_soft_dependencies("x") == []
 
     def test_all_hard(self):
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "c")
-        dag.add_edge("b", "c")
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "c")
+        dag = dag.add_edge("b", "c")
         assert set(dag.get_hard_dependencies("c")) == {"a", "b"}
         assert dag.get_soft_dependencies("c") == []
 
     def test_all_soft(self):
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "c", dependency_type=DependencyType.SOFT)
-        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
         assert dag.get_hard_dependencies("c") == []
         assert set(dag.get_soft_dependencies("c")) == {"a", "b"}
 
@@ -153,9 +153,9 @@ class TestHardDependencySkip:
     async def test_hard_dep_failed_skips_downstream(self):
         """A→B(hard), A fails → A becomes SKIPPED (via handler), B SKIP."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -173,9 +173,9 @@ class TestHardDependencySkip:
     async def test_hard_dep_succeeded_allows_downstream(self):
         """A→B(hard), A succeeds → B executes."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
 
         engine = _make_engine()
         result = await engine.execute(dag)
@@ -191,9 +191,9 @@ class TestSoftDependencyContinue:
     async def test_soft_dep_failed_continues(self):
         """A→B(soft), A fails → B still executes."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -211,11 +211,11 @@ class TestSoftDependencyContinue:
     async def test_soft_dep_chain(self):
         """A→B(soft)→C(soft), A fails → B and C both execute."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
-        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -237,11 +237,11 @@ class TestMixedDependencies:
     async def test_hard_fails_soft_ok_skips(self):
         """A→C(hard), B→C(soft). A fails, B succeeds → C SKIP (hard dep failed)."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
-        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
+        dag = dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -259,11 +259,11 @@ class TestMixedDependencies:
     async def test_hard_ok_soft_fails_continues(self):
         """A→C(hard), B→C(soft). A succeeds, B fails → C executes (hard dep OK)."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
-        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
+        dag = dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
         async def fail_b(node, artifacts, **kwargs):
             if node.id == "b":
@@ -281,11 +281,11 @@ class TestMixedDependencies:
     async def test_all_soft_deps_fail_continues(self):
         """A→C(soft), B→C(soft). Both A and B fail → C still executes."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "c", dependency_type=DependencyType.SOFT)
-        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
         async def fail_ab(node, artifacts, **kwargs):
             if node.id in ("a", "b"):
@@ -307,9 +307,9 @@ class TestSoftDepWarningArtifact:
     async def test_warning_artifact_injected_on_soft_failure(self):
         """A→B(soft), A fails → B receives dependency_warning HandoffArtifact."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
 
         received_artifacts: list[list] = []
 
@@ -341,9 +341,9 @@ class TestSoftDepWarningArtifact:
     async def test_no_warning_when_all_deps_succeed(self):
         """A→B(hard), A succeeds → B receives normal artifact, no warning."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
 
         received_artifacts: list[list] = []
 
@@ -369,9 +369,9 @@ class TestGetReadyNodesSoftDep:
 
     def _make_dag_with_soft(self) -> DAG:
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
         return dag
 
     def test_soft_pending_not_ready(self):
@@ -420,11 +420,11 @@ class TestGetReadyNodesSoftDep:
     def test_mixed_hard_soft_deps(self):
         """A→C(hard), B→C(soft). C ready only when A=SUCCESS AND B=terminal."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
-        dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "c", dependency_type=DependencyType.HARD)
+        dag = dag.add_edge("b", "c", dependency_type=DependencyType.SOFT)
 
         # Both PENDING → not ready
         assert "c" not in dag.get_ready_nodes()
@@ -440,9 +440,9 @@ class TestGetReadyNodesSoftDep:
     def test_hard_dep_not_success_not_ready(self):
         """get_ready_nodes uses terminal success for hard deps (not just SUCCESS)."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
 
         # PARTIAL_PASS should also count as ready for hard deps
         dag.nodes["a"].status = NodeStatus.PARTIAL_PASS
@@ -458,13 +458,13 @@ class TestGetReadyNodesSoftDep:
         """Foundation→A(soft), Foundation→B(hard), Foundation→C(hard).
         A fails → B and C still execute."""
         dag = DAG()
-        dag.add_node(_make_node("foundation"))
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("foundation", "a", dependency_type=DependencyType.SOFT)
-        dag.add_edge("foundation", "b", dependency_type=DependencyType.HARD)
-        dag.add_edge("foundation", "c", dependency_type=DependencyType.HARD)
+        dag = dag.add_node(_make_node("foundation"))
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("foundation", "a", dependency_type=DependencyType.SOFT)
+        dag = dag.add_edge("foundation", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_edge("foundation", "c", dependency_type=DependencyType.HARD)
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -484,15 +484,15 @@ class TestGetReadyNodesSoftDep:
         """6 parallel Level 1 nodes, one fails, others continue (#296).
         impl_accounts fails → others NOT skipped, integration SKIP (hard dep)."""
         dag = DAG()
-        dag.add_node(_make_node("foundation", agent_type="planner"))
+        dag = dag.add_node(_make_node("foundation", agent_type="planner"))
         for name in ["impl_core", "impl_accounts", "impl_trans", "impl_budgets", "impl_reports"]:
-            dag.add_node(_make_node(name))
-        dag.add_node(_make_node("integration", agent_type="evaluator"))
+            dag = dag.add_node(_make_node(name))
+        dag = dag.add_node(_make_node("integration", agent_type="evaluator"))
 
         for name in ["impl_core", "impl_accounts", "impl_trans", "impl_budgets", "impl_reports"]:
-            dag.add_edge("foundation", name)
+            dag = dag.add_edge("foundation", name)
         for name in ["impl_core", "impl_accounts", "impl_trans", "impl_budgets", "impl_reports"]:
-            dag.add_edge(name, "integration", dependency_type=DependencyType.HARD)
+            dag = dag.add_edge(name, "integration", dependency_type=DependencyType.HARD)
 
         async def selective_fail(node, artifacts, **kwargs):
             if node.id == "impl_accounts":
@@ -515,15 +515,15 @@ class TestGetReadyNodesSoftDep:
         """integration has soft deps on impl nodes.
         impl_accounts fails → integration still runs."""
         dag = DAG()
-        dag.add_node(_make_node("foundation", agent_type="planner"))
+        dag = dag.add_node(_make_node("foundation", agent_type="planner"))
         for name in ["impl_core", "impl_accounts", "impl_trans"]:
-            dag.add_node(_make_node(name))
-        dag.add_node(_make_node("integration", agent_type="evaluator"))
+            dag = dag.add_node(_make_node(name))
+        dag = dag.add_node(_make_node("integration", agent_type="evaluator"))
 
         for name in ["impl_core", "impl_accounts", "impl_trans"]:
-            dag.add_edge("foundation", name)
+            dag = dag.add_edge("foundation", name)
         for name in ["impl_core", "impl_accounts", "impl_trans"]:
-            dag.add_edge(name, "integration", dependency_type=DependencyType.SOFT)
+            dag = dag.add_edge(name, "integration", dependency_type=DependencyType.SOFT)
 
         async def selective_fail(node, artifacts, **kwargs):
             if node.id == "impl_accounts":
@@ -546,9 +546,9 @@ class TestBackwardCompatibility:
     async def test_default_edge_is_hard(self):
         """Edge without dependency_type defaults to hard → skip on failure."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b")
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b")
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -565,11 +565,11 @@ class TestBackwardCompatibility:
     async def test_existing_cascade_skip_still_works(self):
         """Linear chain A→B→C, A fails → B and C skipped (existing behavior)."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_node(_make_node("c"))
-        dag.add_edge("a", "b")
-        dag.add_edge("b", "c")
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_node(_make_node("c"))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("b", "c")
 
         async def fail_a(node, artifacts, **kwargs):
             if node.id == "a":
@@ -729,9 +729,9 @@ class TestAdaptToFailureSoftFallback:
     async def test_soft_only_dependents_skip_fallback(self):
         """Failed node with only soft dependents → skip (not abort) on parse error."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.SOFT)
         dag.nodes["a"].status = NodeStatus.FAILED
         dag.nodes["a"].error = "boom"
         dag.nodes["a"].retry_count = 99
@@ -764,9 +764,9 @@ class TestAdaptToFailureSoftFallback:
     async def test_hard_dependents_abort_fallback(self):
         """Failed node with hard dependents → abort on parse error."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
-        dag.add_node(_make_node("b"))
-        dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
+        dag = dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("b"))
+        dag = dag.add_edge("a", "b", dependency_type=DependencyType.HARD)
         dag.nodes["a"].status = NodeStatus.FAILED
         dag.nodes["a"].error = "boom"
         dag.nodes["a"].retry_count = 99
@@ -799,7 +799,7 @@ class TestAdaptToFailureSoftFallback:
     async def test_no_dependents_abort_fallback(self):
         """Failed node with no dependents → abort on parse error."""
         dag = DAG()
-        dag.add_node(_make_node("a"))
+        dag = dag.add_node(_make_node("a"))
         dag.nodes["a"].status = NodeStatus.FAILED
         dag.nodes["a"].error = "boom"
         dag.nodes["a"].retry_count = 99
