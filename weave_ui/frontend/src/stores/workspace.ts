@@ -11,7 +11,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loading.value = true
     try {
       const res = await api.getWorkspaces()
-      workspaces.value = (res as any).workspaces ?? res
+      workspaces.value = res.workspaces
     } catch { workspaces.value = [] }
     finally { loading.value = false }
   }

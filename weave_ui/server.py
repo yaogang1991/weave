@@ -12,11 +12,15 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Ensure project root is on path when running server directly
 _PROJECT_ROOT = Path(__file__).parent.parent
@@ -105,11 +109,34 @@ class AddWorkspaceRequest(PydanticModel):
     path: str
     label: str = ""
 
+
 class NotificationPrefsUpdate(PydanticModel):
     on_succeeded: bool | None = None
     on_failed: bool | None = None
     on_stuck: bool | None = None
     on_pending_approval: bool | None = None
+
+
+class TaskTemplateCreate(PydanticModel):
+    model_config = {"extra": "allow"}
+    name: str
+    description: str = ""
+    category: str = "general"
+    prompt: str = ""
+
+
+class TaskTemplateUpdate(PydanticModel):
+    model_config = {"extra": "allow"}
+    name: str | None = None
+    description: str | None = None
+    category: str | None = None
+    prompt: str | None = None
+
+
+class AnnotationUpdate(PydanticModel):
+    tags: list[str] | None = None
+    notes: str | None = None
+    rating: int | None = None
 
 
 # Static files
@@ -709,10 +736,8 @@ async def api_learning_status():
 
 
 class TemplateInstantiateRequest(PydanticModel):
+    model_config = {"extra": "forbid"}
     variables: dict[str, str] = {}
-
-    class Config:
-        extra = "forbid"
 
 
 @app.get("/api/templates")
@@ -764,32 +789,36 @@ async def api_instantiate_template(name: str, request: TemplateInstantiateReques
 # ── Job Submission & Workspace APIs ──────────────────────────────────
 
 
+def _get_run_service() -> "RunService":
+    """Lazily create and cache a RunService singleton."""
+    if not hasattr(app.state, "run_service"):
+        from control_plane.service import RunService
+        weave_config = WeaveConfig.from_env()
+        app.state.run_service = RunService(
+            repository=JobRepository(base_path="./data/jobs"),
+            llm_config=weave_config.llm,
+            default_backend=weave_config.default_backend,
+            backend_base_path=weave_config.backend_base_path,
+            approval_repo=ApprovalRepository(),
+            non_interactive=True,
+            approval_timeout_sec=weave_config.approval_timeout_sec,
+            budget_config=weave_config.budget,
+        )
+    return app.state.run_service
+
+
 @app.post("/api/jobs")
 async def api_submit_job(body: SubmitJobRequest):
     """Submit a new job via the web UI."""
-    from control_plane.service import RunService
-    from core.config import WeaveConfig
-
-    repo = JobRepository(base_path="./data/jobs")
-    weave_config = WeaveConfig.from_env()
-    approval_repo = ApprovalRepository()
-    service = RunService(
-        repository=repo,
-        llm_config=weave_config.llm,
-        default_backend=weave_config.default_backend,
-        backend_base_path=weave_config.backend_base_path,
-        approval_repo=approval_repo,
-        non_interactive=True,
-        approval_timeout_sec=weave_config.approval_timeout_sec,
-        budget_config=weave_config.budget,
-    )
+    service = _get_run_service()
     try:
         job = await service.submit_job(
             requirement=body.requirement,
             project_path=body.workspace,
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to submit job: {exc}")
+        logger.exception("Failed to submit job")
+        raise HTTPException(status_code=500, detail="Failed to submit job. Check server logs for details.")
 
     return {
         "id": job.id,
@@ -801,6 +830,7 @@ async def api_submit_job(body: SubmitJobRequest):
 
 _WORKSPACES_FILE = Path("./data/workspaces.json")
 _PRESET_WORKSPACES: list[dict] = []
+_workspaces_lock = asyncio.Lock()
 
 
 def _load_workspaces() -> list[dict]:
@@ -824,19 +854,20 @@ async def api_list_workspaces():
 @app.post("/api/workspaces")
 async def api_add_workspace(body: AddWorkspaceRequest):
     """Add a custom workspace path."""
-    _WORKSPACES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    existing = []
-    if _WORKSPACES_FILE.exists():
-        try:
-            existing = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            existing = []
-    # Avoid duplicates
-    if any(w.get("path") == body.path for w in existing):
-        raise HTTPException(status_code=409, detail="Workspace already exists")
-    entry = {"path": body.path, "label": body.label or body.path}
-    existing.append(entry)
-    _WORKSPACES_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    async with _workspaces_lock:
+        _WORKSPACES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        existing = []
+        if _WORKSPACES_FILE.exists():
+            try:
+                existing = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                existing = []
+        # Avoid duplicates
+        if any(w.get("path") == body.path for w in existing):
+            raise HTTPException(status_code=409, detail="Workspace already exists")
+        entry = {"path": body.path, "label": body.label or body.path}
+        existing.append(entry)
+        _WORKSPACES_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
     return entry
 
 
@@ -882,6 +913,7 @@ _DEFAULT_NOTIF_PREFS = {
     "on_stuck": True,
     "on_pending_approval": True,
 }
+_notif_lock = asyncio.Lock()
 
 
 def _load_notif_prefs() -> dict:
@@ -906,17 +938,25 @@ async def api_get_notif_prefs():
 
 @app.put("/api/notification-preferences")
 async def api_update_notif_prefs(prefs: NotificationPrefsUpdate):
-    saved = _load_notif_prefs()
-    saved.update({k: v for k, v in prefs.model_dump(exclude_none=True).items() if k in _DEFAULT_NOTIF_PREFS})
-    return _save_notif_prefs(saved)
+    async with _notif_lock:
+        saved = _load_notif_prefs()
+        saved.update({k: v for k, v in prefs.model_dump(exclude_none=True).items() if k in _DEFAULT_NOTIF_PREFS})
+        return _save_notif_prefs(saved)
 
 
 @app.get("/api/search")
-async def api_search(q: str = "", status: str | None = None, from_: str | None = Query(None, alias="from"), to: str | None = None):
-    """Full-text search across jobs."""
+async def api_search(
+    q: str = "",
+    status: str | None = None,
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Full-text search across jobs with pagination."""
     repo = JobRepository()
     all_jobs = repo.list_jobs()
-    results = []
+    matches = []
     highlights: dict[str, str] = {}
     q_lower = q.lower()
 
@@ -940,7 +980,7 @@ async def api_search(q: str = "", status: str | None = None, from_: str | None =
             if end < len(job.requirement):
                 snippet = snippet + "..."
             highlights[job.id] = snippet
-        results.append({
+        matches.append({
             "id": job.id,
             "requirement": job.requirement,
             "status": job.status.value,
@@ -948,7 +988,9 @@ async def api_search(q: str = "", status: str | None = None, from_: str | None =
             "updated_at": job.updated_at.isoformat() if job.updated_at else None,
         })
 
-    return {"jobs": results, "highlights": highlights, "count": len(results)}
+    total = len(matches)
+    page = matches[offset:offset + limit]
+    return {"jobs": page, "highlights": highlights, "count": total}
 
 
 # ── Task Templates & Annotations APIs (M8.4) ──────────────────────
@@ -956,6 +998,7 @@ async def api_search(q: str = "", status: str | None = None, from_: str | None =
 
 _TASK_TEMPLATES_DIR = Path("./data/task_templates")
 _ANNOTATIONS_DIR = Path("./data/annotations")
+_annotations_lock = asyncio.Lock()
 
 
 def _ensure_dir(p: Path) -> None:
@@ -991,29 +1034,31 @@ async def api_list_task_templates():
 
 
 @app.post("/api/task-templates")
-async def api_create_task_template(body: dict):
+async def api_create_task_template(body: TaskTemplateCreate):
     _ensure_dir(_TASK_TEMPLATES_DIR)
-    name = body.get("name", "").strip()
+    name = body.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Template name is required")
-    safe_name = "".join(c for c in name if c.isalnum() or c in "-_ ")
+    safe_name = _sanitize_filename(name)
     filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
     if filepath.exists():
         raise HTTPException(status_code=409, detail="Template already exists")
     import yaml
-    filepath.write_text(yaml.dump(body, allow_unicode=True, default_flow_style=False), encoding="utf-8")
-    return body
+    filepath.write_text(yaml.dump(body.model_dump(), allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return body.model_dump()
 
 
 @app.put("/api/task-templates/{name}")
-async def api_update_task_template(name: str, body: dict):
+async def api_update_task_template(name: str, body: TaskTemplateUpdate):
     safe_name = _sanitize_filename(name)
     filepath = _TASK_TEMPLATES_DIR / f"{safe_name}.yaml"
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Template not found")
     import yaml
-    filepath.write_text(yaml.dump(body, allow_unicode=True, default_flow_style=False), encoding="utf-8")
-    return body
+    existing = yaml.safe_load(filepath.read_text(encoding="utf-8")) or {}
+    existing.update({k: v for k, v in body.model_dump(exclude_none=True).items()})
+    filepath.write_text(yaml.dump(existing, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+    return existing
 
 
 @app.delete("/api/task-templates/{name}")
@@ -1036,21 +1081,23 @@ async def api_get_annotations(job_id: str):
 
 
 @app.put("/api/jobs/{job_id}/annotations")
-async def api_update_annotations(job_id: str, body: dict):
+async def api_update_annotations(job_id: str, body: AnnotationUpdate):
     _ensure_dir(_ANNOTATIONS_DIR)
     safe_id = _sanitize_filename(job_id)
     filepath = _ANNOTATIONS_DIR / f"{safe_id}.json"
-    existing = {}
-    if filepath.exists():
-        try:
-            existing = json.loads(filepath.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    existing.update({"job_id": job_id, "updated_at": datetime.now(timezone.utc).isoformat()})
-    for key in ("tags", "notes", "rating"):
-        if key in body:
-            existing[key] = body[key]
-    filepath.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
+    async with _annotations_lock:
+        existing = {}
+        if filepath.exists():
+            try:
+                existing = json.loads(filepath.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
+        existing.update({"job_id": job_id, "updated_at": datetime.now(timezone.utc).isoformat()})
+        for key in ("tags", "notes", "rating"):
+            val = getattr(body, key, None)
+            if val is not None:
+                existing[key] = val
+        filepath.write_text(json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8")
     return existing
 
 

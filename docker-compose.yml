@@ -1,0 +1,13 @@
+services:
+  weave-ui:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - weave-data:/app/data
+    environment:
+      - WEAVE_API_KEY=${WEAVE_API_KEY:-}
+    restart: unless-stopped
+
+volumes:
+  weave-data:

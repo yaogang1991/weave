@@ -255,3 +255,34 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `./data/impact/` — M3.5: Impact analysis data
 - `./data/backends/` — M2: Backend data (worktrees, etc.)
 - `./data/learning/` — M3.3: Learning analysis state
+
+## M8: Weave UI Dashboard (`weave_ui/`)
+
+Web dashboard for multi-agent task orchestration. FastAPI backend serves Vue 3 SPA.
+
+### Structure
+- `weave_ui/server.py` — FastAPI + all API endpoints + WebSocket
+- `weave_ui/event_bridge.py` — WebSocket event broadcasting
+- `weave_ui/cli_renderer.py` — CLI DAG renderer
+- `weave_ui/frontend/` — Vue 3 + Vite + Naive UI + Pinia
+- `weave_ui/static/` — Built frontend (gitignored, from `npm run build`)
+
+### Frontend Conventions
+- Components: PascalCase `.vue` files in `src/components/`
+- Views: page-level components in `src/views/`
+- Stores: Pinia composition API in `src/stores/`
+- Composables: `useXxx.ts` in `src/composables/`
+- API calls: centralized in `src/api/index.ts`
+- Types: interfaces in `src/types/index.ts`
+
+### Backend Conventions
+- Direct Repository instantiation (no DI)
+- Pydantic models for request bodies
+- `HTTPException` for error responses
+- JSON file persistence for workspaces, annotations, notification prefs
+
+### Commands
+- `make ui-dev` — Start frontend dev server (port 3000)
+- `make ui-build` — Build frontend to `weave_ui/static/`
+- `make ui-start` — Start production server (port 8080)
+- `make ui-test` — Run weave_ui tests
