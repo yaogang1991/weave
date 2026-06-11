@@ -24,7 +24,7 @@ def _make_dag_with_token_fields():
         token_budget=8192,
         actual_tokens=4200,
     )
-    dag.add_node(node)
+    dag = dag.add_node(node)
     return dag
 
 
@@ -52,7 +52,7 @@ class TestSerializeDagTokenFields:
     def test_default_token_values(self):
         """Nodes with default (0) token values are still serialized."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan",
             agent_type="planner",
             task_description="plan the project",
@@ -82,7 +82,7 @@ class TestRoundTripDagSerialization:
     def test_round_trip_single_node_token_fields(self):
         """Serialize a DAG, write to file, load back — token fields match."""
         dag = DAG(reasoning="round trip test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl_core",
             agent_type="generator",
             task_description="implement core module",
@@ -117,7 +117,7 @@ class TestRoundTripDagSerialization:
     def test_round_trip_multi_node_with_edges(self):
         """Round-trip preserves multiple nodes and edges."""
         dag = DAG(reasoning="multi-node plan")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan_1",
             agent_type="planner",
             task_description="plan the project",
@@ -125,7 +125,7 @@ class TestRoundTripDagSerialization:
             token_budget=4096,
             actual_tokens=1800,
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl_1",
             agent_type="generator",
             task_description="implement feature",
@@ -133,7 +133,7 @@ class TestRoundTripDagSerialization:
             token_budget=12288,
             actual_tokens=5500,
         ))
-        dag.add_edge("plan_1", "impl_1")
+        dag = dag.add_edge("plan_1", "impl_1")
 
         serialized = _serialize_dag(dag)
 
@@ -165,7 +165,7 @@ class TestRoundTripDagSerialization:
     def test_round_trip_default_token_values(self):
         """Nodes with default (0) token values survive round-trip."""
         dag = DAG(reasoning="defaults test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1",
             agent_type="evaluator",
             task_description="evaluate results",

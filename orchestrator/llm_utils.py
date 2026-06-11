@@ -27,15 +27,11 @@ MODEL_CONTEXT_WINDOWS: dict[str, int] = {
 }
 DEFAULT_CONTEXT_WINDOW = 200_000
 # Conservative chars-per-token estimate.
-CHARS_PER_TOKEN = 3.5
+# Re-export from core for backward compatibility (#1087).
+from core.token_utils import estimate_tokens, CHARS_PER_TOKEN  # noqa: F401
 # Anthropic API total message size limit (bytes).
 MAX_MESSAGE_BYTES = 2_097_152  # 2 MiB
 PRUNE_THRESHOLD = 0.60  # 1.2 MiB
-
-
-def estimate_tokens(text: str) -> int:
-    """Rough token estimate: chars / 3.5."""
-    return int(len(text) / CHARS_PER_TOKEN)
 
 
 def get_context_window(model: str) -> int:

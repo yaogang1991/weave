@@ -16,7 +16,7 @@ class TestExecutionSummary:
     def test_eval_feedback_included_in_node_details(self):
         """Evaluator findings are reflected in execution summary (#665)."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1",
             agent_type="evaluator",
             task_description="evaluate",
@@ -37,7 +37,7 @@ class TestExecutionSummary:
     def test_no_eval_feedback_omitted(self):
         """Nodes without eval_feedback don't include the key."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_1",
             agent_type="generator",
             task_description="implement",
@@ -53,7 +53,7 @@ class TestExecutionSummary:
     def test_empty_eval_feedback_omitted(self):
         """Nodes with empty string eval_feedback don't include the key."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1",
             agent_type="evaluator",
             task_description="evaluate",
@@ -69,10 +69,10 @@ class TestExecutionSummary:
     def test_evaluator_failure_does_not_affect_all_succeeded(self):
         """Evaluator failure is non-critical — all_succeeded still True (#676)."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_1", agent_type="generator", task_description="implement",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1", agent_type="evaluator", task_description="evaluate",
         ))
         dag.update_node("gen_1", status=NodeStatus.SUCCESS)
@@ -88,7 +88,7 @@ class TestExecutionSummary:
     def test_generator_failure_affects_all_succeeded(self):
         """Non-evaluator failures still affect all_succeeded."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_1", agent_type="generator", task_description="implement",
         ))
         dag.update_node("gen_1", status=NodeStatus.FAILED)
@@ -101,10 +101,10 @@ class TestExecutionSummary:
     def test_all_success_all_succeeded(self):
         """All nodes succeeding → all_succeeded True."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_1", agent_type="generator", task_description="implement",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1", agent_type="evaluator", task_description="evaluate",
         ))
         dag.update_node("gen_1", status=NodeStatus.SUCCESS)

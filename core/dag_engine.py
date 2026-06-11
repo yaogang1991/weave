@@ -16,10 +16,11 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Any, Callable, Awaitable
+from typing import TYPE_CHECKING, Any, Callable, Awaitable
 
 from core.models import (
     DAG,
+    DAGEdge,
     DAGNode,
     NodeStatus,
     ExecutionEvent,
@@ -29,12 +30,28 @@ from core.models import (
 from core.config import NodeTimeoutConfig
 from core.exceptions import PendingApprovalError
 from core.exceptions import BudgetExhaustedError
-from backend.lifecycle import BackendManager
-from memory.manager import MemoryManager
-from evaluator.engine import EvaluatorEngine
 from core.artifact_handoff import ArtifactHandoffService
 from core.quality_gate import QualityGate
+from core.dag_replan import (
+    classify_failure,
+    merge_dag_results,
+    rewire_replacement_edges,
+    find_evaluator_target,
+    check_planner_circuit_break,
+    auto_serialize_parallel_generators,
+)
+
+# Backward-compat re-export for tests that import _classify_failure
+_classify_failure = classify_failure
 from core.retry_policy import RetryPolicyEngine
+from core.protocols import (
+    BackendManagerProto,
+    BackendRegistryProto,
+    EvaluatorEngineProto,
+    MemoryManagerProto,
+    SessionStoreProto,
+    NodeGuardrailsProto,
+)
 from core.watchdog import WatchdogService
 from core.node_executor import NodeExecutor, NodeExecutorConfig
 from core.budget_manager import BudgetManager
@@ -45,32 +62,17 @@ from monitoring.otel import (
     start_span, start_run_span, start_node_span,  # optional OTel (#509)
 )
 
-
 EventHandler = Callable[[ExecutionEvent], Awaitable[None]]
 ReplanHandler = Callable[[DAG, str], Awaitable[DAG]]
 
 logger = logging.getLogger(__name__)
 
 
-def _classify_failure(error: str) -> FailureCategory:
-    """Classify a node failure by its error message for provider health tracking.
+# Backward-compat re-export
+_classify_failure = classify_failure
 
-    Only API-level errors (connection failures, rate limits) should count
-    toward the provider health threshold. Evaluation failures, timeouts,
-    and stall detections are local issues, not provider issues (#921/#924).
-    """
-    if not error:
-        return FailureCategory.API_ERROR  # conservative: unknown = API error
-    error_lower = error.lower()
-    if "rate_limit" in error_lower or "rate limit" in error_lower or "429" in error_lower:
-        return FailureCategory.RATE_LIMIT
-    if "stall" in error_lower:
-        return FailureCategory.STALL
-    if "eval" in error_lower:
-        return FailureCategory.EVALUATION
-    if "timeout" in error_lower:
-        return FailureCategory.TIMEOUT
-    return FailureCategory.API_ERROR  # conservative: unclassified = API error
+
+
 
 
 class DAGEngineConfig:
@@ -133,21 +135,22 @@ class DAGExecutionEngine:
         config: DAGEngineConfig | None = None,
         # Service dependencies
         replan_handler: ReplanHandler | None = None,
-        evaluator: EvaluatorEngine | None = None,
-        memory_manager: MemoryManager | None = None,
-        backend_manager: BackendManager | None = None,
-        backend_registry: Any | None = None,
+        evaluator: EvaluatorEngineProto | None = None,
+        memory_manager: MemoryManagerProto | None = None,
+        backend_manager: BackendManagerProto | None = None,
+        backend_registry: BackendRegistryProto | None = None,
         budget_manager: BudgetManager | None = None,
         provider_health: ProviderHealthTracker | None = None,
-        llm_config: Any | None = None,
+        llm_config: Any | None = None,  # TODO (#1087): LLMConfig Protocol
         project_config: ProjectConfig | None = None,
         # Identifiers and workspace
         work_dir: str | None = None,
         session_id: str | None = None,
         job_id: str = "",
         run_id: str = "",
-        session_store: Any | None = None,
-        node_guardrails: Any | None = None,
+        session_store: SessionStoreProto | None = None,
+        node_guardrails: NodeGuardrailsProto | None = None,
+        agent_registry: Any | None = None,
     ):
         cfg = config or DAGEngineConfig()
         # Note: agent_executor is stored in NodeExecutor (created below).
@@ -223,6 +226,7 @@ class DAGExecutionEngine:
                 default_agent_backend=cfg.default_agent_backend,
                 session_store=session_store,
                 node_guardrails=node_guardrails,
+                agent_registry=agent_registry,
             ),
         )
         # R3: Backend manager for workspace isolation and cleanup (#176, #240)
@@ -329,103 +333,14 @@ class DAGExecutionEngine:
                     dag.update_node(nid, status=NodeStatus.SKIPPED)
 
     def _merge_dag_results(self, old_dag: DAG, new_dag: DAG) -> DAG:
-        """
-        Merge two DAGs, preserving successful node results from old_dag.
-
-        For each node that succeeded in old_dag and also exists in new_dag,
-        copy over its status, result, output_artifacts, and timestamps so
-        the re-executed plan does not re-run already-completed work.
-
-        Nodes in old_dag that don't exist in new_dag are also preserved
-        so the execution summary counts ALL nodes, not just the replan
-        subset (#720).  Their edges are also preserved so
-        topological_levels() orders them correctly (#728).
-        """
-        merged = new_dag
-        for node_id, node in old_dag.nodes.items():
-            if node_id in merged.nodes:
-                # Node exists in both — preserve success state
-                if QualityGate.is_terminal_success(node.status):
-                    merged.update_node(
-                        node_id,
-                        status=node.status,
-                        result=node.result,
-                        output_artifacts=node.output_artifacts,
-                        started_at=node.started_at,
-                        completed_at=node.completed_at,
-                    )
-            else:
-                # Node only in old DAG — preserve it so summary is
-                # accurate (#720) and downstream execution can continue
-                # after _rewire_replacement_edges reconnects deps (#797).
-                merged.add_node(node.model_copy())
-
-        # #728: Preserve old edges for nodes that were carried over.
-        # Without edges, topological_levels() can't order preserved
-        # nodes correctly, causing _skip_remaining to miss them.
-        merged_edge_set = {
-            (e.from_node, e.to_node) for e in merged.edges
-        }
-        for edge in old_dag.edges:
-            if (
-                edge.from_node in merged.nodes
-                and edge.to_node in merged.nodes
-                and (edge.from_node, edge.to_node) not in merged_edge_set
-            ):
-                merged.edges.append(edge.model_copy())
-                merged_edge_set.add((edge.from_node, edge.to_node))
-
-        return merged
+        """Delegate to dag_replan.merge_dag_results."""
+        return merge_dag_results(old_dag, new_dag)
 
     def _rewire_replacement_edges(
         self, merged: DAG, old_dag: DAG, new_dag: DAG, failed_id: str,
-    ) -> None:
-        """Rewire downstream edges from failed node to its replacement (#775).
-
-        When replan generates a replacement node (e.g., plan_v2 replacing
-        failed plan), downstream dependencies still point to the original.
-        This detects the replacement by matching agent_type and rewires edges.
-        """
-        if failed_id not in old_dag.nodes:
-            return
-
-        failed_node = old_dag.nodes[failed_id]
-        old_node_ids = set(old_dag.nodes.keys())
-
-        # Replacement candidates: new nodes with same agent_type as failed node
-        candidates = [
-            nid for nid, node in new_dag.nodes.items()
-            if nid not in old_node_ids and node.agent_type == failed_node.agent_type
-        ]
-        if not candidates:
-            return
-
-        replacement_id = candidates[0]
-
-        # Rewire: failed_id → X  becomes  replacement_id → X
-        existing = {(e.from_node, e.to_node) for e in merged.edges}
-        edges_to_remove = []
-        edges_to_add = []
-
-        for i, edge in enumerate(merged.edges):
-            if edge.from_node == failed_id and edge.to_node in merged.nodes:
-                new_key = (replacement_id, edge.to_node)
-                if new_key not in existing:
-                    edges_to_add.append(
-                        edge.model_copy(update={"from_node": replacement_id})
-                    )
-                    existing.add(new_key)
-                edges_to_remove.append(i)
-
-        for i in reversed(edges_to_remove):
-            merged.edges.pop(i)
-        merged.edges.extend(edges_to_add)
-
-        if edges_to_add:
-            logger.info(
-                "Rewired %d downstream edges from %s to replacement %s (#775)",
-                len(edges_to_add), failed_id, replacement_id,
-            )
+    ) -> DAG:
+        """Delegate to dag_replan.rewire_replacement_edges."""
+        return rewire_replacement_edges(merged, old_dag, new_dag, failed_id)
 
     # ------------------------------------------------------------------
     # M2.0: Watchdog
@@ -467,7 +382,7 @@ class DAGExecutionEngine:
         self._start_watchdog()
 
         # R3: Auto-serialize parallel generators without ownership contracts (#272 EC4)
-        levels = self._auto_serialize_parallel_generators(dag, levels)
+        dag, levels = self._auto_serialize_parallel_generators(dag, levels)
 
         # #455: Restore completed nodes from checkpoint
         completed_nodes = self._load_completed_nodes()
@@ -568,7 +483,7 @@ class DAGExecutionEngine:
                             elif final.status == NodeStatus.FAILED:
                                 self._provider_health.record_failure(
                                     provider, model,
-                                    category=_classify_failure(final.error),
+                                    category=classify_failure(final.error),
                                 )
                         finally:
                             # M5.1: Trace node end
@@ -1092,7 +1007,7 @@ class DAGExecutionEngine:
             return old_dag, levels, level_idx, replan_count, False
 
         # #775: Rewire downstream edges from failed node to its replacement.
-        self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
+        dag = self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
         # #789: Mark original failed node as superseded so it won't
         # re-trigger replan when other nodes fail later.
         if failed_id in dag.nodes and failed_id not in replan_node_ids:
@@ -1141,224 +1056,42 @@ class DAGExecutionEngine:
         self._checkpoint.cleanup()
 
     def _find_evaluator_target(self, dag: DAG, eval_node_id: str) -> str | None:
-        """
-        Find the generator node that an evaluator is responsible for assessing.
-
-        Heuristic: look for a generator node that is a direct dependency
-        (i.e. has an edge → evaluator) and whose ID/domain matches the evaluator.
-        """
-        # Candidate 1: direct upstream generator with an edge to the evaluator
-        candidates = [
-            e.from_node for e in dag.edges
-            if e.to_node == eval_node_id
-            and dag.nodes[e.from_node].agent_type == "generator"
-        ]
-        if len(candidates) == 1:
-            return candidates[0]
-
-        # Candidate 2: name-based matching among upstream nodes only
-        # (eval_backend ↔ impl_backend / gen_backend)
-        eval_name = eval_node_id.lower().replace("eval_", "")
-        upstream_ids = {e.from_node for e in dag.edges if e.to_node == eval_node_id}
-        for nid in upstream_ids:
-            node = dag.nodes[nid]
-            if node.agent_type != "generator":
-                continue
-            gen_name = nid.lower().replace("impl_", "").replace("gen_", "")
-            if gen_name == eval_name:
-                return nid
-
-        # Candidate 3: any direct upstream generator
-        if candidates:
-            return candidates[0]
-
-        return None
+        """Delegate to dag_replan.find_evaluator_target."""
+        return find_evaluator_target(dag, eval_node_id)
 
     # -- File snapshot for regression rollback (#212) ----------------------
 
     def _check_planner_circuit_break(
         self, dag: DAG, failed_id: str,
     ) -> bool:
-        """Check circuit breaker for futile replans (#750, #795).
-
-        Returns True if replan should be blocked due to too many
-        consecutive failures indicating a provider-level issue
-        (planner timeouts, empty args degeneration, etc.)
-        rather than task-specific fixable problems.
-        """
-        node = dag.nodes[failed_id]
-        error_lower = (node.error or "").lower()
-        is_provider_issue = (
-            # #750: Planner timeout streak
-            (
-                node.agent_type == "planner"
-                and "timeout" in error_lower
-            )
-            # #795: Empty args degeneration (provider-wide issue)
-            or "empty args" in error_lower
-            or "degeneration" in error_lower
-            or "{}" in (node.error or "")
+        """Delegate to dag_replan.check_planner_circuit_break."""
+        blocked, self._planner_timeout_streak = check_planner_circuit_break(
+            dag, failed_id, self._planner_timeout_streak,
+            self._PLANNER_CIRCUIT_BREAKER_THRESHOLD,
         )
-        if is_provider_issue:
-            self._planner_timeout_streak += 1
-        else:
-            self._planner_timeout_streak = 0
-
-        if self._planner_timeout_streak >= self._PLANNER_CIRCUIT_BREAKER_THRESHOLD:
-            logger.warning(
-                "Replan circuit breaker tripped "
-                "(%d consecutive provider issues, threshold %d) "
-                "— blocking replan (#750, #795)",
-                self._planner_timeout_streak,
-                self._PLANNER_CIRCUIT_BREAKER_THRESHOLD,
-            )
-            return True
-        return False
+        return blocked
 
     def _auto_serialize_parallel_generators(
-        self,
-        dag: DAG,
-        levels: list[list[str]],
-    ) -> list[list[str]]:
-        """Auto-serialize parallel generators without ownership contracts (#272 EC4).
+        self, dag: DAG, levels: list[list[str]],
+    ) -> tuple[DAG, list[list[str]]]:
+        """Delegate to dag_replan.auto_serialize_parallel_generators.
 
-        When parallel generators at the same level have no owned_files AND
-        no edges at all (standalone generators), insert implicit HARD edges
-        to serialize them, preventing write conflicts. Generators that are
-        part of an existing dependency structure (have incoming or outgoing
-        edges) are left alone — they were explicitly planned as parallel.
-
-        Returns recomputed levels if edges were added.
+        Returns (dag, levels) since dag may be a new instance with added edges.
         """
-        from core.models import DependencyType
-
-        edges_added = False
-        for level in levels:
-            generators = [
-                nid for nid in level
-                if dag.nodes[nid].agent_type == "generator"
-            ]
-            if len(generators) < 2:
-                continue
-
-            # Only auto-serialize generators that lack ownership contracts
-            no_contract = [nid for nid in generators if not dag.nodes[nid].owned_files]
-            if not no_contract:
-                continue  # All have contracts → safe to parallelize
-
-            # Only serialize standalone generators (no incoming or outgoing edges).
-            # Generators with existing edges are part of an intentional
-            # dependency structure and should not be modified.
-            standalone = []
-            for nid in no_contract:
-                has_edge = any(
-                    e.from_node == nid or e.to_node == nid
-                    for e in dag.edges
-                )
-                if not has_edge:
-                    standalone.append(nid)
-
-            if len(standalone) < 2:
-                continue  # Not enough standalone generators to serialize
-
-            # Auto-serialize: add implicit edges between standalone generators
-            for i in range(1, len(standalone)):
-                from_id = standalone[i - 1]
-                to_id = standalone[i]
-                dag.add_edge(from_id, to_id, dependency_type=DependencyType.HARD)
-                edges_added = True
-                logger.info(
-                    "Auto-serialized standalone generators: %s → %s "
-                    "(no ownership contracts, no existing edges)",
-                    from_id, to_id,
-                )
-
-        if edges_added:
-            return dag.topological_levels()
-        return levels
+        return auto_serialize_parallel_generators(dag, levels)
 
     def get_execution_summary(self, dag: DAG) -> dict[str, Any]:
-        """Generate a summary of DAG execution results."""
-        total = len(dag.nodes)
-        success = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SUCCESS)
-        partial_pass = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.PARTIAL_PASS)
-        warned = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.WARNED)
-        failed = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.FAILED)
-        skipped = sum(1 for n in dag.nodes.values() if n.status == NodeStatus.SKIPPED)
-        # #676: Evaluator failures are non-critical (informational only).
-        # Exclude them from all_succeeded so implementation success
-        # is not masked by evaluation timeouts.
-        non_eval_failed = sum(
-            1 for n in dag.nodes.values()
-            if n.status == NodeStatus.FAILED and n.agent_type != "evaluator"
-        )
+        """Generate a summary of DAG execution results.
 
-        summary = {
-            "total_nodes": total,
-            "success": success,
-            "partial_pass": partial_pass,
-            "warned": warned,
-            "failed": failed,
-            "skipped": skipped,
-            "all_succeeded": (
-                non_eval_failed == 0
-                and skipped == 0
-                and partial_pass == 0
-            ),
-        }
+        Delegates to core.dag_summary.compute_dag_summary (#1084 #1089).
+        """
+        from core.dag_summary import compute_dag_summary
 
-        # #724: Break down success by agent role so the summary
-        # distinguishes planning (plan output) from implementation
-        # (file artifacts).  A planner with output_count=0 is fine,
-        # but a generator with output_count=0 should not inflate the
-        # success count.
-        impl_types = {"generator", "worker"}
-        summary["implementation_success"] = sum(
-            1 for n in dag.nodes.values()
-            if n.status == NodeStatus.SUCCESS
-            and n.agent_type in impl_types
-        )
-        summary["implementation_total"] = sum(
-            1 for n in dag.nodes.values()
-            if n.agent_type in impl_types
-        )
-
-        summary["node_details"] = {
-                nid: {
-                    "status": n.status.value,
-                    "agent": n.agent_type,
-                    "duration_ms": (
-                        (n.completed_at - n.started_at).total_seconds() * 1000
-                        if n.completed_at and n.started_at else None
-                    ),
-                    **(
-                        {"eval_feedback": n.eval_feedback}
-                        if n.eval_feedback else {}
-                    ),
-                }
-                for nid, n in dag.nodes.items()
-            }
-
-        # M4.2: Token usage aggregation
-        total_input = 0
-        total_output = 0
-        for n in dag.nodes.values():
-            tu = n.token_usage if hasattr(n, "token_usage") else {}
-            total_input += tu.get("input_tokens", 0)
-            total_output += tu.get("output_tokens", 0)
-        summary["token_usage"] = {
-            "total_input_tokens": total_input,
-            "total_output_tokens": total_output,
-            "total_tokens": total_input + total_output,
-        }
-        # M4.6: Aggregate actual_tokens
-        actual_total = sum(
-            n.actual_tokens for n in dag.nodes.values()
-            if hasattr(n, "actual_tokens")
-        )
-        if actual_total > 0:
-            summary["token_usage"]["actual_tokens_total"] = actual_total
+        budget_dict = None
         if self._budget_manager and not self._budget_manager.config.is_unlimited:
-            summary["budget"] = self._budget_manager.to_dict()
+            budget_dict = self._budget_manager.to_dict()
 
-        return summary
+        return compute_dag_summary(
+            dag,
+            budget_dict=budget_dict,
+        )

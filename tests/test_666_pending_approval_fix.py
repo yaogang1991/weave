@@ -110,7 +110,7 @@ class TestNodeExecutorPendingApproval:
     async def test_sets_pending_approval_and_raises(self):
         """When agent raises PendingApprovalError, node becomes PENDING_APPROVAL then re-raises."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="node_a",
             agent_type="generator",
             task_description="Generate code",
@@ -133,18 +133,18 @@ class TestNodeExecutorPendingApproval:
     async def test_downstream_skipped_on_pending_approval_hard_dep(self):
         """Node with PENDING_APPROVAL hard dep should be SKIPPED."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="upstream",
             agent_type="generator",
             task_description="Upstream",
             status=NodeStatus.PENDING_APPROVAL,
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="downstream",
             agent_type="evaluator",
             task_description="Downstream",
         ))
-        dag.add_edge("upstream", "downstream")
+        dag = dag.add_edge("upstream", "downstream")
 
         executor_called = False
 
@@ -167,18 +167,18 @@ class TestNodeExecutorPendingApproval:
     async def test_downstream_continues_on_soft_pending_approval(self):
         """Soft dep PENDING_APPROVAL: node continues with warning."""
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="upstream",
             agent_type="generator",
             task_description="Upstream",
             status=NodeStatus.PENDING_APPROVAL,
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="downstream",
             agent_type="evaluator",
             task_description="Downstream",
         ))
-        dag.add_edge("upstream", "downstream", dependency_type="soft")
+        dag = dag.add_edge("upstream", "downstream", dependency_type="soft")
 
         executor_called = False
 

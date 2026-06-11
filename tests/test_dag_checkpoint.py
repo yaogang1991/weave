@@ -41,11 +41,11 @@ def _make_engine(tmp_path, session_id="test-session"):
 
 def _make_three_node_dag():
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
-    dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
-    dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
-    dag.add_edge("a", "b")
-    dag.add_edge("b", "c")
+    dag = dag.add_node(DAGNode(id="a", agent_type="planner", task_description="plan"))
+    dag = dag.add_node(DAGNode(id="b", agent_type="generator", task_description="impl"))
+    dag = dag.add_node(DAGNode(id="c", agent_type="evaluator", task_description="eval"))
+    dag = dag.add_edge("a", "b")
+    dag = dag.add_edge("b", "c")
     return dag
 
 
