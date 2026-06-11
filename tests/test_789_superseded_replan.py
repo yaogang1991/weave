@@ -18,17 +18,17 @@ from core.models import NodeStatus, FailureDecision
 def _make_dag_with_failed_and_pending() -> DAG:
     """DAG: plan(succeeded) -> impl(failed) -> eval(pending)."""
     dag = DAG(reasoning="test #789")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="plan", agent_type="planner", task_description="plan",
     ))
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="impl", agent_type="generator", task_description="impl",
     ))
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="eval", agent_type="evaluator", task_description="eval",
     ))
-    dag.add_edge("plan", "impl")
-    dag.add_edge("impl", "eval")
+    dag = dag.add_edge("plan", "impl")
+    dag = dag.add_edge("impl", "eval")
     dag.update_node("plan", status=NodeStatus.SUCCESS)
     dag.update_node("impl", status=NodeStatus.FAILED, error="timeout")
     return dag
@@ -43,7 +43,7 @@ class TestSupersededAfterReplan:
         dag = _make_dag_with_failed_and_pending()
 
         new_dag = DAG(reasoning="replan")
-        new_dag.add_node(DAGNode(
+        new_dag = new_dag.add_node(DAGNode(
             id="impl_v2", agent_type="generator",
             task_description="split implementation",
         ))
@@ -74,7 +74,7 @@ class TestSupersededAfterReplan:
         dag = _make_dag_with_failed_and_pending()
 
         new_dag = DAG(reasoning="replan")
-        new_dag.add_node(DAGNode(
+        new_dag = new_dag.add_node(DAGNode(
             id="impl", agent_type="generator",
             task_description="retry implementation",
         ))
@@ -102,16 +102,16 @@ class TestSupersededAfterReplan:
     async def test_superseded_not_re_triggered_for_replan(self):
         """Full execution: superseded node doesn't trigger replan again."""
         dag = DAG(reasoning="test #789 full")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl", agent_type="generator", task_description="impl",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval", agent_type="evaluator", task_description="eval",
         ))
-        dag.add_edge("impl", "eval")
+        dag = dag.add_edge("impl", "eval")
 
         replan_new_dag = DAG(reasoning="replan")
-        replan_new_dag.add_node(DAGNode(
+        replan_new_dag = replan_new_dag.add_node(DAGNode(
             id="impl_v2", agent_type="generator",
             task_description="split implementation",
         ))

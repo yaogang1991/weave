@@ -6,6 +6,9 @@ It discovers available agents through this registry.
 
 Default: Anthropic's 3 foundational agents (planner/generator/evaluator)
 Extension: Projects register custom agents via config or code.
+
+M7.4: Internal storage uses AgentSpec. Backward-compatible AgentCapability
+      API is preserved via to_capability() / from_capability() conversion.
 """
 
 from __future__ import annotations
@@ -15,6 +18,18 @@ from typing import Callable
 
 import yaml
 
+from core.agent_spec import (
+    AgentSpec,
+    BoundarySpec,
+    BrainSpec,
+    CapabilitySpec,
+    ContractSpec,
+    ErrorPolicy,
+    ErrorStrategy,
+    InvocationOverrides,
+    LifecycleSpec,
+    QualityTier,
+)
 from core.models import AgentCapability
 
 
@@ -30,127 +45,269 @@ class AgentRegistry:
     """
 
     def __init__(self):
-        self._agents: dict[str, AgentCapability] = {}
+        self._specs: dict[str, AgentSpec] = {}
         self._factories: dict[str, Callable] = {}
         self._register_defaults()
 
     def _register_defaults(self) -> None:
-        """
-        Register Anthropic Managed Agents' 3 foundational agents.
-        These are the Weave's出厂设置.
-        """
-        self.register(AgentCapability(
-            id="planner",
-            name="Planner",
+        """Register the 3 foundational agents as full AgentSpecs."""
+        self.register_spec(AgentSpec(
+            name="planner",
             description=(
                 "Responsible for requirement analysis, task decomposition, "
                 "architecture design, and technical decision-making. "
                 "Produces structured plans, specifications, and architecture documents."
             ),
-            skills=[
-                "requirement_analysis",
-                "task_decomposition",
-                "architecture_design",
-                "technical_decision",
-                "interface_definition",
-                "planning",
-            ],
-            input_schema=["user_requirements", "project_context"],
-            output_schema=["plan", "specification", "architecture_doc", "sprint_contract"],
-            constraints=[
-                "Only produces design documents, does NOT write implementation code",
-                "Must define clear success criteria for each task",
-                "Must identify dependencies between tasks",
-            ],
+            contract=ContractSpec(
+                input_schema={
+                    "user_requirements": {"description": "User requirement text"},
+                    "project_context": {"description": "Project context and constraints"},
+                },
+                output_schema={
+                    "plan": {"description": "DAG execution plan"},
+                    "specification": {"description": "Task specification"},
+                    "architecture_doc": {"description": "Architecture document"},
+                    "sprint_contract": {"description": "Sprint contract"},
+                },
+            ),
+            brain=BrainSpec(quality_tier=QualityTier.HIGH, system_prompt=""),
+            capability=CapabilitySpec(
+                skills=[
+                    "requirement_analysis",
+                    "task_decomposition",
+                    "architecture_design",
+                    "technical_decision",
+                    "interface_definition",
+                    "planning",
+                ],
+                constraints=[
+                    "Only produces design documents, does NOT write implementation code",
+                    "Must define clear success criteria for each task",
+                    "Must identify dependencies between tasks",
+                ],
+            ),
+            boundary=BoundarySpec(timeout=300, max_retries=2),
+            lifecycle=LifecycleSpec(
+                memory_enabled=True,
+                error_policy=ErrorPolicy(strategy=ErrorStrategy.REPLAN, max_retries=2),
+            ),
         ))
 
-        self.register(AgentCapability(
-            id="generator",
-            name="Generator",
+        self.register_spec(AgentSpec(
+            name="generator",
             description=(
                 "Responsible for code implementation, file editing, feature development, "
                 "and test writing. Executes the plan produced by the planner."
             ),
-            skills=[
-                "code_writing",
-                "file_editing",
-                "test_writing",
-                "debugging",
-                "git_operations",
-                "implementation",
-            ],
-            input_schema=["plan", "existing_code", "feedback"],
-            output_schema=["code", "tests", "git_commit", "implementation_artifact"],
-            constraints=[
-                "Must follow project coding standards",
-                "Must read related existing code before modifying",
-                "Must verify work by running tests",
-                "Must produce handoff artifacts for evaluator",
-            ],
+            contract=ContractSpec(
+                input_schema={
+                    "plan": {"description": "Execution plan"},
+                    "existing_code": {"description": "Existing codebase"},
+                    "feedback": {"description": "Evaluator feedback"},
+                },
+                output_schema={
+                    "code": {"description": "Generated code"},
+                    "tests": {"description": "Test files"},
+                    "git_commit": {"description": "Git commit"},
+                    "implementation_artifact": {"description": "Handoff artifact"},
+                },
+            ),
+            brain=BrainSpec(quality_tier=QualityTier.BALANCED, system_prompt=""),
+            capability=CapabilitySpec(
+                skills=[
+                    "code_writing",
+                    "file_editing",
+                    "test_writing",
+                    "debugging",
+                    "git_operations",
+                    "implementation",
+                ],
+                tools=["read", "write", "edit", "bash", "glob", "grep"],
+                constraints=[
+                    "Must follow project coding standards",
+                    "Must read related existing code before modifying",
+                    "Must verify work by running tests",
+                    "Must produce handoff artifacts for evaluator",
+                ],
+            ),
+            boundary=BoundarySpec(timeout=600, max_retries=3),
+            lifecycle=LifecycleSpec(
+                memory_enabled=True,
+                error_policy=ErrorPolicy(strategy=ErrorStrategy.RETRY_WITH_BACKOFF),
+            ),
         ))
 
-        self.register(AgentCapability(
-            id="evaluator",
-            name="Evaluator",
+        self.register_spec(AgentSpec(
+            name="evaluator",
             description=(
                 "Responsible for quality assessment, test verification, code review, "
                 "and pass/fail judgment. Provides structured feedback to generator."
             ),
-            skills=[
-                "test_execution",
-                "quality_assessment",
-                "code_review",
-                "performance_analysis",
-                "security_scan",
-                "evaluation",
-            ],
-            input_schema=["code", "tests", "sprint_contract", "implementation_artifact"],
-            output_schema=["evaluation_report", "pass_fail_verdict", "feedback", "score"],
-            constraints=[
-                "Does NOT modify code - only evaluates and reports",
-                "Must provide explicit pass/fail verdict",
-                "Feedback must be specific and actionable",
-                "Uses predefined scoring criteria calibrated with examples",
-            ],
+            contract=ContractSpec(
+                input_schema={
+                    "code": {"description": "Code to evaluate"},
+                    "tests": {"description": "Test files"},
+                    "sprint_contract": {"description": "Sprint contract"},
+                    "implementation_artifact": {"description": "Handoff artifact"},
+                },
+                output_schema={
+                    "evaluation_report": {"description": "Evaluation report"},
+                    "pass_fail_verdict": {"description": "Pass/fail verdict"},
+                    "feedback": {"description": "Structured feedback"},
+                    "score": {"description": "Quality score"},
+                },
+            ),
+            brain=BrainSpec(quality_tier=QualityTier.BALANCED, system_prompt=""),
+            capability=CapabilitySpec(
+                skills=[
+                    "test_execution",
+                    "quality_assessment",
+                    "code_review",
+                    "performance_analysis",
+                    "security_scan",
+                    "evaluation",
+                ],
+                constraints=[
+                    "Does NOT modify code - only evaluates and reports",
+                    "Must provide explicit pass/fail verdict",
+                    "Feedback must be specific and actionable",
+                    "Uses predefined scoring criteria calibrated with examples",
+                ],
+            ),
+            boundary=BoundarySpec(timeout=480, max_retries=2),
+            lifecycle=LifecycleSpec(
+                memory_enabled=True,
+                error_policy=ErrorPolicy(strategy=ErrorStrategy.FAIL_FAST, max_retries=1),
+            ),
         ))
 
-    def register(self, capability: AgentCapability) -> None:
-        """Register a new agent capability."""
-        self._agents[capability.id] = capability
+    # ------------------------------------------------------------------
+    # AgentSpec API (primary)
+    # ------------------------------------------------------------------
 
-    def register_factory(self, agent_id: str, factory: Callable) -> None:
-        """
-        Register a factory function that creates agent instances.
-        The factory signature: factory(task_description, artifacts) -> AgentInstance
-        """
-        self._factories[agent_id] = factory
+    def register_spec(self, spec: AgentSpec) -> None:
+        """Register an AgentSpec."""
+        self._specs[spec.name] = spec
+
+    def get_spec(self, name: str) -> AgentSpec | None:
+        """Get an AgentSpec by name."""
+        return self._specs.get(name)
+
+    def list_specs(self) -> list[AgentSpec]:
+        """List all registered AgentSpecs."""
+        return list(self._specs.values())
+
+    # ------------------------------------------------------------------
+    # Backward-compatible AgentCapability API
+    # ------------------------------------------------------------------
+
+    def register(self, capability: AgentCapability) -> None:
+        """Register via legacy AgentCapability (converted to AgentSpec internally)."""
+        spec = AgentSpec.from_capability(capability)
+        self._specs[spec.name] = spec
 
     def get(self, agent_id: str) -> AgentCapability | None:
-        """Get an agent's capability description."""
-        return self._agents.get(agent_id)
+        """Get backward-compatible AgentCapability."""
+        spec = self._specs.get(agent_id)
+        return spec.to_capability() if spec else None
 
     def list_agents(self) -> list[AgentCapability]:
-        """List all registered agents."""
-        return list(self._agents.values())
+        """List all agents as backward-compatible AgentCapabilities."""
+        return [spec.to_capability() for spec in self._specs.values()]
+
+    # ------------------------------------------------------------------
+    # Shared API (unchanged)
+    # ------------------------------------------------------------------
 
     def has_agent(self, agent_id: str) -> bool:
         """Check if an agent is registered."""
-        return agent_id in self._agents
+        return agent_id in self._specs
+
+    # ------------------------------------------------------------------
+    # Caller Invocation Interface
+    # ------------------------------------------------------------------
+
+    async def invoke(
+        self,
+        agent_name: str,
+        task: str,
+        overrides: InvocationOverrides | None = None,
+    ) -> Any:
+        """Invoke an agent with optional caller overrides.
+
+        This is the primary caller interface: 1 required (task) + 3 optional tighten.
+        If a factory is registered, delegates to factory. Otherwise returns resolved spec.
+
+        Args:
+            agent_name: Name of the registered agent.
+            task: Task description (required).
+            overrides: Optional tighten-only overrides (success/budget/timeout).
+
+        Returns:
+            Resolved AgentSpec (with overrides applied), or factory result.
+
+        Raises:
+            ValueError: If agent_name is not registered.
+        """
+        spec = self._specs.get(agent_name)
+        if spec is None:
+            raise ValueError(f"Agent '{agent_name}' not registered")
+
+        effective = spec
+        if overrides:
+            effective = self._apply_overrides(spec, overrides)
+
+        factory = self._factories.get(agent_name)
+        if factory:
+            return await factory(task, effective)
+
+        return effective
+
+    @staticmethod
+    def _apply_overrides(spec: AgentSpec, overrides: InvocationOverrides) -> AgentSpec:
+        """Apply caller overrides (tighten-only) to an AgentSpec."""
+        updates: dict = {}
+
+        if overrides.timeout is not None:
+            # Tighten: caller timeout must be <= spec boundary timeout (or spec has no timeout)
+            if spec.boundary.timeout is None or overrides.timeout <= spec.boundary.timeout:
+                updates["boundary"] = spec.boundary.model_copy(update={"timeout": overrides.timeout})
+
+        if overrides.budget is not None:
+            boundary = updates.get("boundary", spec.boundary)
+            updates["boundary"] = boundary.model_copy(update={"resource_budget": overrides.budget})
+
+        if overrides.success_criteria is not None:
+            updates["contract"] = spec.contract.model_copy(
+                update={"success_criteria": overrides.success_criteria}
+            )
+
+        if not updates:
+            return spec
+
+        return spec.model_copy(update=updates)
+
+    def register_factory(self, agent_id: str, factory: Callable) -> None:
+        """Register a factory function that creates agent instances."""
+        self._factories[agent_id] = factory
 
     def get_factory(self, agent_id: str) -> Callable | None:
         """Get the factory for creating agent instances."""
         return self._factories.get(agent_id)
 
     def unregister(self, agent_id: str) -> None:
-        """Remove an agent from registry. Protected agents cannot be removed."""
+        """Remove an agent. Protected agents cannot be removed."""
         protected = {"planner", "generator", "evaluator"}
         if agent_id in protected:
             raise ValueError(f"Cannot unregister protected agent: {agent_id}")
-        self._agents.pop(agent_id, None)
+        self._specs.pop(agent_id, None)
         self._factories.pop(agent_id, None)
 
     def load_from_yaml(self, path: str | Path) -> None:
-        """Load agent definitions from a YAML file."""
+        """Load agent definitions from YAML.
+
+        Supports both legacy AgentCapability format and new 5-core AgentSpec format.
+        """
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Agent config not found: {path}")
@@ -159,8 +316,14 @@ class AgentRegistry:
             data = yaml.safe_load(f)
 
         for agent_def in data.get("agents", []):
-            capability = AgentCapability(**agent_def)
-            self.register(capability)
+            # Detect format: new format has 5-core keys
+            if any(k in agent_def for k in ("contract", "brain", "capability", "boundary", "lifecycle")):
+                spec = AgentSpec.model_validate(agent_def)
+                self.register_spec(spec)
+            else:
+                # Legacy AgentCapability format
+                capability = AgentCapability(**agent_def)
+                self.register(capability)
 
     def load_from_directory(self, dir_path: str | Path) -> None:
         """Load all YAML agent definitions from a directory."""
@@ -172,22 +335,25 @@ class AgentRegistry:
             self.load_from_yaml(yaml_file)
 
     def to_prompt_description(self) -> str:
-        """
-        Generate a formatted description of all registered agents
-        for injection into the orchestrator's system prompt.
-        """
+        """Generate formatted description for orchestrator system prompt."""
         lines = ["Available Worker Agents (registered in the system):"]
-        for agent in self._agents.values():
-            lines.append(f"\n### {agent.id}: {agent.name}")
-            lines.append(f"Description: {agent.description}")
-            lines.append(f"Skills: {', '.join(agent.skills)}")
-            lines.append(f"Input: {', '.join(agent.input_schema)}")
-            lines.append(f"Output: {', '.join(agent.output_schema)}")
-            if agent.constraints:
+        for spec in self._specs.values():
+            cap = spec.capability
+            contract = spec.contract
+            lines.append(f"\n### {spec.name}: {spec.resolved_display_name}")
+            lines.append(f"Description: {spec.description}")
+            lines.append(f"Skills: {', '.join(cap.skills)}")
+            input_items = list(contract.input_schema.keys()) if contract.input_schema else []
+            output_items = list(contract.output_schema.keys()) if contract.output_schema else []
+            if input_items:
+                lines.append(f"Input: {', '.join(input_items)}")
+            if output_items:
+                lines.append(f"Output: {', '.join(output_items)}")
+            if cap.constraints:
                 lines.append("Constraints:")
-                for c in agent.constraints:
+                for c in cap.constraints:
                     lines.append(f"  - {c}")
         return "\n".join(lines)
 
     def __repr__(self) -> str:
-        return f"AgentRegistry(agents={list(self._agents.keys())})"
+        return f"AgentRegistry(agents={list(self._specs.keys())})"

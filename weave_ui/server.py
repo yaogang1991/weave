@@ -105,6 +105,12 @@ class AddWorkspaceRequest(PydanticModel):
     path: str
     label: str = ""
 
+class NotificationPrefsUpdate(PydanticModel):
+    on_succeeded: bool | None = None
+    on_failed: bool | None = None
+    on_stuck: bool | None = None
+    on_pending_approval: bool | None = None
+
 
 # Static files
 static_path = Path(__file__).parent / "static"
@@ -899,9 +905,9 @@ async def api_get_notif_prefs():
 
 
 @app.put("/api/notification-preferences")
-async def api_update_notif_prefs(prefs: dict):
+async def api_update_notif_prefs(prefs: NotificationPrefsUpdate):
     saved = _load_notif_prefs()
-    saved.update({k: v for k, v in prefs.items() if k in _DEFAULT_NOTIF_PREFS})
+    saved.update({k: v for k, v in prefs.model_dump(exclude_none=True).items() if k in _DEFAULT_NOTIF_PREFS})
     return _save_notif_prefs(saved)
 
 

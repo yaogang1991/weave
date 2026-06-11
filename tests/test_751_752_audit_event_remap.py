@@ -16,7 +16,7 @@ def _make_dag_with_failed_node(
 ):
     """Create a DAG with one failed node."""
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="n1",
         agent_type="generator",
         task_description="do stuff",

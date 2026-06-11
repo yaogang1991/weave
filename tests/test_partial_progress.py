@@ -37,7 +37,7 @@ def _make_dag():
         status=NodeStatus.PENDING,
         success_criteria=["tests pass", "lint clean"],
     )
-    dag.add_node(node)
+    dag = dag.add_node(node)
     return dag
 
 

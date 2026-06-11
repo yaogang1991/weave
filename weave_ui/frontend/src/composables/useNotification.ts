@@ -29,6 +29,8 @@ function onJobStatusChange(jobId: string, newStatus: string, requirement: string
   const summary = requirement.length > 60 ? requirement.slice(0, 60) + '...' : requirement
   if (newStatus === 'succeeded' && prefs.value.on_succeeded) notify('Task Succeeded', summary, jobId)
   else if (newStatus === 'failed' && prefs.value.on_failed) notify('Task Failed', summary, jobId)
+  // Fix #8: wire on_stuck notification to the 'stuck' status
+  else if (newStatus === 'stuck' && prefs.value.on_stuck) notify('Task Stuck (15min)', summary, jobId)
   else if (newStatus === 'pending_approval' && prefs.value.on_pending_approval) notify('Approval Needed', summary, jobId)
 }
 

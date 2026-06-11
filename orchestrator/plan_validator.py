@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import sys
+from typing import Any
 
 
 from core.exceptions import PlanValidationError  # noqa: F401 — re-export (#918)
@@ -100,7 +101,7 @@ class PlanValidator:
         self.warnings: list[str] = []
         self.rename_map: dict[str, str] = {}  # stdlib name → prefixed alternative
 
-    def validate(self, plan_data: dict) -> dict:
+    def validate(self, plan_data: dict, agent_registry: Any = None) -> dict:
         """Validate plan structure. Returns plan_data unchanged on success.
 
         Raises PlanValidationError on any structural error.
@@ -176,6 +177,10 @@ class PlanValidator:
         # excluded from softening to avoid contradicting _check_foundation_dependencies (#1043).
         edges = self._soften_hub_dependencies(nodes, edges, auto_foundation_keys)
         plan_data["edges"] = edges
+
+        # AgentSpec integration checks (M7.4)
+        self._check_agent_dependencies(plan_data, agent_registry)
+        self._check_capability_contract_consistency(plan_data, agent_registry)
 
         return plan_data
 
@@ -716,3 +721,50 @@ class PlanValidator:
                 f"dependencies from hub softening (#1043)."
             )
         return edges
+
+    # ------------------------------------------------------------------
+    # AgentSpec integration checks (M7.4)
+    # ------------------------------------------------------------------
+
+    def _check_agent_dependencies(
+        self, plan_data: dict, agent_registry: Any = None,
+    ) -> None:
+        """Check that declared agent dependencies are satisfied."""
+        if agent_registry is None:
+            return
+        for node in plan_data.get("nodes", []):
+            agent_type = node.get("agent_type", "")
+            spec = agent_registry.get_spec(agent_type)
+            if spec is None:
+                continue
+            for dep in spec.capability.dependencies:
+                if not agent_registry.has_agent(dep.agent_name):
+                    if dep.fallback and not agent_registry.has_agent(dep.fallback):
+                        self.warnings.append(
+                            f"Node '{node.get('id', '?')}' agent '{agent_type}' "
+                            f"depends on '{dep.agent_name}' (unavailable), "
+                            f"fallback '{dep.fallback}' also unavailable"
+                        )
+                    elif not dep.fallback:
+                        self.warnings.append(
+                            f"Node '{node.get('id', '?')}' agent '{agent_type}' "
+                            f"depends on '{dep.agent_name}' which is not registered"
+                        )
+
+    def _check_capability_contract_consistency(
+        self, plan_data: dict, agent_registry: Any = None,
+    ) -> None:
+        """Warn if node success_criteria exist but agent contract has none."""
+        if agent_registry is None:
+            return
+        for node in plan_data.get("nodes", []):
+            agent_type = node.get("agent_type", "")
+            spec = agent_registry.get_spec(agent_type)
+            if spec is None:
+                continue
+            node_criteria = node.get("success_criteria", [])
+            if node_criteria and not spec.contract.success_criteria:
+                self.warnings.append(
+                    f"Node '{node.get('id', '?')}' has success_criteria but "
+                    f"agent '{agent_type}' ContractSpec defines no default criteria"
+                )

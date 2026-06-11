@@ -243,14 +243,14 @@ class TestDAGConstruction:
     def test_add_node(self):
         dag = DAG()
         node = DAGNode(id="n1", agent_type="gen", task_description="Test")
-        dag.add_node(node)
+        dag = dag.add_node(node)
         assert "n1" in dag.nodes
         assert dag.nodes["n1"].task_description == "Test"
 
     def test_update_node_returns_new_node(self):
         dag = DAG()
         node = DAGNode(id="n1", agent_type="gen", task_description="Test")
-        dag.add_node(node)
+        dag = dag.add_node(node)
         updated = dag.update_node("n1", status=NodeStatus.RUNNING, error="test")
         assert updated.status == NodeStatus.RUNNING
         assert updated.error == "test"
@@ -260,7 +260,7 @@ class TestDAGConstruction:
     def test_update_node_preserves_original(self):
         dag = DAG()
         node = DAGNode(id="n1", agent_type="gen", task_description="Test")
-        dag.add_node(node)
+        dag = dag.add_node(node)
         old_id = id(node)
         dag.update_node("n1", status=NodeStatus.RUNNING)
         # The old node object is not mutated (model_copy creates new)
@@ -268,18 +268,18 @@ class TestDAGConstruction:
 
     def test_add_edge(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="gen", task_description="A"))
-        dag.add_node(DAGNode(id="b", agent_type="gen", task_description="B"))
-        dag.add_edge("a", "b")
+        dag = dag.add_node(DAGNode(id="a", agent_type="gen", task_description="A"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="gen", task_description="B"))
+        dag = dag.add_edge("a", "b")
         assert len(dag.edges) == 1
         assert dag.edges[0].from_node == "a"
         assert dag.edges[0].to_node == "b"
 
     def test_add_edge_with_type(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="gen", task_description="A"))
-        dag.add_node(DAGNode(id="b", agent_type="gen", task_description="B"))
-        dag.add_edge("a", "b", DependencyType.SOFT)
+        dag = dag.add_node(DAGNode(id="a", agent_type="gen", task_description="A"))
+        dag = dag.add_node(DAGNode(id="b", agent_type="gen", task_description="B"))
+        dag = dag.add_edge("a", "b", DependencyType.SOFT)
         assert dag.edges[0].dependency_type == DependencyType.SOFT
 
 
@@ -291,9 +291,9 @@ class TestDAGDependencies:
         """a -> b -> c"""
         dag = DAG()
         for nid in ("a", "b", "c"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=f"Node {nid}"))
-        dag.add_edge("a", "b")
-        dag.add_edge("b", "c")
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=f"Node {nid}"))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("b", "c")
         return dag
 
     @pytest.fixture
@@ -301,9 +301,9 @@ class TestDAGDependencies:
         """a --hard--> b --soft--> c"""
         dag = DAG()
         for nid in ("a", "b", "c"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=f"Node {nid}"))
-        dag.add_edge("a", "b", DependencyType.HARD)
-        dag.add_edge("b", "c", DependencyType.SOFT)
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=f"Node {nid}"))
+        dag = dag.add_edge("a", "b", DependencyType.HARD)
+        dag = dag.add_edge("b", "c", DependencyType.SOFT)
         return dag
 
     def test_get_dependencies(self, linear_dag):
@@ -331,19 +331,19 @@ class TestDAGTopologicalSort:
     def test_linear_dag(self):
         dag = DAG()
         for nid in ("a", "b", "c"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b")
-        dag.add_edge("b", "c")
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("b", "c")
         levels = dag.topological_levels()
         assert levels == [["a"], ["b"], ["c"]]
 
     def test_parallel_nodes(self):
         dag = DAG()
         for nid in ("a", "b", "c"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
         # a -> c, b -> c (a and b are parallel)
-        dag.add_edge("a", "c")
-        dag.add_edge("b", "c")
+        dag = dag.add_edge("a", "c")
+        dag = dag.add_edge("b", "c")
         levels = dag.topological_levels()
         assert len(levels) == 2
         assert set(levels[0]) == {"a", "b"}
@@ -352,11 +352,11 @@ class TestDAGTopologicalSort:
     def test_diamond_dag(self):
         dag = DAG()
         for nid in ("a", "b", "c", "d"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b")
-        dag.add_edge("a", "c")
-        dag.add_edge("b", "d")
-        dag.add_edge("c", "d")
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("a", "c")
+        dag = dag.add_edge("b", "d")
+        dag = dag.add_edge("c", "d")
         levels = dag.topological_levels()
         assert levels[0] == ["a"]
         assert set(levels[1]) == {"b", "c"}
@@ -365,10 +365,10 @@ class TestDAGTopologicalSort:
     def test_cycle_detection(self):
         dag = DAG()
         for nid in ("a", "b", "c"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b")
-        dag.add_edge("b", "c")
-        dag.add_edge("c", "a")
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b")
+        dag = dag.add_edge("b", "c")
+        dag = dag.add_edge("c", "a")
         with pytest.raises(ValueError, match="Cycle detected"):
             dag.topological_levels()
 
@@ -379,15 +379,15 @@ class TestDAGReadyNodes:
     def test_initial_all_pending(self):
         dag = DAG()
         for nid in ("a", "b", "c"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
         # No edges, all should be ready
         assert set(dag.get_ready_nodes()) == {"a", "b", "c"}
 
     def test_dep_must_succeed(self):
         dag = DAG()
         for nid in ("a", "b"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b")
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b")
         # a is PENDING, b should not be ready
         assert "b" not in dag.get_ready_nodes()
         # a succeeds, b should be ready
@@ -397,16 +397,16 @@ class TestDAGReadyNodes:
     def test_dep_failed_blocks_hard(self):
         dag = DAG()
         for nid in ("a", "b"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b", DependencyType.HARD)
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b", DependencyType.HARD)
         dag.update_node("a", status=NodeStatus.FAILED)
         assert "b" not in dag.get_ready_nodes()
 
     def test_dep_failed_allows_soft(self):
         dag = DAG()
         for nid in ("a", "b"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b", DependencyType.SOFT)
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b", DependencyType.SOFT)
         dag.update_node("a", status=NodeStatus.FAILED)
         # Soft dep: upstream FAILED is terminal, so b is ready
         assert "b" in dag.get_ready_nodes()
@@ -414,8 +414,8 @@ class TestDAGReadyNodes:
     def test_running_dep_not_ready(self):
         dag = DAG()
         for nid in ("a", "b"):
-            dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
-        dag.add_edge("a", "b")
+            dag = dag.add_node(DAGNode(id=nid, agent_type="gen", task_description=nid))
+        dag = dag.add_edge("a", "b")
         dag.update_node("a", status=NodeStatus.RUNNING)
         assert "b" not in dag.get_ready_nodes()
 
@@ -425,8 +425,8 @@ class TestDAGTokenBudget:
 
     def test_total_token_budget(self):
         dag = DAG()
-        dag.add_node(DAGNode(id="a", agent_type="gen", task_description="A", token_budget=1000))
-        dag.add_node(DAGNode(id="b", agent_type="gen", task_description="B", token_budget=2000))
+        dag = dag.add_node(DAGNode(id="a", agent_type="gen", task_description="A", token_budget=1000))
+        dag = dag.add_node(DAGNode(id="b", agent_type="gen", task_description="B", token_budget=2000))
         assert dag.total_token_budget == 3000
 
     def test_empty_dag_budget(self):

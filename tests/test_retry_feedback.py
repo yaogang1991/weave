@@ -34,7 +34,7 @@ def _make_dag_with_failed_generator():
     )
     node.eval_feedback = node.error + "\n\nOutput artifacts: [parser.py, lexer.py]"
     node.retry_count = 1
-    dag.add_node(node)
+    dag = dag.add_node(node)
     return dag
 
 
@@ -45,7 +45,7 @@ class TestRetryFeedbackContent:
         # Use an executor that produces source-only artifacts to trigger
         # evaluation failure, then on retry produces test files too
         dag = DAG(reasoning="test")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="impl",
             agent_type="generator",
             task_description="impl",
@@ -156,9 +156,9 @@ class TestEventFeedbackNotTruncated:
             agent_type="evaluator",
             task_description="eval",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         # Simulate gen succeeded, eval failed
         gen_node.status = NodeStatus.SUCCESS
@@ -207,9 +207,9 @@ class TestUpstreamRetryGuard:
             agent_type="evaluator",
             task_description="eval",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         gen_node.status = NodeStatus.SUCCESS
         gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
@@ -255,9 +255,9 @@ class TestUpstreamRetryGuard:
             agent_type="evaluator",
             task_description="eval",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         gen_node.status = NodeStatus.PARTIAL_PASS
         gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
@@ -296,9 +296,9 @@ class TestUpstreamRetryGuard:
             agent_type="evaluator",
             task_description="eval",
         )
-        dag.add_node(gen_node)
-        dag.add_node(eval_node)
-        dag.add_edge("gen", "eval")
+        dag = dag.add_node(gen_node)
+        dag = dag.add_node(eval_node)
+        dag = dag.add_edge("gen", "eval")
 
         gen_node.status = NodeStatus.WARNED
         gen_node.result = {"summary": "done", "artifacts": ["main.py"]}
