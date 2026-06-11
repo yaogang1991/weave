@@ -52,7 +52,7 @@ def _make_dag(
 ) -> DAG:
     """Build a minimal DAG with one failed node."""
     dag = DAG()
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id=failed_node_id,
         agent_type=agent_type,
         task_description=task_description,
@@ -75,7 +75,7 @@ def _make_dag_with_deps(
 ) -> DAG:
     """Build a DAG with a failed node and one downstream dependent."""
     dag = DAG()
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id=failed_node_id,
         agent_type="generator",
         task_description="implement feature",
@@ -83,13 +83,13 @@ def _make_dag_with_deps(
         error=error,
         retry_count=retry_count,
     ))
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id=dep_id,
         agent_type="evaluator",
         task_description="evaluate results",
         status=NodeStatus.PENDING,
     ))
-    dag.add_edge(failed_node_id, dep_id, dependency_type=dep_type)
+    dag = dag.add_edge(failed_node_id, dep_id, dependency_type=dep_type)
     return dag
 
 
@@ -464,7 +464,7 @@ class TestAdaptOfFailureSuccessfulLLM:
             }),
         })
         dag = _make_dag()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan1",
             agent_type="planner",
             task_description="plan things",
@@ -529,7 +529,7 @@ class TestReplan:
             edges=[],
         )
         mock_dag = DAG()
-        mock_dag.add_node(DAGNode(id="new_gen", agent_type="generator", task_description="new task"))
+        mock_dag = mock_dag.add_node(DAGNode(id="new_gen", agent_type="generator", task_description="new task"))
 
         adapter = _make_adapter(llm_response={
             "content": json.dumps(plan.model_dump()),
@@ -537,14 +537,14 @@ class TestReplan:
         adapter._plan_to_dag.return_value = mock_dag
 
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1", agent_type="generator",
             task_description="original task",
             status=NodeStatus.FAILED,
             error="boom",
             result={"summary": "partial work"},
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan1", agent_type="planner",
             task_description="plan",
             status=NodeStatus.SUCCESS,
@@ -606,7 +606,7 @@ class TestReplan:
             edges=[],
         )
         mock_dag = DAG()
-        mock_dag.add_node(DAGNode(id="new_gen", agent_type="generator", task_description="new task"))
+        mock_dag = mock_dag.add_node(DAGNode(id="new_gen", agent_type="generator", task_description="new task"))
 
         adapter = _make_adapter(llm_response={
             "content": json.dumps(plan.model_dump()),
@@ -628,11 +628,11 @@ class TestReplan:
             }),
         })
         mock_dag = DAG()
-        mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
+        mock_dag = mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
         adapter._plan_to_dag.return_value = mock_dag
 
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1",
             agent_type="generator",
             task_description="big output",
@@ -658,11 +658,11 @@ class TestReplan:
             }),
         })
         mock_dag = DAG()
-        mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
+        mock_dag = mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
         adapter._plan_to_dag.return_value = mock_dag
 
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen1",
             agent_type="generator",
             task_description="fail task",
@@ -690,7 +690,7 @@ class TestReplan:
             {"content": json.dumps(plan.model_dump())},
         ])
         mock_dag = DAG()
-        mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
+        mock_dag = mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
         adapter._plan_to_dag.return_value = mock_dag
 
         dag = _make_dag(status=NodeStatus.FAILED, error="fail")
@@ -708,11 +708,11 @@ class TestReplan:
             }),
         })
         mock_dag = DAG()
-        mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
+        mock_dag = mock_dag.add_node(DAGNode(id="n1", agent_type="generator", task_description="t"))
         adapter._plan_to_dag.return_value = mock_dag
 
         dag = DAG()
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="other_node",
             agent_type="generator",
             task_description="other",

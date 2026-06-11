@@ -14,14 +14,14 @@ def _make_dag(nodes, edges=None):
     """Create a DAG with given nodes and edges."""
     dag = DAG(reasoning="test")
     for nid, agent_type in nodes:
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id=nid,
             agent_type=agent_type,
             task_description=f"task for {nid}",
         ))
     if edges:
         for from_n, to_n in edges:
-            dag.add_edge(from_n, to_n)
+            dag = dag.add_edge(from_n, to_n)
     return dag
 
 

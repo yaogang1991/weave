@@ -204,7 +204,7 @@ def _load_dag_from_file(plan_file: str) -> DAG:
 
     dag = DAG(reasoning=plan_data.get("reasoning", ""))
     for node_def in plan_data["nodes"]:
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id=node_def["id"],
             agent_type=node_def["agent_type"],
             task_description=node_def["task"],
@@ -214,7 +214,7 @@ def _load_dag_from_file(plan_file: str) -> DAG:
             actual_tokens=node_def.get("actual_tokens", 0),
         ))
     for edge_def in plan_data.get("edges", []):
-        dag.add_edge(edge_def["from"], edge_def["to"])
+        dag = dag.add_edge(edge_def["from"], edge_def["to"])
     return dag
 
 
@@ -413,6 +413,7 @@ def _build_runtime(
         session_id=session_id,
         backend_registry=backend_registry,
         budget_manager=budget_manager,
+        agent_registry=registry,
     )
 
     return {

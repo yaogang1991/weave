@@ -17,7 +17,7 @@ from core.exceptions import NodeTimeoutError, RateLimitError
 
 def _make_dag_with_node(max_retries: int = 2) -> DAG:
     dag = DAG(reasoning="test")
-    dag.add_node(DAGNode(
+    dag = dag.add_node(DAGNode(
         id="n1",
         agent_type="generator",
         task_description="impl",

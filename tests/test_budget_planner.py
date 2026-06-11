@@ -16,7 +16,7 @@ def _make_dag(nodes_spec: list[tuple[str, str]]) -> DAG:
     """Create a DAG from (id, agent_type) tuples."""
     dag = DAG(reasoning="test")
     for nid, atype in nodes_spec:
-        dag.add_node(DAGNode(id=nid, agent_type=atype, task_description=f"task for {nid}"))
+        dag = dag.add_node(DAGNode(id=nid, agent_type=atype, task_description=f"task for {nid}"))
     return dag
 
 

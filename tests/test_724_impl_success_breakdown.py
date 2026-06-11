@@ -24,7 +24,7 @@ class TestImplementationSuccessBreakdown:
     def test_planner_success_not_counted_as_implementation(self):
         """Planner success should not inflate implementation_success."""
         dag = DAG(reasoning="test #724")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan", agent_type="planner",
             task_description="plan",
         ))
@@ -40,11 +40,11 @@ class TestImplementationSuccessBreakdown:
     def test_generator_success_counted_as_implementation(self):
         """Generator success should be counted in implementation_success."""
         dag = DAG(reasoning="test #724")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan", agent_type="planner",
             task_description="plan",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_1", agent_type="generator",
             task_description="implement",
         ))
@@ -61,19 +61,19 @@ class TestImplementationSuccessBreakdown:
     def test_mixed_statuses_implementation_breakdown(self):
         """Implementation total includes all generators regardless of status."""
         dag = DAG(reasoning="test #724")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="plan", agent_type="planner",
             task_description="plan",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_1", agent_type="generator",
             task_description="impl feature A",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_2", agent_type="generator",
             task_description="impl feature B",
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="gen_3", agent_type="generator",
             task_description="impl feature C",
         ))
@@ -94,7 +94,7 @@ class TestImplementationSuccessBreakdown:
     def test_worker_counted_as_implementation(self):
         """Worker agent type should also be counted as implementation."""
         dag = DAG(reasoning="test #724")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="worker_1", agent_type="worker",
             task_description="build",
         ))
@@ -109,7 +109,7 @@ class TestImplementationSuccessBreakdown:
     def test_evaluator_not_counted_as_implementation(self):
         """Evaluator success should not inflate implementation_success."""
         dag = DAG(reasoning="test #724")
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="eval_1", agent_type="evaluator",
             task_description="evaluate",
         ))

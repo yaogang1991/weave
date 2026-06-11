@@ -18,7 +18,7 @@ async def _skip_handler(dag, node_id, error):
 async def _replan_handler(dag, failed_id):
     """Produces a small replacement DAG with 1 new pending node."""
     new_dag = DAG(reasoning="replan for " + failed_id)
-    new_dag.add_node(DAGNode(
+    new_dag = new_dag.add_node(DAGNode(
         id=f"{failed_id}_r1", agent_type="generator",
         task_description=f"retry {failed_id}",
     ))
@@ -42,23 +42,23 @@ class TestActiveNodeCount:
         # Only 3 are active -> replan should succeed
         dag = DAG(reasoning="test")
         for i in range(20):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"skip_{i}", agent_type="generator",
                 task_description=f"skipped {i}",
                 status=NodeStatus.SKIPPED,
             ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="fail_1", agent_type="generator",
             task_description="failed 1",
             status=NodeStatus.FAILED,
         ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="fail_2", agent_type="generator",
             task_description="failed 2",
             status=NodeStatus.FAILED,
         ))
         for i in range(3):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"pending_{i}", agent_type="generator",
                 task_description=f"pending {i}",
             ))
@@ -83,12 +83,12 @@ class TestActiveNodeCount:
 
         dag = DAG(reasoning="test")
         for i in range(24):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"super_{i}", agent_type="generator",
                 task_description=f"superseded {i}",
                 status=NodeStatus.SUPERSEDED,
             ))
-        dag.add_node(DAGNode(
+        dag = dag.add_node(DAGNode(
             id="active", agent_type="generator",
             task_description="active node",
         ))
@@ -112,7 +112,7 @@ class TestActiveNodeCount:
 
         dag = DAG(reasoning="test")
         for i in range(15):
-            dag.add_node(DAGNode(
+            dag = dag.add_node(DAGNode(
                 id=f"active_{i}", agent_type="generator",
                 task_description=f"active {i}",
             ))
