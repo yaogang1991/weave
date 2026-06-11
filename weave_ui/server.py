@@ -30,7 +30,7 @@ from starlette.requests import Request  # noqa: E402
 from starlette.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel as PydanticModel  # noqa: E402
 
-from visualizer.event_bridge import WebSocketEventBridge  # noqa: E402
+from weave_ui.event_bridge import WebSocketEventBridge  # noqa: E402
 from session.store import SessionStore  # noqa: E402
 from core.config import WeaveConfig  # noqa: E402
 
@@ -39,7 +39,7 @@ from control_plane.repository import JobRepository  # noqa: E402
 from control_plane.approval import ApprovalRepository, TicketStatus  # noqa: E402
 
 
-app = FastAPI(title="Weave Visualizer", version="2.0")
+app = FastAPI(title="Weave UI", version="3.0")
 bridge = WebSocketEventBridge()
 
 
@@ -752,7 +752,7 @@ def get_event_bridge() -> WebSocketEventBridge:
 
 
 async def run_server(host: str = "0.0.0.0", port: int = 8080) -> None:
-    """Run the visualizer server (programmatic entry point)."""
+    """Run the Weave UI server (programmatic entry point)."""
     import uvicorn
     await uvicorn.Server(
         uvicorn.Config(app, host=host, port=port, log_level="info")

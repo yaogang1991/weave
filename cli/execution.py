@@ -158,7 +158,7 @@ async def cmd_execute(args, dag: DAG | None = None):
     if dag is None:
         dag = _load_dag_from_file(args.plan_file)
 
-    # Store DAG in session for visualizer
+    # Store DAG in session for Weave UI
     store.emit_event(
         session_id,
         EventType.SESSION_DAG,
@@ -431,7 +431,7 @@ def _setup_visualization(args, engine, dag, session_id):
     cli_renderer = None
 
     if args.viz or args.visualize:
-        from visualizer.cli_renderer import CLIDAGRenderer
+        from weave_ui.cli_renderer import CLIDAGRenderer
 
         cli_renderer = CLIDAGRenderer()
         engine.on_event(cli_renderer.handle_event)
@@ -613,13 +613,13 @@ async def cmd_run(args):
 
 
 async def cmd_viz(args):
-    """Launch the visualizer web server."""
-    from visualizer.server import run_server
+    """Launch the Weave UI web server."""
+    from weave_ui.server import run_server
 
     host = args.host
     port = args.port
 
-    print(f"🚀 Starting Weave Visualizer at http://{host}:{port}")
+    print(f"🚀 Starting Weave UI at http://{host}:{port}")
     print("Press Ctrl+C to stop")
 
     if not args.no_browser:

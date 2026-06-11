@@ -6,7 +6,7 @@ Usage:
     python main.py plan "Build a REST API for user authentication"
     python main.py execute ./data/plans/plan_xxx.json
     python main.py run "Add OAuth2 support" --project ./my-project
-    python main.py viz                    # Launch visualizer dashboard
+    python main.py viz                    # Launch Weave UI dashboard
     python main.py run "Build API" --viz  # Run with live visualization
 """
 
@@ -88,7 +88,7 @@ Examples:
   python main.py run "Build API" --viz
   python main.py run "Build API" --visualize --no-browser
 
-  # Launch standalone visualizer
+  # Launch Weave UI dashboard
   python main.py viz --port 8080
         """,
     )
@@ -148,7 +148,7 @@ Examples:
     run_parser.set_defaults(func=cmd_run)
 
     # viz command (standalone server)
-    viz_parser = subparsers.add_parser("viz", help="Launch visualizer dashboard")
+    viz_parser = subparsers.add_parser("viz", help="Launch Weave UI dashboard")
     viz_parser.add_argument("--host", default="127.0.0.1", help="Server host (default: 127.0.0.1)")
     viz_parser.add_argument("--port", type=int, default=8080, help="Server port (default: 8080)")
     viz_parser.add_argument("--no-browser", action="store_true", help="Don't auto-open browser")

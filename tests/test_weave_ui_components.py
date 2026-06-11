@@ -1,4 +1,4 @@
-"""Tests for visualizer/cli_renderer.py and visualizer/event_bridge.py."""
+"""Tests for weave_ui/cli_renderer.py and weave_ui/event_bridge.py."""
 from __future__ import annotations
 
 import pytest
@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime, timezone
 
 from core.models import DAG, DAGNode, ExecutionEvent, NodeStatus
-from visualizer.cli_renderer import CLIDAGRenderer
-from visualizer.event_bridge import WebSocketEventBridge
+from weave_ui.cli_renderer import CLIDAGRenderer
+from weave_ui.event_bridge import WebSocketEventBridge
 from datetime import datetime, timezone
 
 

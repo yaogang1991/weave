@@ -14,3 +14,6 @@ weave_ui/static/
 weave_ui/frontend/node_modules/
 .claude/worktrees/
 .coverage
+weave_ui/frontend/node_modules/
+weave_ui/static/
+.claude/worktrees/

@@ -763,7 +763,7 @@ class TestCmdRecover:
 class TestCmdConsole:
     """Tests for cmd_console."""
 
-    @patch("visualizer.server.run_server", new_callable=AsyncMock)
+    @patch("weave_ui.server.run_server", new_callable=AsyncMock)
     def test_console_default_host_port(self, mock_run_server, capsys):
         """Console launches with default host and port."""
         from cli.jobs import cmd_console
@@ -778,7 +778,7 @@ class TestCmdConsole:
         assert "http://0.0.0.0:8080/" in captured.out
         mock_run_server.assert_awaited_once_with(host="0.0.0.0", port=8080)
 
-    @patch("visualizer.server.run_server", new_callable=AsyncMock)
+    @patch("weave_ui.server.run_server", new_callable=AsyncMock)
     def test_console_custom_host_port(self, mock_run_server, capsys):
         """Console launches with custom host and port."""
         from cli.jobs import cmd_console
