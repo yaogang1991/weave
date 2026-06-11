@@ -94,6 +94,18 @@ class MemoryAddRequest(PydanticModel):
     keywords: list[str] = []
 
 
+class SubmitJobRequest(PydanticModel):
+    requirement: str
+    workspace: str
+    template: str | None = None
+    priority: int = 0
+
+
+class AddWorkspaceRequest(PydanticModel):
+    path: str
+    label: str = ""
+
+
 # Static files
 static_path = Path(__file__).parent / "static"
 if static_path.exists():
@@ -389,13 +401,13 @@ async def api_retry_job(job_id: str):
             detail=f"Cannot retry job in status {job.status.value}",
         )
 
-    job.status = JobStatus.QUEUED
-    job.attempt = 0
+    try:
+        job = repo.transition_job_status(job_id, JobStatus.QUEUED)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # Reset retry fields for fresh start
     job.last_error = ""
     job.error_category = ""
-    job.lease_owner = None
-    job.lease_expires_at = None
-    job.updated_at = datetime.now(timezone.utc)
     repo.update_job(job)
     return {"job_id": job.id, "status": job.status.value, "message": "Job queued for retry"}
 
@@ -742,6 +754,117 @@ async def api_instantiate_template(name: str, request: TemplateInstantiateReques
         "edges": [{"from": e.from_node, "to": e.to_node} for e in dag.edges],
         "reasoning": dag.reasoning,
     }
+
+
+# ── Job Submission & Workspace APIs ──────────────────────────────────
+
+
+@app.post("/api/jobs")
+async def api_submit_job(body: SubmitJobRequest):
+    """Submit a new job via the web UI."""
+    from control_plane.service import RunService
+    from core.config import WeaveConfig
+
+    repo = JobRepository(base_path="./data/jobs")
+    weave_config = WeaveConfig.from_env()
+    approval_repo = ApprovalRepository()
+    service = RunService(
+        repository=repo,
+        llm_config=weave_config.llm,
+        default_backend=weave_config.default_backend,
+        backend_base_path=weave_config.backend_base_path,
+        approval_repo=approval_repo,
+        non_interactive=True,
+        approval_timeout_sec=weave_config.approval_timeout_sec,
+        budget_config=weave_config.budget,
+    )
+    try:
+        job = await service.submit_job(
+            requirement=body.requirement,
+            project_path=body.workspace,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to submit job: {exc}")
+
+    return {
+        "id": job.id,
+        "status": job.status.value,
+        "requirement": job.requirement,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+    }
+
+
+_WORKSPACES_FILE = Path("./data/workspaces.json")
+_PRESET_WORKSPACES: list[dict] = []
+
+
+def _load_workspaces() -> list[dict]:
+    """Load workspaces from presets + user-configured paths."""
+    workspaces = list(_PRESET_WORKSPACES)
+    if _WORKSPACES_FILE.exists():
+        try:
+            custom = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
+            workspaces.extend(custom)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return workspaces
+
+
+@app.get("/api/workspaces")
+async def api_list_workspaces():
+    """List available workspaces (presets + custom)."""
+    return {"workspaces": _load_workspaces()}
+
+
+@app.post("/api/workspaces")
+async def api_add_workspace(body: AddWorkspaceRequest):
+    """Add a custom workspace path."""
+    _WORKSPACES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    existing = []
+    if _WORKSPACES_FILE.exists():
+        try:
+            existing = json.loads(_WORKSPACES_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            existing = []
+    # Avoid duplicates
+    if any(w.get("path") == body.path for w in existing):
+        raise HTTPException(status_code=409, detail="Workspace already exists")
+    entry = {"path": body.path, "label": body.label or body.path}
+    existing.append(entry)
+    _WORKSPACES_FILE.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    return entry
+
+
+@app.get("/api/jobs/{job_id}/summary")
+async def api_job_summary(job_id: str):
+    """Get the completion summary for a job."""
+    repo = JobRepository()
+    job = repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    runs = repo.list_runs_by_job(job_id)
+    if not runs:
+        return {"title": "No runs yet", "content": ""}
+
+    # Find the latest completed run's session
+    config = WeaveConfig.from_env()
+    store = SessionStore(config.event_store_path)
+    for run in reversed(runs):
+        if run.session_id:
+            events = store.get_events(run.session_id)
+            # Look for the final summary event
+            for evt in reversed(events):
+                evt_type = evt.type.value if hasattr(evt, "type") else str(evt)
+                evt_payload = evt.payload if hasattr(evt, "payload") else {}
+                if "end" in evt_type or "summary" in evt_type or "result" in evt_type:
+                    data = evt_payload if isinstance(evt_payload, dict) else {}
+                    return {
+                        "title": data.get("title", f"Run {run.id} completed"),
+                        "content": data.get("content", data.get("result", "")),
+                    }
+
+    return {"title": f"Job {job_id}", "content": "No summary available"}
 
 
 # ── Integration helpers ──────────────────────────────────────────────
