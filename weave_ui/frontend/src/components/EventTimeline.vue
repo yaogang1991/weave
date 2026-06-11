@@ -1,9 +1,9 @@
 <template>
   <n-timeline v-if="events.length">
     <n-timeline-item v-for="(evt, i) in events" :key="i"
-      :type="eventTypeColor(evt.event_type)" :title="formatLabel(evt.event_type)"
+      :type="eventTypeColor(evt.event_type || evt.type)" :title="formatLabel(evt.event_type || evt.type)"
       :time="formatTime(evt.timestamp)">
-      <template #icon>{{ eventIcon(evt.event_type) }}</template>
+      <template #icon>{{ eventIcon(evt.event_type || evt.type) }}</template>
       <n-collapse v-if="evt.payload && Object.keys(evt.payload).length">
         <n-collapse-item title="Details">
           <pre style="font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow: auto">{{ JSON.stringify(evt.payload, null, 2) }}</pre>
@@ -18,6 +18,7 @@ import { NTimeline, NTimelineItem, NCollapse, NCollapseItem, NEmpty } from 'naiv
 import type { SessionEvent } from '../types'
 defineProps<{ events: SessionEvent[] }>()
 function eventIcon(t: string) {
+  if (!t) return '📌'
   if (t.includes('tool_use')) return '🔧'
   if (t.includes('start')) return '▶️'
   if (t.includes('end')) return '✅'
@@ -26,11 +27,12 @@ function eventIcon(t: string) {
   return '📌'
 }
 function eventTypeColor(t: string) {
+  if (!t) return 'default'
   if (t.includes('error')) return 'error'
   if (t.includes('end') || t.includes('succeeded')) return 'success'
   if (t.includes('start')) return 'info'
   return 'default'
 }
-function formatLabel(t: string) { return t.replace(/\./g, ' › ') }
-function formatTime(iso: string) { return new Date(iso).toLocaleTimeString() }
+function formatLabel(t: string) { return t ? t.replace(/\./g, ' › ') : '' }
+function formatTime(iso: string) { return iso ? new Date(iso).toLocaleTimeString() : '' }
 </script>

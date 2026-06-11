@@ -10,14 +10,18 @@
           <n-text>{{ jobStore.currentJob.job?.requirement }}</n-text>
         </n-card>
         <n-card size="small" style="margin-bottom: 12px">
-          <template #header>
-            <n-space>
-              <span>Events</span>
-              <n-button v-if="events.length" size="tiny" @click="showReplay = !showReplay">{{ showReplay ? 'Timeline' : 'Replay' }}</n-button>
-            </n-space>
-          </template>
-          <ReplayView v-if="showReplay" :events="events" />
-          <EventTimeline v-else :events="events" />
+          <n-tabs v-model:value="activeTab" type="segment" size="small">
+            <n-tab-pane name="dag" tab="DAG">
+              <DagView :dag="dagData" />
+            </n-tab-pane>
+            <n-tab-pane name="timeline" tab="Timeline">
+              <n-space style="margin-bottom: 8px">
+                <n-button v-if="events.length" size="tiny" @click="showReplay = !showReplay">{{ showReplay ? 'Timeline' : 'Replay' }}</n-button>
+              </n-space>
+              <ReplayView v-if="showReplay" :events="events" />
+              <EventTimeline v-else :events="events" />
+            </n-tab-pane>
+          </n-tabs>
         </n-card>
       </n-gi>
       <n-gi :span="8">
@@ -37,19 +41,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { NPageHeader, NGrid, NGi, NCard, NText, NButton, NSpace, NSpin, useMessage } from 'naive-ui'
+import { NPageHeader, NGrid, NGi, NCard, NText, NButton, NSpace, NSpin, NTabs, NTabPane, useMessage } from 'naive-ui'
 import { useJobStore } from '../stores/job'
 import StatusTag from '../components/StatusTag.vue'
 import EventTimeline from '../components/EventTimeline.vue'
 import ReplayView from '../components/ReplayView.vue'
+import DagView from '../components/DagView.vue'
 import TicketList from '../components/TicketList.vue'
 import AnnotationPanel from '../components/AnnotationPanel.vue'
 import * as api from '../api'
-import type { SessionEvent } from '../types'
+import type { SessionEvent, DAGData } from '../types'
 
 const router = useRouter(), route = useRoute(), msg = useMessage(), jobStore = useJobStore()
 const events = ref<SessionEvent[]>([])
 const showReplay = ref(false)
+const dagData = ref<DAGData | null>(null)
+const activeTab = ref('dag')
 const jobId = computed(() => (route.params.id as string || '').slice(0, 16))
 const status = computed(() => jobStore.currentJob?.job?.status)
 const canCancel = computed(() => ['queued','running','leased','pending_approval'].includes(status.value))
@@ -60,6 +67,7 @@ async function loadEvents() {
   const sid = runs[runs.length - 1]?.session_id
   if (!sid) return
   try { const res = await api.getSession(sid); events.value = (res as any).events || [] } catch {}
+  try { dagData.value = await api.getSessionDag(sid) } catch {}
 }
 async function doCancel() { try { await jobStore.cancelJob(route.params.id as string); msg.success('Canceled') } catch (e: any) { msg.error(e.message) } }
 async function doRetry() { try { await jobStore.retryJob(route.params.id as string); msg.success('Retrying') } catch (e: any) { msg.error(e.message) } }

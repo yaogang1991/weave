@@ -589,6 +589,7 @@ class RunService:
                 },
                 "edges": [{"from": e.from_node, "to": e.to_node} for e in dag.edges],
                 "requirement": job.requirement,
+                "reasoning": dag.reasoning,
             },
         )
 

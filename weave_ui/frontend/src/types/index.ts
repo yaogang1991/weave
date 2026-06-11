@@ -101,3 +101,31 @@ export interface Annotation {
   rating: number
   updated_at: string
 }
+
+// DAG visualization types
+export type NodeStatus = "pending" | "running" | "success" | "partial_pass" | "warned" | "failed" | "skipped" | "retrying" | "pending_approval"
+
+export interface DAGNode {
+  id: string
+  agent_type: string
+  task: string
+  status: NodeStatus
+  started_at: string | null
+  completed_at: string | null
+  error: string | null
+  duration_ms: number | null
+}
+
+export interface DAGEdge {
+  from: string
+  to: string
+  dependency_type?: "hard" | "soft"
+}
+
+export interface DAGData {
+  nodes: DAGNode[]
+  edges: DAGEdge[]
+  levels: string[][]
+  reasoning: string
+  requirement: string
+}
