@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
 import { useWebSocket } from '../composables/useWebSocket'
 import { useJobStore } from './job'
@@ -6,15 +6,21 @@ import { useJobStore } from './job'
 export const useWebSocketStore = defineStore('websocket', () => {
   const connected = ref(false)
   const lastEventType = ref<string | null>(null)
-  let ws: ReturnType<typeof useWebSocket> | null = null
+  let cleanup: (() => void) | null = null
 
   function connect() {
+    if (cleanup) return // already connected
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = wsProtocol + '//' + location.host + '/ws'
     const { connected: conn, lastEvent } = useWebSocket(wsUrl)
-    ws = { connected: conn, lastEvent } as any
-    // Watch for connection status
-    connected.value = true
+
+    // Fix #6: reflect actual connection state instead of assuming true
+    watch(conn, (val) => { connected.value = val }, { immediate: true })
+
+    // Fix #7: wire handleEvent to incoming WebSocket messages
+    watch(lastEvent, (evt) => { if (evt) handleEvent(evt) })
+
+    cleanup = () => { conn.value = false }
   }
 
   function handleEvent(event: any) {
@@ -35,4 +41,4 @@ export const useWebSocketStore = defineStore('websocket', () => {
   }
 
   return { connected, lastEventType, connect, handleEvent }
-})
+}

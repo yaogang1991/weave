@@ -23,7 +23,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect  # noqa: E402
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect  # noqa: E402
 from fastapi.staticfiles import StaticFiles  # noqa: E402
 from fastapi.responses import HTMLResponse  # noqa: E402
 from starlette.requests import Request  # noqa: E402
@@ -104,6 +104,12 @@ class SubmitJobRequest(PydanticModel):
 class AddWorkspaceRequest(PydanticModel):
     path: str
     label: str = ""
+
+class NotificationPrefsUpdate(PydanticModel):
+    on_succeeded: bool | None = None
+    on_failed: bool | None = None
+    on_stuck: bool | None = None
+    on_pending_approval: bool | None = None
 
 
 # Static files
@@ -405,7 +411,6 @@ async def api_retry_job(job_id: str):
         job = repo.transition_job_status(job_id, JobStatus.QUEUED)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    # Reset retry fields for fresh start
     job.last_error = ""
     job.error_category = ""
     repo.update_job(job)
@@ -865,6 +870,85 @@ async def api_job_summary(job_id: str):
                     }
 
     return {"title": f"Job {job_id}", "content": "No summary available"}
+
+
+# ── Notification & Search APIs (M8.3) ──────────────────────────────
+
+
+_NOTIF_PREFS_FILE = Path("./data/notification_preferences.json")
+_DEFAULT_NOTIF_PREFS = {
+    "on_succeeded": True,
+    "on_failed": True,
+    "on_stuck": True,
+    "on_pending_approval": True,
+}
+
+
+def _load_notif_prefs() -> dict:
+    if _NOTIF_PREFS_FILE.exists():
+        try:
+            return {**_DEFAULT_NOTIF_PREFS, **json.loads(_NOTIF_PREFS_FILE.read_text(encoding="utf-8"))}
+        except (json.JSONDecodeError, OSError):
+            pass
+    return dict(_DEFAULT_NOTIF_PREFS)
+
+
+def _save_notif_prefs(prefs: dict) -> dict:
+    _NOTIF_PREFS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _NOTIF_PREFS_FILE.write_text(json.dumps(prefs, indent=2), encoding="utf-8")
+    return prefs
+
+
+@app.get("/api/notification-preferences")
+async def api_get_notif_prefs():
+    return _load_notif_prefs()
+
+
+@app.put("/api/notification-preferences")
+async def api_update_notif_prefs(prefs: NotificationPrefsUpdate):
+    saved = _load_notif_prefs()
+    saved.update({k: v for k, v in prefs.model_dump(exclude_none=True).items() if k in _DEFAULT_NOTIF_PREFS})
+    return _save_notif_prefs(saved)
+
+
+@app.get("/api/search")
+async def api_search(q: str = "", status: str | None = None, from_: str | None = Query(None, alias="from"), to: str | None = None):
+    """Full-text search across jobs."""
+    repo = JobRepository()
+    all_jobs = repo.list_jobs()
+    results = []
+    highlights: dict[str, str] = {}
+    q_lower = q.lower()
+
+    for job in all_jobs:
+        if status and job.status.value != status:
+            continue
+        if from_ and job.created_at and job.created_at.isoformat() < from_:
+            continue
+        if to and job.created_at and job.created_at.isoformat() > to:
+            continue
+        if q_lower:
+            req_lower = job.requirement.lower()
+            if q_lower not in req_lower and q_lower not in job.id.lower():
+                continue
+            idx = req_lower.find(q_lower)
+            start = max(0, idx - 30)
+            end = min(len(job.requirement), idx + len(q_lower) + 30)
+            snippet = job.requirement[start:end]
+            if start > 0:
+                snippet = "..." + snippet
+            if end < len(job.requirement):
+                snippet = snippet + "..."
+            highlights[job.id] = snippet
+        results.append({
+            "id": job.id,
+            "requirement": job.requirement,
+            "status": job.status.value,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        })
+
+    return {"jobs": results, "highlights": highlights, "count": len(results)}
 
 
 # ── Integration helpers ──────────────────────────────────────────────
