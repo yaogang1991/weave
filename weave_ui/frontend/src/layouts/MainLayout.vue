@@ -17,6 +17,7 @@ const activeKey = computed(() => route.name as string)
 const menuOptions: MenuOption[] = [
   { label: 'Dashboard', key: 'dashboard' },
   { label: 'Tasks', key: 'tasks' },
+  { label: 'Templates', key: 'templates' },
   { label: 'History', key: 'history' },
   { label: 'Settings', key: 'settings' },
 ]
