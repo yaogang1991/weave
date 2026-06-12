@@ -663,17 +663,8 @@ class NodeExecutor:
         """
         from core.progress import ProgressTracker
 
-        # #1106: Resolve backend name early so stall timeout can be
-        # adjusted for slow third-party LLM API backends (e.g. claude_code
-        # with GLM-5.1 proxy).
-        backend_name = (
-            node.backend or self._default_agent_backend
-            if self._backend_registry is not None
-            else ""
-        )
-
         stall_timeout = self._get_stall_timeout(
-            node.agent_type, node=node, backend=backend_name,
+            node.agent_type, node=node,
         )
 
         tracker = ProgressTracker(stall_timeout=stall_timeout)
@@ -709,9 +700,10 @@ class NodeExecutor:
                 logger.debug("Heartbeat call_soon_threadsafe failed (event loop closing)")
 
         if self._backend_registry is not None:
-            # backend_name already resolved above for stall timeout (#1106).
+            # Resolve backend name first to avoid double injection.
             # BuiltinBackend has its own memory injection via agent_pool/worker;
             # only inject into BackendContext for external backends.
+            backend_name = node.backend or self._default_agent_backend
 
             # M6.2: Pre-check guardrail for external backends
             if self._node_guardrails and backend_name not in ("builtin", ""):
@@ -961,20 +953,13 @@ class NodeExecutor:
         return max(1, int(interval * threshold))
 
     def _get_stall_timeout(
-        self,
-        agent_type: str,
-        node: DAGNode | None = None,
-        backend: str = "",
+        self, agent_type: str, node: DAGNode | None = None,
     ) -> int:
         """Return dynamic stall timeout.
 
         Priority: NodeTimeoutConfig (supports dynamic complexity scaling)
                   → AgentSpec boundary (static fallback)
                   → _get_node_timeout (heartbeat-based)
-
-        #1106: *backend* is passed through to ``stall_timeout_for()`` so
-        that backend-specific multipliers (e.g. 2.5× for claude_code) are
-        applied when using slow third-party LLM APIs.
         """
         if self._node_timeout_config is not None:
             from core.node_utils import (
@@ -996,7 +981,6 @@ class NodeExecutor:
                 test_count=test_count,
                 dep_count=dep_count,
                 feature_count=feature_count,
-                backend=backend,
             )
         spec = self._get_agent_spec(agent_type)
         if spec and spec.boundary.stall_timeout is not None:
