@@ -474,18 +474,24 @@ class ClaudeCodeBackend(AgentBackend):
                         "— attempting text extraction (#1123)",
                         output_tokens,
                     )
-                    from agent.backends.text_artifact_extractor import (
-                        extract_artifacts_from_text,
-                    )
-                    extracted = extract_artifacts_from_text(
-                        result_text,
-                        context.workspace_path or cwd,
-                        node_context={
-                            "agent_type": context.node.agent_type,
-                        },
-                    )
-                    if extracted:
-                        artifacts = extracted
+                    try:
+                        from agent.backends.text_artifact_extractor import (
+                            extract_artifacts_from_text,
+                        )
+                        extracted = extract_artifacts_from_text(
+                            result_text,
+                            context.workspace_path or cwd,
+                            node_context={
+                                "agent_type": context.node.agent_type,
+                            },
+                        )
+                        if extracted:
+                            artifacts = extracted
+                    except Exception as exc:
+                        logger.warning(
+                            "Text artifact extraction failed (#1123): %s",
+                            exc,
+                        )
 
             return self._build_stream_result(
                 parser, usage, state, artifacts,

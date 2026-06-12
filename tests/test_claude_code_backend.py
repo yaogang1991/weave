@@ -591,3 +591,114 @@ class TestSilentCliFailure:
             result = await backend._execute_via_cli(ctx, "test prompt")
 
         assert result.status == BackendStatus.COMPLETED
+
+
+class TestTextArtifactExtractionFallback:
+    """#1123: Text artifact extraction fallback when no files are written."""
+
+    @pytest.fixture
+    def backend(self):
+        from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
+        return ClaudeCodeBackend(config=ClaudeCodeRuntimeConfig())
+
+    @pytest.mark.asyncio
+    async def test_fallback_extracts_from_text_output(self, backend):
+        """When _discover_artifacts returns empty, text blocks are extracted."""
+        ctx = _make_context()
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+        mock_process.stdout = AsyncMock()
+
+        code_block = (
+            "```python\n# file: extracted.py\nprint('hello')\n```\n"
+        )
+        # Pad to exceed 200-char minimum threshold
+        padded_result = code_block + "x" * 250
+
+        mock_process.stdout.readline = AsyncMock(
+            side_effect=[
+                json.dumps({
+                    "type": "result",
+                    "result": padded_result,
+                    "usage": {"input_tokens": 100, "output_tokens": 600},
+                }).encode() + b"\n",
+                b"",
+            ],
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process), \
+             patch.object(backend, "_discover_artifacts", return_value=[]), \
+             patch(
+                 "agent.backends.text_artifact_extractor.extract_artifacts_from_text",
+                 return_value=["extracted.py"],
+             ) as mock_extract:
+            result = await backend._execute_via_cli(ctx, "test prompt")
+
+        assert result.status == BackendStatus.COMPLETED
+        assert "extracted.py" in result.artifacts
+        mock_extract.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_fallback_when_artifacts_found(self, backend):
+        """No text extraction when _discover_artifacts succeeds normally."""
+        ctx = _make_context()
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(
+            side_effect=[
+                json.dumps({
+                    "type": "result",
+                    "result": "some text output",
+                    "usage": {"input_tokens": 100, "output_tokens": 600},
+                }).encode() + b"\n",
+                b"",
+            ],
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process), \
+             patch.object(backend, "_discover_artifacts", return_value=["real_file.py"]), \
+             patch(
+                 "agent.backends.text_artifact_extractor.extract_artifacts_from_text",
+             ) as mock_extract:
+            result = await backend._execute_via_cli(ctx, "test prompt")
+
+        assert result.status == BackendStatus.COMPLETED
+        assert result.artifacts == ["real_file.py"]
+        mock_extract.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_extraction_failure_does_not_crash(self, backend):
+        """If text extraction raises, the backend still returns COMPLETED."""
+        ctx = _make_context()
+        mock_process = AsyncMock()
+        mock_process.returncode = 0
+        mock_process.stderr = AsyncMock()
+        mock_process.stderr.read = AsyncMock(return_value=b"")
+        mock_process.stdout = AsyncMock()
+        mock_process.stdout.readline = AsyncMock(
+            side_effect=[
+                json.dumps({
+                    "type": "result",
+                    "result": "x" * 250,
+                    "usage": {"input_tokens": 100, "output_tokens": 600},
+                }).encode() + b"\n",
+                b"",
+            ],
+        )
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_process), \
+             patch.object(backend, "_discover_artifacts", return_value=[]), \
+             patch(
+                 "agent.backends.text_artifact_extractor.extract_artifacts_from_text",
+                 side_effect=ImportError("module not found"),
+             ):
+            result = await backend._execute_via_cli(ctx, "test prompt")
+
+        # Should not crash — falls back to empty artifacts
+        assert result.status == BackendStatus.COMPLETED
+        assert result.artifacts == []

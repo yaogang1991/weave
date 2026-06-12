@@ -84,6 +84,17 @@ def extract_artifacts_from_text(
     if not text or len(text) < _MIN_TEXT_LENGTH:
         return []
 
+    # Only extract for generator nodes — planners and evaluators
+    # typically don't need to write files.
+    if node_context:
+        agent_type = node_context.get("agent_type")
+        if agent_type and agent_type not in ("generator",):
+            logger.debug(
+                "Skipping text extraction for non-generator node: %s",
+                agent_type,
+            )
+            return []
+
     blocks = _parse_code_blocks(text)
     if not blocks:
         return []
@@ -102,7 +113,7 @@ def extract_artifacts_from_text(
 
     for i, (lang, filename, content) in enumerate(meaningful_blocks):
         if not filename:
-            filename = _infer_filename(lang, content, i, node_context)
+            filename = _infer_filename(lang, content, i)
         if not filename:
             logger.debug("Skipping code block %d: no filename inferred", i)
             continue
@@ -161,7 +172,6 @@ def _infer_filename(
     lang: str,
     content: str,
     index: int,
-    node_context: dict[str, Any] | None = None,
 ) -> str | None:
     """Infer a filename from language tag and code content.
 
