@@ -461,6 +461,38 @@ class ClaudeCodeBackend(AgentBackend):
                 )
 
             artifacts = self._discover_artifacts(context)
+
+            # #1123: Extract code blocks from text output when no files were
+            # written. Third-party LLMs may output code as fenced blocks
+            # instead of using tool_use calls.
+            if not artifacts and state.get("result"):
+                result_text = state["result"]
+                output_tokens = usage.get("output_tokens", 0)
+                if output_tokens > 500 or len(result_text) > 200:
+                    logger.warning(
+                        "Zero artifacts discovered despite %d output tokens "
+                        "— attempting text extraction (#1123)",
+                        output_tokens,
+                    )
+                    try:
+                        from agent.backends.text_artifact_extractor import (
+                            extract_artifacts_from_text,
+                        )
+                        extracted = extract_artifacts_from_text(
+                            result_text,
+                            context.workspace_path or cwd,
+                            node_context={
+                                "agent_type": context.node.agent_type,
+                            },
+                        )
+                        if extracted:
+                            artifacts = extracted
+                    except Exception as exc:
+                        logger.warning(
+                            "Text artifact extraction failed (#1123): %s",
+                            exc,
+                        )
+
             return self._build_stream_result(
                 parser, usage, state, artifacts,
             )
