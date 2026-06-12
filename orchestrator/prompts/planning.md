@@ -115,7 +115,15 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     the old file should be deleted/replaced). NEVER create duplicate files
     that serve the same purpose as existing ones. Include the file inventory
     in your planning reasoning.
-19. **Retry continuity**: When the prompt includes "Retry Context", this is a
+19. **Publishing/deployment nodes must be terminal**: Nodes that publish
+    artifacts externally (push PR, deploy, release, notify, etc.) MUST
+    depend on ALL upstream implementation AND evaluation nodes. They must
+    be the LAST nodes in the DAG — never parallel with implementation.
+    Correct: `impl → eval → push_pr`
+    Wrong: `plan → (impl ‖ push_pr)` where push_pr runs before code exists.
+    If an eval node exists, the publishing node MUST depend on eval.
+    If no eval node exists, the publishing node MUST depend on ALL impl nodes.
+20. **Retry continuity**: When the prompt includes "Retry Context", this is a
     retry of a previous failed/timed-out attempt. You MUST:
     a. Review ALL existing files listed above — they represent completed work
     b. Only plan nodes for MISSING or INCOMPLETE work
