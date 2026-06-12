@@ -66,8 +66,8 @@ async function loadEvents() {
   const runs = jobStore.currentJob?.runs || []
   const sid = runs[runs.length - 1]?.session_id
   if (!sid) return
-  try { const res = await api.getSession(sid); events.value = (res as any).events || [] } catch {}
-  try { dagData.value = await api.getSessionDag(sid) } catch {}
+  try { const res = await api.getSession(sid); events.value = (res as any).events || [] } catch (e) { console.warn('Failed to load session events:', e) }
+  try { dagData.value = await api.getSessionDag(sid) } catch (e) { console.warn('Failed to load DAG data:', e) }
 }
 async function doCancel() { try { await jobStore.cancelJob(route.params.id as string); msg.success('Canceled') } catch (e: any) { msg.error(e.message) } }
 async function doRetry() { try { await jobStore.retryJob(route.params.id as string); msg.success('Retrying') } catch (e: any) { msg.error(e.message) } }

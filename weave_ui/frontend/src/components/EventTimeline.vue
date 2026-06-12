@@ -1,9 +1,9 @@
 <template>
   <n-timeline v-if="events.length">
     <n-timeline-item v-for="(evt, i) in events" :key="i"
-      :type="eventTypeColor(evt.event_type || evt.type)" :title="formatLabel(evt.event_type || evt.type)"
+      :type="eventTypeColor(evt.event_type || evt.type || '')" :title="formatLabel(evt.event_type || evt.type || '')"
       :time="formatTime(evt.timestamp)">
-      <template #icon>{{ eventIcon(evt.event_type || evt.type) }}</template>
+      <template #icon>{{ eventIcon(evt.event_type || evt.type || '') }}</template>
       <n-collapse v-if="evt.payload && Object.keys(evt.payload).length">
         <n-collapse-item title="Details">
           <pre style="font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow: auto">{{ JSON.stringify(evt.payload, null, 2) }}</pre>

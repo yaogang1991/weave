@@ -28,12 +28,12 @@
             <div class="dag-node__header">
               <span class="dag-node__icon">{{ agentIcon(getNode(nodeId).agent_type) }}</span>
               <span class="dag-node__id">{{ nodeId }}</span>
-              <n-spin v-if="getNode(nodeId).status === 'running'" size="tiny" />
+              <n-spin v-if="getNode(nodeId).status === 'running'" :size="'small'" />
               <span v-else class="dag-node__status">{{ statusIcon(getNode(nodeId).status) }}</span>
             </div>
             <div class="dag-node__task">{{ truncate(getNode(nodeId).task, 80) }}</div>
-            <div v-if="getNode(nodeId).duration_ms" class="dag-node__duration">
-              {{ formatDuration(getNode(nodeId).duration_ms) }}
+            <div v-if="getNode(nodeId).duration_ms != null" class="dag-node__duration">
+              {{ formatDuration(getNode(nodeId).duration_ms!) }}
             </div>
             <div v-if="getNode(nodeId).error" class="dag-node__error">
               {{ truncate(getNode(nodeId).error!, 60) }}
@@ -123,7 +123,8 @@ function statusIcon(status: NodeStatus): string {
   return icons[status] || '📋'
 }
 
-function truncate(s: string, len: number): string {
+function truncate(s: string | null | undefined, len: number): string {
+  if (!s) return ''
   return s.length > len ? s.slice(0, len) + '...' : s
 }
 
@@ -168,6 +169,8 @@ function edgeColor(edge: DAGEdge): string {
 }
 
 watch(() => props.dag, () => {
+  // Clear stale refs from previous DAG data
+  Object.keys(nodeRefs).forEach(k => delete nodeRefs[k])
   nextTick(measurePositions)
 })
 

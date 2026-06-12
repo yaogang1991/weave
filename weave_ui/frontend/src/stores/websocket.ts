@@ -39,6 +39,7 @@ export const useWebSocketStore = defineStore("websocket", () => {
     wsHandle?.disconnect()
     wsHandle = null
     connected.value = false
+    dagNodeStatus.value = {}
   }
 
   function handleEvent(event: any) {

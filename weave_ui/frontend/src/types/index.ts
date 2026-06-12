@@ -44,6 +44,7 @@ export interface ApprovalTicket {
 export interface SessionEvent {
   timestamp: string
   event_type: string
+  type?: string
   agent_type?: string
   payload: Record<string, any>
 }

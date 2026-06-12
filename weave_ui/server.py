@@ -394,7 +394,6 @@ def _build_dag_response(events: list[dict]) -> dict:
         duration = None
         if started and completed:
             try:
-                from datetime import datetime, timezone
                 s = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
                 e = datetime.fromisoformat(str(completed).replace("Z", "+00:00"))
                 duration = int((e - s).total_seconds() * 1000)
