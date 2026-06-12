@@ -145,6 +145,24 @@ class NodeTimeoutConfig(BaseModel):
         description="Semantic inactivity timeout in seconds for CLI backends",
     )
 
+    # #1106: Backend-specific stall timeout multiplier.  Third-party LLM
+    # APIs (GLM-5.1 via Anthropic-compatible proxy) have much higher latency
+    # than native Anthropic API, causing CLI subprocess to produce no
+    # streaming events for extended periods.  This multiplier is applied to
+    # the stall timeout when the backend is in the map.
+    backend_stall_multipliers: dict[str, float] = Field(
+        default_factory=lambda: {
+            "claude_code": float(
+                os.getenv("WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE", "2.5"),
+            ),
+        },
+        description=(
+            "Per-backend stall timeout multiplier.  Applied when the "
+            "active backend matches a key in this dict.  E.g. "
+            "claude_code: 2.5 turns a 120s stall into 300s."
+        ),
+    )
+
     def timeout_for(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
@@ -173,11 +191,16 @@ class NodeTimeoutConfig(BaseModel):
         test_count: int = 0,
         dep_count: int = 0,
         feature_count: int = 0,
+        backend: str = "",
     ) -> int:
         """Return dynamic stall timeout: max(configured, complexity-based).
 
         Caller provides file/test/dependency/feature counts; no I/O
         performed here.  Configured value is always a floor.
+
+        #1106: If *backend* matches a key in ``backend_stall_multipliers``,
+        the final timeout is multiplied by that factor.  This prevents
+        third-party LLM API latency from triggering false stall kills.
         """
         configured = self.stall_overrides.get(agent_type, self.stall_timeout)
 
@@ -197,7 +220,14 @@ class NodeTimeoutConfig(BaseModel):
                 self.gen_stall_scale.cap,
             )
 
-        return max(configured, dynamic) if dynamic else configured
+        result = max(configured, dynamic) if dynamic else configured
+
+        # #1106: Apply backend-specific multiplier for slow third-party APIs.
+        if backend and backend in self.backend_stall_multipliers:
+            multiplier = self.backend_stall_multipliers[backend]
+            result = int(result * multiplier)
+
+        return result
 
     @property
     def min_timeout(self) -> int:
