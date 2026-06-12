@@ -20,14 +20,14 @@ M6 迁移后保留了 ~1915 行废弃代码（`AgentPool`, `AgentWorker`, `Outpu
 
 ## 删除文件清单
 
-| 文件 | 行数 | 移除原因 |
+| 文件 | 行数 (approx.) | 移除原因 |
 |------|------|----------|
-| `agent/agent_pool.py` | 702 | AgentPool/WorkerAgent/ExecutionContext 全部废弃 |
-| `agent/worker.py` | 646 | AgentWorker 废弃，仅被 agent_pool.py 引用 |
-| `guardrails/output_monitor.py` | 197 | 仅被 worker.py 引用（已标注 DEPRECATED） |
-| `core/stuck_detector.py` | 173 | 仅被 worker.py 引用（已标注 DEPRECATED） |
+| `agent/agent_pool.py` | ~702 | AgentPool/WorkerAgent/ExecutionContext 全部废弃 |
+| `agent/worker.py` | ~646 | AgentWorker 废弃，仅被 agent_pool.py 引用 |
+| `guardrails/output_monitor.py` | ~197 | 仅被 worker.py 引用（已标注 DEPRECATED） |
+| `core/stuck_detector.py` | ~173 | 仅被 worker.py 引用（已标注 DEPRECATED） |
 
-**小计：1718 行源代码**
+**小计：~1718 行源代码**（基于 2026-06-11 main 分支快照）
 
 ## 修改文件清单
 
@@ -142,6 +142,26 @@ Step 10: 删除/更新测试文件
 Step 11: 清理注释和 docstring
 Step 12: 全量测试验证
 ```
+
+## 风险评估
+
+### R1: 外部后端不可用时 Generator 节点降级
+- **场景**: `default_agent_backend` 为 `"claude_code"` 但 Claude Code CLI 不可用
+- **当前行为**: BackendRegistry 回退到 BuiltinBackend → lightweight 路径产出纯文本（无工具循环）
+- **风险**: Generator 节点可能产出不完整的代码实现（无文件写入能力）
+- **缓解**: NodeExecutor 质量门控（零输出检测）+ DAGEngine `adapt_to_failure()` 自动恢复
+- **残余风险**: 低 — 该降级路径在 M6 后已存在，本次移除仅消除了 pool 回退（极少使用）
+
+### R2: 大规模删除后遗漏引用
+- **场景**: grep 验证未覆盖间接引用（如 `__init__.py` re-exports、动态 import）
+- **缓解**: Task 9 使用 6 个关键词全局 grep；Task 10 全量测试套件验证
+- **残余风险**: 低 — pytest 运行时 import 即可发现遗漏
+
+### R3: 测试覆盖率下降
+- **场景**: 删除 ~4500 行测试代码后整体覆盖率下降
+- **风险**: 降级路径（lightweight-only generator）可能缺少充分测试
+- **缓解**: 保留 `test_execution_factory.py` 中 BuiltinBackend 构造验证；降级路径本身已有集成测试覆盖
+- **残余风险**: 中 — 建议在后续 PR 中补充 BuiltinBackend lightweight-only 的单元测试
 
 ## 验收标准
 

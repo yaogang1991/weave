@@ -10,11 +10,12 @@ dist/
 build/
 .pytest_cache/
 output/
-weave_ui/static/
-weave_ui/frontend/node_modules/
-.claude/worktrees/
 .coverage
+
+# Weave UI build artifacts
 weave_ui/frontend/node_modules/
 weave_ui/static/
-.claude/worktrees/
-.worktrees/
+
+# Worktree isolation directories
+.claude/worktrees/    # Claude Code managed worktrees
+.worktrees/           # generic git worktree isolation

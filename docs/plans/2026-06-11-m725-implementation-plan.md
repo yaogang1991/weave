@@ -195,7 +195,7 @@ Generator nodes must use external backends via BackendRegistry."
 
 In `agent/backends/registry.py`:
 
-1. Remove the `from_pool` classmethod (lines 28-48)
+1. Remove the `from_pool` classmethod
 2. Remove the `BuiltinBackend` import (only needed by `from_pool`)
 
 The file becomes:
@@ -296,7 +296,7 @@ In `control_plane/execution_factory.py`:
 
 1. Remove line: `from agent.agent_pool import AgentPool`
 2. Add import at top: `from core.exceptions import AgentExecutionError` (if not already imported)
-3. Replace the `AgentPool(...)` block (lines 163-177) with direct `BuiltinBackend` construction
+3. Replace the `AgentPool(...)` construction block with direct `BuiltinBackend` construction
 4. Replace `pool.get_executor(session_id)` in `DAGExecutionEngine(agent_executor=...)` with an error-raising async function
 5. The error function makes it clear that the legacy path is gone:
 
@@ -359,7 +359,7 @@ In `cli/execution.py`:
    from agent.lightweight_llm_caller import LightweightLLMCaller
    from core.exceptions import AgentExecutionError
    ```
-3. Replace the "Agent pool" block (lines 306-321) with:
+3. Replace the "Agent pool" construction block with:
    ```python
    # M7.2.5: No AgentPool — use LightweightLLMCaller + BuiltinBackend
    approval_repo = ApprovalRepository()
@@ -369,7 +369,7 @@ In `cli/execution.py`:
        llm_router=llm_router,
    )
    ```
-4. Replace `BackendRegistry.from_pool(pool=pool, session_id=session_id)` (line 347) with:
+4. Replace `BackendRegistry.from_pool(pool=pool, session_id=session_id)` with:
    ```python
    builtin_backend = BuiltinBackend(
        lightweight_caller=lightweight_caller,
@@ -554,13 +554,13 @@ git commit -m "refactor: update mixed test files, remove deprecated references (
 ## Task 9: 清理注释和 docstring
 
 **Files:**
-- Modify: `core/node_executor.py` — update comment about agent_pool/worker (line 704)
-- Modify: `core/context.py` — update comment about AgentWorker (lines 8, 30, 53)
-- Modify: `core/backend_models.py` — update comment about AgentPool (line 79)
-- Modify: `core/activity_detector.py` — update comment about stuck_detector (line 5)
-- Modify: `core/llm_client.py` — update comment about AgentWorker (lines 4-6)
-- Modify: `core/exceptions.py` — update comment about AgentWorker.run() (line 222)
-- Modify: `guardrails/node_isolation.py` — update comment about output_monitor (line 9)
+- Modify: `core/node_executor.py` — update comment about agent_pool/worker
+- Modify: `core/context.py` — update comment about AgentWorker
+- Modify: `core/backend_models.py` — update comment about AgentPool
+- Modify: `core/activity_detector.py` — update comment about stuck_detector
+- Modify: `core/llm_client.py` — update comment about AgentWorker
+- Modify: `core/exceptions.py` — update comment about AgentWorker.run()
+- Modify: `guardrails/node_isolation.py` — update comment about output_monitor
 
 **Step 1: Search for remaining text references**
 
