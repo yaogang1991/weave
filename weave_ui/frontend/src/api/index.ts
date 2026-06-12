@@ -1,4 +1,4 @@
-import type { Job, ApprovalTicket, Session, Template, Workspace, SubmitJobRequest, NotificationPrefs, SearchResult, TaskTemplate, Annotation } from "../types"
+import type { Job, ApprovalTicket, Session, Template, Workspace, SubmitJobRequest, NotificationPrefs, SearchResult, TaskTemplate, Annotation, DAGData } from "../types"
 
 const BASE = "/api"
 
@@ -28,6 +28,7 @@ export const retryJob = (id: string) => request<{ job_id: string; status: string
 
 export const getSessions = () => request<{ sessions: any[] }>("/sessions")
 export const getSession = (id: string) => request<Session>("/sessions/" + encodeURIComponent(id))
+export const getSessionDag = (sessionId: string) => request<DAGData>("/sessions/" + encodeURIComponent(sessionId) + "/dag")
 
 // ── Tickets ───────────────────────────────────────────────────────────
 

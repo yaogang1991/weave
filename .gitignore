@@ -17,3 +17,4 @@ weave_ui/frontend/node_modules/
 weave_ui/frontend/node_modules/
 weave_ui/static/
 .claude/worktrees/
+.worktrees/

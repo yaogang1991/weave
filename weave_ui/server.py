@@ -206,6 +206,27 @@ async def api_get_session(session_id: str):
     return _get_session_data(session_id)
 
 
+@app.get("/api/sessions/{session_id}/dag")
+async def api_get_session_dag(session_id: str):
+    """Get DAG structure with node execution status."""
+    config = WeaveConfig.from_env()
+    store = SessionStore(config.event_store_path)
+    events = store.get_events(session_id)
+    if not events:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    events_data = []
+    for event in events:
+        events_data.append({
+            "id": event.id,
+            "timestamp": event.timestamp.isoformat() if event.timestamp else None,
+            "type": event.type.value,
+            "payload": event.payload,
+        })
+
+    return _build_dag_response(events_data)
+
+
 @app.get("/api/runs/{session_id}/tokens")
 async def api_run_tokens(session_id: str):
     """M5.1: Token summary for a session/run."""
@@ -313,6 +334,126 @@ def _reconstruct_dag_from_events(events: list[dict]) -> dict | None:
     return None
 
 
+def _build_dag_response(events: list[dict]) -> dict:
+    """Build a DAG response with node statuses from session events."""
+    # Find session.dag event for structure
+    dag_payload = None
+    for event in events:
+        if event.get("type") == "session.dag":
+            payload = event.get("payload", {})
+            if isinstance(payload, dict) and "nodes" in payload:
+                dag_payload = payload
+                break
+
+    if not dag_payload:
+        return {
+            "nodes": [], "edges": [], "levels": [],
+            "reasoning": "", "requirement": "",
+        }
+
+    raw_nodes = dag_payload.get("nodes", {})
+    raw_edges = dag_payload.get("edges", [])
+    requirement = dag_payload.get("requirement", "")
+    reasoning = dag_payload.get("reasoning", "")
+
+    # Build status map from workflow events
+    node_status: dict[str, str] = {}
+    node_times: dict[str, dict] = {}
+    for event in events:
+        evt_type = event.get("type", "")
+        payload = event.get("payload", {})
+        if not isinstance(payload, dict):
+            continue
+        # stage_start → running
+        if evt_type == "workflow.stage_start":
+            nid = payload.get("node_id") or payload.get("stage")
+            if nid:
+                node_status[nid] = "running"
+                node_times.setdefault(nid, {})["started_at"] = event.get("timestamp")
+        # stage_end → success
+        elif evt_type == "workflow.stage_end":
+            nid = payload.get("node_id") or payload.get("stage")
+            if nid:
+                node_status[nid] = "success"
+                node_times.setdefault(nid, {})["completed_at"] = event.get("timestamp")
+        # stage_error → failed
+        elif evt_type == "workflow.stage_error":
+            nid = payload.get("node_id") or payload.get("stage")
+            if nid:
+                node_status[nid] = "failed"
+                node_times.setdefault(nid, {})["completed_at"] = event.get("timestamp")
+
+    # Convert nodes dict to array
+    nodes_array = []
+    for nid, ndata in raw_nodes.items():
+        if not isinstance(ndata, dict):
+            ndata = {"task": str(ndata)}
+        times = node_times.get(nid, {})
+        started = times.get("started_at")
+        completed = times.get("completed_at")
+        duration = None
+        if started and completed:
+            try:
+                s = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
+                e = datetime.fromisoformat(str(completed).replace("Z", "+00:00"))
+                duration = int((e - s).total_seconds() * 1000)
+            except (ValueError, TypeError):
+                pass
+        nodes_array.append({
+            "id": nid,
+            "agent_type": ndata.get("agent_type", "worker"),
+            "task": ndata.get("task", ""),
+            "status": node_status.get(nid, "pending"),
+            "started_at": started,
+            "completed_at": completed,
+            "error": None,
+            "duration_ms": duration,
+        })
+
+    # Compute topological levels (Kahn's algorithm)
+    node_ids = set(raw_nodes.keys())
+    in_degree: dict[str, int] = {nid: 0 for nid in node_ids}
+    adjacency: dict[str, list[str]] = {nid: [] for nid in node_ids}
+    for edge in raw_edges:
+        src = edge.get("from", "")
+        dst = edge.get("to", "")
+        if src in node_ids and dst in node_ids:
+            adjacency[src].append(dst)
+            in_degree[dst] += 1
+
+    levels: list[list[str]] = []
+    queue = [nid for nid in node_ids if in_degree[nid] == 0]
+    visited = set()
+    while queue:
+        level = sorted(queue)
+        levels.append(level)
+        visited.update(level)
+        next_queue = []
+        for nid in level:
+            for dst in adjacency[nid]:
+                in_degree[dst] -= 1
+                if in_degree[dst] == 0 and dst not in visited:
+                    next_queue.append(dst)
+        queue = next_queue
+    # Add any remaining nodes (cycles)
+    remaining = [nid for nid in node_ids if nid not in visited]
+    if remaining:
+        levels.append(sorted(remaining))
+
+    edges_array = [
+        {"from": e.get("from", ""), "to": e.get("to", ""), "dependency_type": e.get("dependency_type", "hard")}
+        for e in raw_edges
+    ]
+
+    return {
+        "nodes": nodes_array,
+        "edges": edges_array,
+        "levels": levels,
+        "reasoning": reasoning,
+        "requirement": requirement,
+    }
+
+
 def _list_plans() -> list[dict]:
     """List all saved execution plans."""
     plans_dir = Path("./data/plans")
@@ -398,6 +539,7 @@ async def api_get_job(job_id: str):
         "runs": [
             {
                 "id": r.id,
+                "session_id": r.session_id,
                 "status": r.status.value,
                 "started_at": r.started_at.isoformat() if r.started_at else None,
                 "completed_at": r.completed_at.isoformat() if r.completed_at else None,
