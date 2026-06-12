@@ -37,7 +37,8 @@ A previous execution plan has partially failed. You need to create a new plan fo
 
 ## Output Format
 
-Return a JSON object with this exact structure:
+Return a JSON object with this exact structure.
+**IMPORTANT**: Declare `input_products` and `output_products` on each node so the system can derive correct DAG topology automatically. You do NOT need to provide an `edges` array — edges are derived from product matching.
 
 {{
   "reasoning": "Explanation of why the original plan failed and how the new plan addresses it...",
@@ -45,12 +46,15 @@ Return a JSON object with this exact structure:
     {{
       "id": "plan_fix",
       "agent_type": "planner",
-      "task": "Re-analyze the failure and produce a corrected implementation plan..."
+      "task": "Re-analyze the failure and produce a corrected implementation plan...",
+      "output_products": ["fix_plan"]
     }},
     {{
       "id": "impl_fix",
       "agent_type": "generator",
       "task": "Implement the corrected plan...",
+      "input_products": ["fix_plan"],
+      "output_products": ["fixed_source"],
       "success_criteria": [
         {{"type": "tests_pass", "description": "tests pass"}},
         {{"type": "lint", "description": "lint clean"}}
@@ -60,20 +64,19 @@ Return a JSON object with this exact structure:
       "id": "eval_fix",
       "agent_type": "evaluator",
       "task": "Verify the corrected implementation...",
+      "input_products": ["fixed_source"],
+      "output_products": ["eval_result"],
       "success_criteria": [
         {{"type": "tests_pass", "description": "tests pass"}},
         {{"type": "coverage", "target": 80, "description": "coverage 80%"}}
       ]
     }}
-  ],
-  "edges": [
-    {{"from": "plan_fix", "to": "impl_fix"}},
-    {{"from": "impl_fix", "to": "eval_fix"}}
   ]
 }}
 
 ## Important
 - Node IDs must be unique and not conflict with already-executed nodes
-- Every edge references valid node IDs
 - The DAG must be acyclic
 - Include ALL nodes that still need execution (failed node + any pending downstream nodes)
+- Each product name must be declared as `output_products` by exactly ONE node
+- Use descriptive product names (e.g., `fix_plan`, `fixed_source`, `eval_result`, `test_files`)

@@ -152,6 +152,8 @@ class PlanValidator:
 
         # Stdlib shadowing detection (#238)
         self._check_stdlib_shadowing(nodes)
+        # Product consistency check (product-driven DAG edges)
+        self._check_product_consistency(nodes)
 
         # Per-node file count estimation (#284)
         self._check_node_file_count(nodes)
@@ -768,3 +770,36 @@ class PlanValidator:
                     f"Node '{node.get('id', '?')}' has success_criteria but "
                     f"agent '{agent_type}' ContractSpec defines no default criteria"
                 )
+
+    def _check_product_consistency(self, nodes: list[dict]) -> None:
+        """Validate product declarations for product-driven DAG edge derivation.
+
+        Checks:
+        1. Duplicate output_products across nodes → PlanValidationError (ambiguous producer).
+        2. Unsatisfied input_products (no matching output_products) → warning.
+
+        Does NOT derive edges — that happens in planner.py. This validates
+        that the product declarations themselves are consistent.
+        """
+        # Build product → producer map; detect duplicates
+        product_producer: dict[str, str] = {}
+        for node in nodes:
+            nid = node.get("id", "")
+            for product in node.get("output_products", []):
+                if product in product_producer:
+                    raise PlanValidationError(
+                        f"Duplicate output product '{product}' declared by "
+                        f"both '{product_producer[product]}' and '{nid}'. "
+                        f"Each product must have exactly one producer."
+                    )
+                product_producer[product] = nid
+
+        # Check unsatisfied input_products
+        for node in nodes:
+            nid = node.get("id", "")
+            for product in node.get("input_products", []):
+                if product not in product_producer:
+                    self.warnings.append(
+                        f"Node '{nid}' needs product '{product}' but no node "
+                        f"produces it — may come from initial context or workspace"
+                    )
