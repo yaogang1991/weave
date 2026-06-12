@@ -789,9 +789,12 @@ class PlanValidator:
 
         Publishing nodes (push PR, deploy, release, etc.) must be terminal
         in the DAG — they must run AFTER all implementation and evaluation
-        work is complete. If the LLM generates a DAG where a publishing node
-        runs in parallel with implementation nodes, this method auto-adds
-        the missing edges.
+        work is complete. This method:
+
+        1. Removes wrong-direction edges FROM publishing nodes TO impl/eval
+           nodes (which would create cycles when we reverse them).
+        2. Adds missing edges FROM impl/eval nodes TO publishing nodes
+           (only for nodes not already transitively reachable).
         """
         # 1. Identify publishing nodes
         publishing_ids: list[str] = []
@@ -808,9 +811,37 @@ class PlanValidator:
         if not publishing_ids:
             return edges
 
-        # 2. Build adjacency and compute transitive ancestors for each node.
-        #    A publishing node only needs a direct edge if there is NO path
-        #    from the impl/eval node to it (transitive dependency check).
+        pub_set = set(publishing_ids)
+
+        # 2. Find impl/eval nodes (not planner, not publishing)
+        impl_eval_ids: set[str] = set()
+        for node in nodes:
+            nid = node.get("id", "")
+            if nid in pub_set:
+                continue
+            if node.get("agent_type") in ("generator", "evaluator"):
+                impl_eval_ids.add(nid)
+
+        # 3. Remove wrong-direction edges: publishing -> impl/eval
+        #    These would create cycles when we add the correct edges.
+        removed_edges: list[tuple[str, str]] = []
+        filtered_edges: list[dict] = []
+        for edge in edges:
+            src = edge.get("from", "")
+            tgt = edge.get("to", "")
+            if src in pub_set and tgt in impl_eval_ids:
+                removed_edges.append((src, tgt))
+                self.warnings.append(
+                    f"Removed wrong-direction edge '{src}' -> '{tgt}': "
+                    f"publishing node '{src}' should not run before "
+                    f"'{tgt}' (rule 19)."
+                )
+            else:
+                filtered_edges.append(edge)
+
+        edges = filtered_edges
+
+        # 4. Build adjacency from cleaned edges, compute transitive ancestors
         adj: dict[str, list[str]] = {nid: [] for nid in node_ids}
         for edge in edges:
             from_id = edge.get("from", "")
@@ -821,7 +852,6 @@ class PlanValidator:
         def ancestors(target: str) -> set[str]:
             """BFS to find all nodes that can reach `target` (transitive)."""
             visited: set[str] = set()
-            # Build reverse adjacency: to -> list of from
             rev: dict[str, list[str]] = {nid: [] for nid in node_ids}
             for src, dsts in adj.items():
                 for dst in dsts:
@@ -836,26 +866,15 @@ class PlanValidator:
                         queue.append(parent)
             return visited
 
-        # 3. For each publishing node, find impl/eval nodes it should depend on
+        # 5. Add missing edges from impl/eval to publishing nodes
         edge_set: set[tuple[str, str]] = set()
         for edge in edges:
             edge_set.add((edge.get("from", ""), edge.get("to", "")))
 
         new_edges: list[dict] = []
         for pub_id in publishing_ids:
-            # Find all impl and eval nodes (not planner, not publishing node)
-            required_deps: list[str] = []
-            for node in nodes:
-                nid = node.get("id", "")
-                if nid == pub_id:
-                    continue
-                agent_type = node.get("agent_type", "")
-                if agent_type in ("generator", "evaluator"):
-                    required_deps.append(nid)
-
-            # Only add edges for nodes that are NOT already transitive ancestors
             reachable = ancestors(pub_id)
-            missing = [d for d in required_deps if d not in reachable]
+            missing = [d for d in impl_eval_ids if d not in reachable]
 
             for dep_id in missing:
                 if (dep_id, pub_id) not in edge_set:
