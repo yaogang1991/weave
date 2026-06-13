@@ -20,6 +20,7 @@ from orchestrator.llm_utils import (
 )
 from orchestrator.prompts import PromptRegistry
 from orchestrator.plan_validator import PlanValidator
+from orchestrator.planner import _has_products, derive_edges_from_products
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,14 @@ class Adapter:
                 "Failed to parse replanning response after retries. "
                 "The LLM did not return valid JSON."
             )
+
+        # Product-driven edge derivation (same logic as planner.py:plan())
+        if _has_products(plan_data.get("nodes", [])):
+            derived_edges = derive_edges_from_products(
+                plan_data["nodes"], plan_data.get("edges"),
+            )
+            # Always override: product-derived edges take precedence.
+            plan_data["edges"] = derived_edges
 
         plan = OrchestratorPlan(**plan_data)
         for node_def in plan.nodes:

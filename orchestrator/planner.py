@@ -169,11 +169,45 @@ class Planner:
         # Product-driven edge derivation: if nodes declare products,
         # derive edges deterministically instead of trusting LLM topology.
         if _has_products(plan_data.get("nodes", [])):
-            derived_edges = derive_edges_from_products(
-                plan_data["nodes"], plan_data.get("edges"),
-            )
-            if derived_edges:
+            try:
+                derived_edges = derive_edges_from_products(
+                    plan_data["nodes"], plan_data.get("edges"),
+                )
+                # Always override: if products exist but yield no edges,
+                # the old LLM edges should not be trusted either.
                 plan_data["edges"] = derived_edges
+            except PlanValidationError as e:
+                # Feed error back to LLM for one retry (same pattern as
+                # node-limit retry below).
+                logger.warning(
+                    "Product derivation failed, retrying: %s", e,
+                )
+                node_resp = json.dumps(plan_data, default=str)[:2000]
+                messages.append({"role": "assistant", "content": node_resp})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Validation error: {e}. "
+                        "Fix the product declarations: each output_products "
+                        "name must be unique across all nodes. Return a "
+                        "valid JSON plan."
+                    ),
+                })
+                messages = self._prune_messages(messages)
+                response = self.llm.call(
+                    messages, tools=[],
+                    max_tokens_override=self._PLANNER_MAX_TOKENS,
+                )
+                plan_data = extract_json(response.get("content", ""))
+                if plan_data is None:
+                    raise
+                # Retry derivation with corrected plan
+                if _has_products(plan_data.get("nodes", [])):
+                    derived_edges = derive_edges_from_products(
+                        plan_data["nodes"], plan_data.get("edges"),
+                    )
+                    if derived_edges:
+                        plan_data["edges"] = derived_edges
 
         plan = OrchestratorPlan(**plan_data)
         self._validate_agents(plan)
@@ -482,7 +516,7 @@ def derive_edges_from_products(
         for product in node.get("input_products", []):
             producer = product_producer.get(product)
             if producer is None:
-                logger.warning(
+                logger.debug(
                     "Node '%s' needs product '%s' but no node produces it"
                     " — may come from initial context or workspace",
                     nid, product,
@@ -502,10 +536,14 @@ def derive_edges_from_products(
         nodes_with_incoming = {e["to"] for e in edges}
         orphaned = node_ids - nodes_with_incoming
         # Exclude planner nodes (they naturally have no incoming edges)
+        # Pre-build agent_type lookup for O(1) access instead of O(n²) scan
+        node_agent_types: dict[str, str] = {
+            n.get("id", ""): n.get("agent_type", "")
+            for n in nodes
+        }
         orphaned_non_planner = {
             nid for nid in orphaned
-            if any(n.get("id") == nid and n.get("agent_type") != "planner"
-                   for n in nodes)
+            if node_agent_types.get(nid) != "planner"
         }
         for llm_edge in llm_edges:
             src = llm_edge.get("from", "")
@@ -525,10 +563,11 @@ def derive_edges_from_products(
                 )
 
     if edges:
+        soft_count = sum(1 for e in edges if e.get("dependency_type") == "soft")
         logger.info(
             "Derived %d edges from product declarations (plus %d supplemented)",
-            len(edges) - sum(1 for e in edges if e.get("dependency_type") == "soft"),
-            sum(1 for e in edges if e.get("dependency_type") == "soft"),
+            len(edges) - soft_count,
+            soft_count,
         )
     return edges
 
