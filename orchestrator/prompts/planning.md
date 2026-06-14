@@ -126,7 +126,8 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
 
 ## Output Format
 
-Return a JSON object with this exact structure:
+Return a JSON object with this exact structure.
+**IMPORTANT**: Declare `input_products` and `output_products` on each node so the system can derive correct DAG topology automatically. You do NOT need to provide an `edges` array — edges are derived from product matching.
 
 {{
   "reasoning": "Brief explanation of your planning decisions...",
@@ -134,12 +135,15 @@ Return a JSON object with this exact structure:
     {{
       "id": "plan",
       "agent_type": "planner",
-      "task": "Analyze requirement and produce implementation plan..."
+      "task": "Analyze requirement and produce implementation plan...",
+      "output_products": ["implementation_plan"]
     }},
     {{
       "id": "impl",
       "agent_type": "generator",
       "task": "Implement the planned feature following project conventions...",
+      "input_products": ["implementation_plan"],
+      "output_products": ["source_code"],
       "owned_files": ["src/feature.py", "src/__init__.py"],
       "success_criteria": [
         {{"type": "file_pattern", "pattern": "mylib/*.py", "description": "source modules exist"}},
@@ -150,6 +154,8 @@ Return a JSON object with this exact structure:
       "id": "impl_tests",
       "agent_type": "generator",
       "task": "Create test files for the implementation. Read the source modules first to use correct class/function names...",
+      "input_products": ["implementation_plan", "source_code"],
+      "output_products": ["test_files"],
       "success_criteria": [
         {{"type": "file_pattern", "pattern": "tests/test_*.py", "description": "test files exist"}},
         {{"type": "tests_pass", "description": "tests pass"}}
@@ -158,16 +164,20 @@ Return a JSON object with this exact structure:
     {{
       "id": "eval",
       "agent_type": "evaluator",
-      "task": "Verify implementation against plan and project standards..."
+      "task": "Verify implementation against plan and project standards...",
+      "input_products": ["source_code", "test_files"],
+      "output_products": ["eval_result"]
     }}
-  ],
-  "edges": [
-    {{"from": "plan", "to": "impl"}},
-    {{"from": "impl", "to": "impl_tests"}},
-    {{"from": "impl_tests", "to": "eval"}},
-    {{"from": "plan", "to": "impl_extra", "dependency_type": "soft"}}
   ]
 }}
+
+## Product Declaration Rules
+
+20. **Declare products on every node**: Each node MUST have `output_products` listing what it produces. Nodes that need output from other nodes MUST declare `input_products`.
+21. **Unique product names**: Each product name must be declared as an `output_product` by exactly ONE node. The system matches `input_products` to `output_products` by exact name to derive execution order.
+22. **Descriptive product names**: Use lowercase snake_case names that describe the artifact (e.g., `source_code`, `test_files`, `eval_result`, `implementation_plan`, `bug_analysis`, `fixed_code`, `pr_url`).
+23. **No edges needed**: When all nodes declare products, the system derives edges automatically — you do NOT need to provide an `edges` array. If you provide `edges`, they will be used only as soft-dep supplements for nodes that have no incoming product-derived edges.
+24. **Don't declare external inputs**: Only declare `input_products` for things produced by OTHER nodes in this plan. Things available from the workspace, initial context, or external sources should NOT be listed as `input_products`.
 
 ## Success Criteria Types
 

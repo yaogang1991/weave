@@ -19,7 +19,8 @@ from orchestrator.llm_utils import (
     extract_json,
 )
 from orchestrator.prompts import PromptRegistry
-from orchestrator.plan_validator import PlanValidator
+from orchestrator.plan_validator import PlanValidator, PlanValidationError
+from orchestrator.planner import _has_products, derive_edges_from_products
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,20 @@ class Adapter:
                 "Failed to parse replanning response after retries. "
                 "The LLM did not return valid JSON."
             )
+
+        # Product-driven edge derivation (same logic as planner.py:plan()).
+        # On validation error (duplicate products / cycle) fall back to the
+        # LLM's own edges instead of crashing the recovery path (#1134).
+        if _has_products(plan_data.get("nodes", [])):
+            try:
+                derived_edges = derive_edges_from_products(
+                    plan_data["nodes"], plan_data.get("edges"),
+                )
+                plan_data["edges"] = derived_edges
+            except PlanValidationError as e:
+                logger.warning(
+                    "Replan product derivation failed, using LLM edges: %s", e,
+                )
 
         plan = OrchestratorPlan(**plan_data)
         for node_def in plan.nodes:
