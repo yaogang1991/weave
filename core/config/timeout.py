@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EvalTimeoutScaleConfig(BaseModel):
@@ -95,7 +95,8 @@ class NodeTimeoutConfig(BaseModel):
     """Per-agent-type node execution timeout (#360 PR2, M4.5).
 
     M4.5 progress-driven stall timeout with dynamic complexity scaling.
-    stall_timeout is the sole kill mechanism (no max_total hard cap).
+    Node execution has four kill mechanisms: wall-clock hard cap (#1079),
+    watchdog health, progress-driven stall, and semantic inactivity (#1068).
     """
 
     default_timeout: int = Field(
@@ -145,6 +146,51 @@ class NodeTimeoutConfig(BaseModel):
         description="Semantic inactivity timeout in seconds for CLI backends",
     )
 
+    # #1106: Backend-specific stall timeout multiplier.  Third-party LLM
+    # APIs (GLM-5.1 via Anthropic-compatible proxy) have much higher latency
+    # than native Anthropic API, causing CLI subprocess to produce no
+    # streaming events for extended periods.  This multiplier is applied to
+    # the stall timeout when the backend is in the map.
+    backend_stall_multipliers: dict[str, float] = Field(
+        default_factory=lambda: {
+            "claude_code": float(
+                os.getenv("WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE", "2.5"),
+            ),
+        },
+        # validate_default=True is required so the _validate_backend_multipliers
+        # field_validator below ALSO runs on the default_factory output.  Without
+        # it, a bad env var (e.g. WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE=0.5
+        # or 0 or -1) is silently accepted, bypassing the < 1.0 rejection that
+        # the validator exists to enforce (#1131 review).
+        validate_default=True,
+        description=(
+            "Per-backend stall timeout multiplier.  Applied when the "
+            "active backend matches a key in this dict.  E.g. "
+            "claude_code: 2.5 turns a 120s stall into 300s."
+        ),
+    )
+
+    @field_validator("backend_stall_multipliers")
+    @classmethod
+    def _validate_backend_multipliers(
+        cls, v: dict[str, float],
+    ) -> dict[str, float]:
+        """Reject multipliers that would disable stall detection (#1131).
+
+        A multiplier < 1.0 makes stall detection MORE aggressive (defeats
+        the feature's purpose); <= 0 yields a zero/negative timeout
+        (int(120*0)==0, int(120*-1)==-120) that breaks stall detection
+        entirely.  Failing loudly at config-load time matches the ``ge``
+        convention on every scalar timeout field in this file.
+        """
+        for backend, mult in v.items():
+            if mult < 1.0:
+                raise ValueError(
+                    f"backend_stall_multipliers['{backend}']={mult} "
+                    f"must be >= 1.0"
+                )
+        return v
+
     def timeout_for(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
@@ -173,11 +219,16 @@ class NodeTimeoutConfig(BaseModel):
         test_count: int = 0,
         dep_count: int = 0,
         feature_count: int = 0,
+        backend: str = "",
     ) -> int:
         """Return dynamic stall timeout: max(configured, complexity-based).
 
         Caller provides file/test/dependency/feature counts; no I/O
         performed here.  Configured value is always a floor.
+
+        #1106: If *backend* matches a key in ``backend_stall_multipliers``,
+        the final timeout is multiplied by that factor.  This prevents
+        third-party LLM API latency from triggering false stall kills.
         """
         configured = self.stall_overrides.get(agent_type, self.stall_timeout)
 
@@ -197,7 +248,14 @@ class NodeTimeoutConfig(BaseModel):
                 self.gen_stall_scale.cap,
             )
 
-        return max(configured, dynamic) if dynamic else configured
+        result = max(configured, dynamic) if dynamic else configured
+
+        # #1106: Apply backend-specific multiplier for slow third-party APIs.
+        if backend and backend in self.backend_stall_multipliers:
+            multiplier = self.backend_stall_multipliers[backend]
+            result = int(round(result * multiplier))
+
+        return result
 
     @property
     def min_timeout(self) -> int:
