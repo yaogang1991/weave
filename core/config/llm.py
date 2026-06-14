@@ -27,7 +27,9 @@ class LLMConfig(BaseModel):
     )
     max_tokens: int = 4096
     temperature: float = 0.3
-    timeout: int = 120
+    timeout: int = Field(
+        default_factory=lambda: int(os.getenv("WEAVE_LLM_TIMEOUT", "120"))
+    )
     # Maximum concurrent API calls across all parallel nodes (#300).
     # When unset (0/None), no limit.  Set to 3-5 for rate-limited APIs.
     max_concurrent_api: int = Field(
