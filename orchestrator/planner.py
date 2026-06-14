@@ -166,6 +166,56 @@ class Planner:
         if plan_data is None and last_timeout_exc is not None:
             raise last_timeout_exc
 
+        # Product-driven edge derivation: if nodes declare products,
+        # derive edges deterministically instead of trusting LLM topology.
+        if _has_products(plan_data.get("nodes", [])):
+            try:
+                derived_edges = derive_edges_from_products(
+                    plan_data["nodes"], plan_data.get("edges"),
+                )
+                # Always override: if products exist but yield no edges,
+                # the old LLM edges should not be trusted either.
+                plan_data["edges"] = derived_edges
+            except PlanValidationError as e:
+                # Feed error back to LLM for one retry (same pattern as
+                # node-limit retry below).
+                logger.warning(
+                    "Product derivation failed, retrying: %s", e,
+                )
+                node_resp = json.dumps(plan_data, default=str)[:2000]
+                messages.append({"role": "assistant", "content": node_resp})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Validation error: {e}. "
+                        "Fix the product declarations: each output_products "
+                        "name must be unique across all nodes. Return a "
+                        "valid JSON plan."
+                    ),
+                })
+                messages = self._prune_messages(messages)
+                response = self.llm.call(
+                    messages, tools=[],
+                    max_tokens_override=self._PLANNER_MAX_TOKENS,
+                )
+                plan_data = extract_json(response.get("content", ""))
+                if plan_data is None:
+                    raise
+                # Retry derivation with corrected plan. If it still fails
+                # (LLM repeated the duplicate, or introduced a cycle), fall
+                # back to the LLM's own edges instead of crashing (#1134).
+                if _has_products(plan_data.get("nodes", [])):
+                    try:
+                        derived_edges = derive_edges_from_products(
+                            plan_data["nodes"], plan_data.get("edges"),
+                        )
+                        plan_data["edges"] = derived_edges
+                    except PlanValidationError as retry_err:
+                        logger.warning(
+                            "Product derivation failed after retry, falling "
+                            "back to LLM edges: %s", retry_err,
+                        )
+
         plan = OrchestratorPlan(**plan_data)
         self._validate_agents(plan)
 
@@ -272,6 +322,8 @@ class Planner:
                         "agent_type": node.agent_type,
                         "task_description": node.task_description,
                         "dependencies": node.dependencies,
+                        "input_products": node.input_products,
+                        "output_products": node.output_products,
                         "backend": node.backend,
                     }
                     for node in dag_model.nodes
@@ -380,6 +432,8 @@ class Planner:
                 task_description=task_desc,
                 success_criteria=node_def.get("success_criteria", []),
                 owned_files=node_def.get("owned_files", []),
+                input_products=node_def.get("input_products", []),
+                output_products=node_def.get("output_products", []),
                 backend=node_def.get("backend"),
             )
             dag = dag.add_node(node)
@@ -420,6 +474,178 @@ class Planner:
 
 
 # -- Module-level helpers (no circular imports) --
+
+
+def _has_products(nodes: list[dict]) -> bool:
+    """Check if any node declares input_products or output_products."""
+    return any(
+        node.get("input_products") or node.get("output_products")
+        for node in nodes
+    )
+
+
+def derive_edges_from_products(
+    nodes: list[dict],
+    llm_edges: list[dict] | None = None,
+) -> list[dict]:
+    """Derive DAG edges from product declarations.
+
+    For each node's input_products, find the node whose output_products
+    includes that product. Returns a list of {"from": ..., "to": ...} edges.
+
+    Strategy (products + LLM edges supplement + validation):
+    1. Derive primary edges from product matching (hard deps).
+    2. Find orphaned nodes (no incoming edges) and supplement from
+       llm_edges as soft deps.
+    3. Duplicate output_products -> raise PlanValidationError (triggers replan).
+    4. Unsatisfied input_products -> log warning.
+    """
+    # 1. Build product -> producer map
+    product_producer: dict[str, str] = {}
+    for node in nodes:
+        nid = node.get("id", "")
+        outputs = node.get("output_products") or []
+        if not isinstance(outputs, list):
+            # Guard against LLM returning a string/scalar in free-text mode
+            # (OrchestratorPlan.nodes is list[dict[str, Any]], untyped) —
+            # iterating a string would split it into chars (#1134).
+            logger.warning(
+                "Node '%s' output_products is %s, expected list — ignoring",
+                nid, type(outputs).__name__,
+            )
+            outputs = []
+        for product in outputs:
+            if product in product_producer:
+                raise PlanValidationError(
+                    f"Duplicate output product '{product}' declared by "
+                    f"both '{product_producer[product]}' and '{nid}'. "
+                    f"Each product must have exactly one producer."
+                )
+            product_producer[product] = nid
+
+    # 2. Derive primary edges from input_products -> output_products matching
+    node_ids = {n.get("id", "") for n in nodes}
+    # agent_type lookup reused for orphan detection and root-node warnings
+    node_agent_types: dict[str, str] = {
+        n.get("id", ""): n.get("agent_type", "") for n in nodes
+    }
+    edge_set: set[tuple[str, str]] = set()
+    edges: list[dict] = []
+
+    for node in nodes:
+        nid = node.get("id", "")
+        inputs = node.get("input_products") or []
+        if not isinstance(inputs, list):
+            logger.warning(
+                "Node '%s' input_products is %s, expected list — ignoring",
+                nid, type(inputs).__name__,
+            )
+            inputs = []
+        for product in inputs:
+            producer = product_producer.get(product)
+            if producer is None:
+                logger.debug(
+                    "Node '%s' needs product '%s' but no node produces it"
+                    " — may come from initial context or workspace",
+                    nid, product,
+                )
+                continue
+            key = (producer, nid)
+            if key not in edge_set:
+                edge_set.add(key)
+                edges.append({
+                    "from": producer,
+                    "to": nid,
+                    "dependency_type": "hard",
+                })
+
+    # 3. Supplement: find orphaned nodes and fill from llm_edges
+    if llm_edges:
+        nodes_with_incoming = {e["to"] for e in edges}
+        orphaned = node_ids - nodes_with_incoming
+        # Exclude planner nodes (they naturally have no incoming edges)
+        orphaned_non_planner = {
+            nid for nid in orphaned
+            if node_agent_types.get(nid) != "planner"
+        }
+        for llm_edge in llm_edges:
+            src = llm_edge.get("from", "")
+            tgt = llm_edge.get("to", "")
+            if src not in node_ids or tgt not in node_ids:
+                continue
+            if tgt in orphaned_non_planner and (src, tgt) not in edge_set:
+                edge_set.add((src, tgt))
+                edges.append({
+                    "from": src,
+                    "to": tgt,
+                    "dependency_type": "soft",
+                })
+                logger.info(
+                    "Supplemented edge '%s' -> '%s' from LLM edges (soft dep)",
+                    src, tgt,
+                )
+
+    if edges:
+        soft_count = sum(1 for e in edges if e.get("dependency_type") == "soft")
+        logger.info(
+            "Derived %d edges from product declarations (plus %d supplemented)",
+            len(edges) - soft_count,
+            soft_count,
+        )
+
+    # Detect cycles in the derived edges — product matching can produce a
+    # mutual dependency (A outputs X needing Y; B outputs Y needing X). Raise
+    # so plan()/replan() can retry or fall back, instead of crashing later in
+    # topological sort (#1134).
+    _raise_on_edge_cycle(node_ids, edges)
+
+    # Surface non-planner nodes that ended up with no incoming edge. They run
+    # as roots and may execute before a real upstream dependency when the LLM
+    # under-declared input_products. Warn so the topology isn't wrong silently.
+    roots = node_ids - {e["to"] for e in edges}
+    for nid in roots:
+        if node_agent_types.get(nid) != "planner":
+            logger.warning(
+                "Node '%s' has no incoming edge after product-driven "
+                "derivation; verify its input_products or it may run before "
+                "its real upstream dependency",
+                nid,
+            )
+
+    return edges
+
+
+def _raise_on_edge_cycle(node_ids: set[str], edges: list[dict]) -> None:
+    """Raise PlanValidationError if the given edges form a cycle.
+
+    Mirrors PlanValidator._detect_cycle (#754) but module-level so
+    derive_edges_from_products can call it without an instance. Product-driven
+    edges are otherwise never cycle-checked on the replan path (#1134).
+    """
+    adj: dict[str, list[str]] = {nid: [] for nid in node_ids}
+    for edge in edges:
+        adj.setdefault(edge["from"], []).append(edge["to"])
+
+    visited: set[str] = set()
+    in_stack: set[str] = set()
+
+    def has_cycle(node_id: str) -> bool:
+        visited.add(node_id)
+        in_stack.add(node_id)
+        for neighbor in adj.get(node_id, []):
+            if neighbor in in_stack:
+                return True
+            if neighbor not in visited and has_cycle(neighbor):
+                return True
+        in_stack.remove(node_id)
+        return False
+
+    for nid in node_ids:
+        if nid not in visited and has_cycle(nid):
+            raise PlanValidationError(
+                "Product-derived edges form a cycle — likely mutual "
+                "input_products/output_products between two nodes"
+            )
 
 
 def _infer_fallback_edges(dag: DAG) -> DAG:

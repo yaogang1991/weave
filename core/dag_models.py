@@ -130,6 +130,14 @@ class DAGNode(BaseModel):
     result: dict[str, Any] = Field(default_factory=dict)
     error: str = ""
     output_artifacts: list[str] = Field(default_factory=list)
+    input_products: list[str] = Field(
+        default_factory=list,
+        description="Named products this node requires from predecessors (planning-time)",
+    )
+    output_products: list[str] = Field(
+        default_factory=list,
+        description="Named products this node makes available to successors (planning-time)",
+    )
     success_criteria: list[str | SuccessCriterion] = Field(default_factory=list)
     eval_feedback: str = ""  # Evaluator feedback, passed back on retry
     auto_eval_result: dict[str, Any] | None = None  # Auto-eval result for downstream agents (#145)
@@ -460,8 +468,19 @@ class OrchestratorPlan(BaseModel):
         When the LLM response is truncated, the ``edges`` field may be
         missing or empty. Each node's ``dependencies`` list contains the
         IDs of upstream nodes, so we can reconstruct edges from that.
+
+        Skipped when nodes declare input/output products — edges are
+        derived from product matching in planner.py instead.
         """
         if self.edges:
+            return self
+
+        # Skip if products are present — edges derived from them
+        has_products = any(
+            n.get("input_products") or n.get("output_products")
+            for n in self.nodes
+        )
+        if has_products:
             return self
 
         node_ids = {n.get("id", "") for n in self.nodes}
@@ -507,6 +526,14 @@ class DAGNodeModel(BaseModel):
     dependencies: list[str] = Field(
         default_factory=list,
         description="IDs of nodes this depends on",
+    )
+    input_products: list[str] = Field(
+        default_factory=list,
+        description="Named products this node needs as input (e.g. 'issue_analysis', 'source_code')",
+    )
+    output_products: list[str] = Field(
+        default_factory=list,
+        description="Named products this node produces (e.g. 'test_files', 'eval_result')",
     )
     backend: str | None = Field(
         default=None,

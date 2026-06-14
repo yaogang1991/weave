@@ -126,13 +126,28 @@ class ClaudeCodeRuntimeConfig:
         self._mcp_config = mcp_config
 
     @classmethod
-    def from_core_config(cls, config: Any) -> ClaudeCodeRuntimeConfig:
-        """Create from core.config.ClaudeCodeConfig."""
+    def from_core_config(
+        cls,
+        config: Any,
+        non_interactive: bool = False,
+    ) -> ClaudeCodeRuntimeConfig:
+        """Create from core.config.ClaudeCodeConfig.
+
+        In non-interactive runs the Claude CLI cannot prompt for permission,
+        so a left-at-``"default"`` mode silently denies every file write
+        (and, with some third-party LLMs, drives a thinking-token flood that
+        hangs the node until ``node_timeout``). Promote it to
+        ``bypassPermissions`` so generator nodes can produce artifacts
+        (#1125 / #1136).
+        """
+        permission_mode = config.permission_mode
+        if non_interactive and permission_mode == "default":
+            permission_mode = "bypassPermissions"
         return cls(
             cli_path=config.cli_path,
             model=config.model,
             max_turns=config.max_turns,
-            permission_mode=config.permission_mode,
+            permission_mode=permission_mode,
             allowed_tools=list(config.allowed_tools) if config.allowed_tools else None,
             system_prompt_append=config.system_prompt_append,
             max_budget_usd=config.max_budget_usd,

@@ -513,6 +513,13 @@ class NodeExecutor:
                     details={"error": str(exc)},
                 ))
 
+        # SHARED strategy (and isolation-setup failure) resolve to the main
+        # project work_dir so external backends run in the target project,
+        # not the weave directory. Previously this stayed None, so backends
+        # fell back to the weave cwd and discovered zero artifacts (#1126).
+        if workspace_path is None and self.work_dir:
+            workspace_path = self.work_dir
+
         return _PrepareResult(
             input_artifacts=input_artifacts,
             workspace_path=workspace_path,
@@ -657,14 +664,24 @@ class NodeExecutor:
     ) -> dict[str, Any]:
         """Execute a node with progress-driven timeout (M4.5).
 
-        Poll loop checks ProgressTracker.should_kill().  Work units (LLM calls,
-        subprocesses, tool execution) report progress via the shared tracker.
-        Stall detection is the sole kill mechanism (no max_total).
+        Poll loop checks four kill mechanisms: wall-clock hard cap (#1079,
+        floored at stall_timeout so it cannot fire before stall), watchdog
+        health (UNHEALTHY/DEAD), progress-driven stall, and semantic
+        inactivity (#1068).  Work units report progress via the shared tracker.
         """
         from core.progress import ProgressTracker
 
+        # #1106: Resolve backend name early so stall timeout can be
+        # adjusted for slow third-party LLM API backends (e.g. claude_code
+        # with GLM-5.1 proxy).
+        backend_name = (
+            node.backend or self._default_agent_backend
+            if self._backend_registry is not None
+            else ""
+        )
+
         stall_timeout = self._get_stall_timeout(
-            node.agent_type, node=node,
+            node.agent_type, node=node, backend=backend_name,
         )
 
         tracker = ProgressTracker(stall_timeout=stall_timeout)
@@ -700,10 +717,9 @@ class NodeExecutor:
                 logger.debug("Heartbeat call_soon_threadsafe failed (event loop closing)")
 
         if self._backend_registry is not None:
-            # Resolve backend name first to avoid double injection.
+            # backend_name already resolved above for stall timeout (#1106).
             # BuiltinBackend has its own memory injection via agent_pool/worker;
             # only inject into BackendContext for external backends.
-            backend_name = node.backend or self._default_agent_backend
 
             # M6.2: Pre-check guardrail for external backends
             if self._node_guardrails and backend_name not in ("builtin", ""):
@@ -804,6 +820,15 @@ class NodeExecutor:
                 node.agent_type,
                 artifact_count=len(input_artifacts),
             )
+            # #1131: The #1079 wall-clock hard kill must never fire before
+            # the (backend-scaled) stall timeout — otherwise a slow but
+            # healthy third-party-API node (e.g. claude_code with a 2.5x
+            # stall multiplier) is killed by wall-clock before stall
+            # detection has a chance to run.  Floor the wall-clock at
+            # stall_timeout; the hard cap is preserved (it still bounds
+            # genuinely-hung nodes that never report progress).
+            if _wall_max < stall_timeout:
+                _wall_max = stall_timeout
             while not task.done():
                 # #1079: Hard wall-clock timeout — kills the node regardless
                 # of stall/activity state. Prevents indefinite hangs when all
@@ -953,13 +978,20 @@ class NodeExecutor:
         return max(1, int(interval * threshold))
 
     def _get_stall_timeout(
-        self, agent_type: str, node: DAGNode | None = None,
+        self,
+        agent_type: str,
+        node: DAGNode | None = None,
+        backend: str = "",
     ) -> int:
         """Return dynamic stall timeout.
 
         Priority: NodeTimeoutConfig (supports dynamic complexity scaling)
                   → AgentSpec boundary (static fallback)
                   → _get_node_timeout (heartbeat-based)
+
+        #1106: *backend* is passed through to ``stall_timeout_for()`` so
+        that backend-specific multipliers (e.g. 2.5× for claude_code) are
+        applied when using slow third-party LLM APIs.
         """
         if self._node_timeout_config is not None:
             from core.node_utils import (
@@ -981,6 +1013,7 @@ class NodeExecutor:
                 test_count=test_count,
                 dep_count=dep_count,
                 feature_count=feature_count,
+                backend=backend,
             )
         spec = self._get_agent_spec(agent_type)
         if spec and spec.boundary.stall_timeout is not None:
