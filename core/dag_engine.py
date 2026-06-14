@@ -1006,6 +1006,17 @@ class DAGExecutionEngine:
             )
             return old_dag, levels, level_idx, replan_count, False
 
+        # #1108: Warn when total nodes (including dead superseded/failed)
+        # grow past the limit. Dead nodes don't block recovery — they are
+        # terminal and skipped in execution, and counted per #720 — but a
+        # large total signals runaway replan growth worth surfacing.
+        if len(dag.nodes) > self.max_dag_nodes:
+            logger.warning(
+                "Merged DAG has %d total nodes (%d active, limit %d) — "
+                "dead nodes accumulating across replans (#1108)",
+                len(dag.nodes), active_count, self.max_dag_nodes,
+            )
+
         # #775: Rewire downstream edges from failed node to its replacement.
         dag = self._rewire_replacement_edges(dag, old_dag, new_dag, failed_id)
         # #789: Mark original failed node as superseded so it won't

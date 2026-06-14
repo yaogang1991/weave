@@ -70,7 +70,22 @@ def merge_dag_results(old_dag: DAG, new_dag: DAG) -> DAG:
                     completed_at=node.completed_at,
                 )
         else:
-            merged = merged.add_node(node.model_copy())
+            # #1108: A FAILED/SKIPPED old node that the replan replaces is
+            # marked SUPERSEDED (not left FAILED) so the summary can tell
+            # "replaced by replan" apart from "failed in the final plan".
+            # Without this every replan leaves the prior failed nodes behind
+            # as FAILED and the DAG only ever grows. The node is still kept
+            # (counted per #720) and stays terminal so it is skipped in
+            # execution. Successful nodes are preserved as completed; a
+            # PENDING/RUNNING node is preserved as-is in case the replan
+            # still needs it to run (e.g. an evaluator assessing the
+            # replacement node's output).
+            if node.status in (NodeStatus.FAILED, NodeStatus.SKIPPED):
+                merged = merged.add_node(
+                    node.model_copy(update={"status": NodeStatus.SUPERSEDED})
+                )
+            else:
+                merged = merged.add_node(node.model_copy())
 
     # #728: Preserve old edges for nodes carried over.
     merged_edge_set = {(e.from_node, e.to_node) for e in merged.edges}
