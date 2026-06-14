@@ -513,6 +513,13 @@ class NodeExecutor:
                     details={"error": str(exc)},
                 ))
 
+        # SHARED strategy (and isolation-setup failure) resolve to the main
+        # project work_dir so external backends run in the target project,
+        # not the weave directory. Previously this stayed None, so backends
+        # fell back to the weave cwd and discovered zero artifacts (#1126).
+        if workspace_path is None and self.work_dir:
+            workspace_path = self.work_dir
+
         return _PrepareResult(
             input_artifacts=input_artifacts,
             workspace_path=workspace_path,
