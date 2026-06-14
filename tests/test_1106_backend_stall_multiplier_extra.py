@@ -394,6 +394,23 @@ class TestBackendStallMultiplierEnvVars:
             cfg = NodeTimeoutConfig()
             assert cfg.backend_stall_multipliers["claude_code"] == 2.5
 
+    def test_bad_env_var_rejected_at_config_load(self):
+        """A bad env-var multiplier (< 1.0) is rejected at config load (#1131).
+
+        The field_validator must run on the default_factory output too.
+        validate_default=True ensures WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE
+        set to 0.5 / 0 / -1 raises at construction rather than silently
+        producing a multiplier that disables or inverts stall detection.
+        """
+        import pytest
+        for bad in ("0.5", "0", "-1.0"):
+            with patch.dict(
+                os.environ,
+                {"WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE": bad},
+            ):
+                with pytest.raises(Exception):
+                    NodeTimeoutConfig()
+
 
 # ------------------------------------------------------------------
 # Serialization / deserialization tests

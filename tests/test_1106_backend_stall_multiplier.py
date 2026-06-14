@@ -111,14 +111,14 @@ class TestBackendStallMultiplier:
         assert result == 480  # 120 * 4.0
 
     def test_multiplier_result_is_int(self):
-        """Result is always an int (truncated, not rounded)."""
+        """Result is always an int, rounded to nearest (not truncated)."""
         cfg = NodeTimeoutConfig(
             stall_timeout=100,
             backend_stall_multipliers={"claude_code": 2.7},
         )
         result = cfg.stall_timeout_for("planner", backend="claude_code")
         assert isinstance(result, int)
-        assert result == 270  # int(100 * 2.7) = int(270.0) = 270
+        assert result == 270  # round(100 * 2.7) = round(270.0) = 270
 
     def test_multiplier_of_one_is_noop(self):
         """Multiplier of 1.0 returns the same value."""

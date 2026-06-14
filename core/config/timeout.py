@@ -157,6 +157,12 @@ class NodeTimeoutConfig(BaseModel):
                 os.getenv("WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE", "2.5"),
             ),
         },
+        # validate_default=True is required so the _validate_backend_multipliers
+        # field_validator below ALSO runs on the default_factory output.  Without
+        # it, a bad env var (e.g. WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE=0.5
+        # or 0 or -1) is silently accepted, bypassing the < 1.0 rejection that
+        # the validator exists to enforce (#1131 review).
+        validate_default=True,
         description=(
             "Per-backend stall timeout multiplier.  Applied when the "
             "active backend matches a key in this dict.  E.g. "
