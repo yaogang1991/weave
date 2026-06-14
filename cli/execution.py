@@ -182,8 +182,11 @@ async def cmd_execute(args, dag: DAG | None = None):
     sys.stdout.flush()
 
     # Execute
+    # #1135: --timeout (args.timeout) overrides config.run_timeout_sec so the
+    # run-level wall-clock ceiling is enforced, not silently ignored.
+    timeout = getattr(args, "timeout", None) or config.run_timeout_sec
     result_dag = await _execute_with_error_handling(
-        runtime["engine"], dag, store, session_id,
+        runtime["engine"], dag, store, session_id, timeout=timeout,
     )
     if result_dag is None:
         return None
@@ -472,10 +475,27 @@ def _attach_event_logger(engine, dag, store, session_id):
     engine.on_event(on_event)
 
 
-async def _execute_with_error_handling(engine, dag, store, session_id):
-    """Execute DAG with error handling for cancellation, approval, and exceptions."""
+async def _execute_with_error_handling(engine, dag, store, session_id, timeout=None):
+    """Execute DAG with error handling for cancellation, approval, and exceptions.
+
+    #1135: When *timeout* is given (seconds), wrap engine.execute in
+    asyncio.wait_for so the run-level wall-clock ceiling (--timeout /
+    config.run_timeout_sec) is actually enforced. Without this the CLI
+    --timeout flag was parsed but silently ignored for run/execute.
+    """
     try:
+        if timeout:
+            return await asyncio.wait_for(engine.execute(dag), timeout=timeout)
         return await engine.execute(dag)
+    except asyncio.TimeoutError:
+        store.emit_event(session_id, EventType.SESSION_ERROR, {
+            "error": f"Run exceeded {timeout}s wall-clock timeout",
+        })
+        print(
+            f"Run exceeded {timeout}s wall-clock timeout.", file=sys.stderr,
+        )
+        sys.stderr.flush()
+        return None
     except asyncio.CancelledError:
         store.emit_event(session_id, EventType.SESSION_ERROR, {
             "error": "Execution cancelled (timeout or external signal)",
@@ -608,6 +628,9 @@ async def cmd_run(args):
         var=getattr(args, "var", []),
         budget_tokens=getattr(args, "budget_tokens", None),
         backend=getattr(args, "backend", None),
+        # #1135: propagate --timeout so cmd_execute can enforce the
+        # run-level wall-clock ceiling (previously dropped here).
+        timeout=getattr(args, "timeout", None),
     )
     return await cmd_execute(exec_args, dag=dag)
 
