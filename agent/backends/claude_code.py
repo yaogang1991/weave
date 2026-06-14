@@ -27,6 +27,7 @@ from core.exceptions import (
     ConfigurationError,
     NodeTimeoutError,
     RateLimitError,
+    ThinkingFloodError,
 )
 from core.subprocess_runner import run_with_progress
 from agent.backends.base import AgentBackend
@@ -42,6 +43,13 @@ ARTIFACT_CONTENT_LIMIT = 2000
 SUMMARY_LIMIT = 500
 OUTPUT_PREVIEW_LIMIT = 2000
 DEFAULT_CLI_TIMEOUT = 1800
+
+# #1137: Fail fast when a model emits this many consecutive thinking-token
+# stream events with no productive output, instead of burning the wall-clock
+# budget waiting for a timeout. Tuned so a healthy extended-thinking run (a
+# few dozen events) is not mistaken for a flood, while a stuck model trips
+# within ~30s.
+THINKING_FLOOD_THRESHOLD = 50
 
 # Valid permission modes (#612 #2).
 VALID_PERMISSION_MODES = {"default", "plan", "bypassPermissions"}
@@ -394,6 +402,8 @@ class ClaudeCodeBackend(AgentBackend):
                         context.cancel_event, context.progress_callback,
                         context.event_callback, context.activity_detector,
                         stderr_tail,
+                        node_id=context.node.id,
+                        agent_type=context.node.agent_type,
                     ),
                     timeout=self._get_cli_timeout(),
                 )
@@ -508,6 +518,8 @@ class ClaudeCodeBackend(AgentBackend):
         event_callback: Any | None,
         activity_detector: Any | None = None,
         stderr_tail: StderrTail | None = None,
+        node_id: str = "",
+        agent_type: str = "",
     ) -> None:
         """Stream NDJSON output from Claude CLI process."""
         if process.stdout is None:
@@ -544,6 +556,16 @@ class ClaudeCodeBackend(AgentBackend):
                 msg = parser.feed_line(line)
                 if msg is None:
                     continue
+
+                # #1137: Fail fast on thinking-token floods instead of
+                # burning the wall-clock budget waiting for a timeout.
+                if parser.thinking_streak >= THINKING_FLOOD_THRESHOLD:
+                    raise ThinkingFloodError(
+                        node_id=node_id,
+                        agent_type=agent_type,
+                        streak=parser.thinking_streak,
+                        threshold=THINKING_FLOOD_THRESHOLD,
+                    )
 
                 # M6.6: Record meaningful stream events for semantic timeout.
                 if activity_detector is not None and is_meaningful_event(msg.raw_type):
