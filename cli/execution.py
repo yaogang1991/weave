@@ -375,8 +375,8 @@ def _build_runtime(
                 ClaudeCodeRuntimeConfig as RuntimeConfig,
             )
             cc_config = RuntimeConfig.from_core_config(
-            config.claude_code, non_interactive=_cc_non_interactive,
-        )
+                config.claude_code, non_interactive=_cc_non_interactive,
+            )
             cc_backend = ClaudeCodeBackend(config=cc_config)
             backend_registry.register("claude_code", cc_backend)
             import logging as _logging
