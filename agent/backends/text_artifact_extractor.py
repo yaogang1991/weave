@@ -82,6 +82,11 @@ def extract_artifacts_from_text(
         List of relative file paths written to the workspace.
     """
     if not text or len(text) < _MIN_TEXT_LENGTH:
+        logger.info(
+            "text artifact extraction skipped: text below minimum length "
+            "(len=%d < %d) (#1137 track 3b)",
+            len(text or ""), _MIN_TEXT_LENGTH,
+        )
         return []
 
     # Only extract for generator nodes — planners and evaluators
@@ -89,8 +94,9 @@ def extract_artifacts_from_text(
     if node_context:
         agent_type = node_context.get("agent_type")
         if agent_type and agent_type not in ("generator",):
-            logger.debug(
-                "Skipping text extraction for non-generator node: %s",
+            logger.info(
+                "text artifact extraction skipped: non-generator node "
+                "(agent_type=%s) (#1137 track 3b)",
                 agent_type,
             )
             return []
@@ -106,6 +112,11 @@ def extract_artifacts_from_text(
         if len(content.strip()) >= 20
     ]
     if not meaningful_blocks:
+        logger.info(
+            "text artifact extraction skipped: all %d fenced block(s) below "
+            "the %d-char threshold (#1137 track 3b)",
+            len(blocks), 20,
+        )
         return []
 
     written: list[str] = []
