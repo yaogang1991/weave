@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class EvalTimeoutScaleConfig(BaseModel):
@@ -95,7 +95,8 @@ class NodeTimeoutConfig(BaseModel):
     """Per-agent-type node execution timeout (#360 PR2, M4.5).
 
     M4.5 progress-driven stall timeout with dynamic complexity scaling.
-    stall_timeout is the sole kill mechanism (no max_total hard cap).
+    Node execution has four kill mechanisms: wall-clock hard cap (#1079),
+    watchdog health, progress-driven stall, and semantic inactivity (#1068).
     """
 
     default_timeout: int = Field(
@@ -163,6 +164,27 @@ class NodeTimeoutConfig(BaseModel):
         ),
     )
 
+    @field_validator("backend_stall_multipliers")
+    @classmethod
+    def _validate_backend_multipliers(
+        cls, v: dict[str, float],
+    ) -> dict[str, float]:
+        """Reject multipliers that would disable stall detection (#1131).
+
+        A multiplier < 1.0 makes stall detection MORE aggressive (defeats
+        the feature's purpose); <= 0 yields a zero/negative timeout
+        (int(120*0)==0, int(120*-1)==-120) that breaks stall detection
+        entirely.  Failing loudly at config-load time matches the ``ge``
+        convention on every scalar timeout field in this file.
+        """
+        for backend, mult in v.items():
+            if mult < 1.0:
+                raise ValueError(
+                    f"backend_stall_multipliers['{backend}']={mult} "
+                    f"must be >= 1.0"
+                )
+        return v
+
     def timeout_for(
         self, agent_type: str, artifact_count: int = 0,
     ) -> int:
@@ -225,7 +247,7 @@ class NodeTimeoutConfig(BaseModel):
         # #1106: Apply backend-specific multiplier for slow third-party APIs.
         if backend and backend in self.backend_stall_multipliers:
             multiplier = self.backend_stall_multipliers[backend]
-            result = int(result * multiplier)
+            result = int(round(result * multiplier))
 
         return result
 

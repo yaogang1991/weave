@@ -657,9 +657,10 @@ class NodeExecutor:
     ) -> dict[str, Any]:
         """Execute a node with progress-driven timeout (M4.5).
 
-        Poll loop checks ProgressTracker.should_kill().  Work units (LLM calls,
-        subprocesses, tool execution) report progress via the shared tracker.
-        Stall detection is the sole kill mechanism (no max_total).
+        Poll loop checks four kill mechanisms: wall-clock hard cap (#1079,
+        floored at stall_timeout so it cannot fire before stall), watchdog
+        health (UNHEALTHY/DEAD), progress-driven stall, and semantic
+        inactivity (#1068).  Work units report progress via the shared tracker.
         """
         from core.progress import ProgressTracker
 
@@ -812,6 +813,15 @@ class NodeExecutor:
                 node.agent_type,
                 artifact_count=len(input_artifacts),
             )
+            # #1131: The #1079 wall-clock hard kill must never fire before
+            # the (backend-scaled) stall timeout — otherwise a slow but
+            # healthy third-party-API node (e.g. claude_code with a 2.5x
+            # stall multiplier) is killed by wall-clock before stall
+            # detection has a chance to run.  Floor the wall-clock at
+            # stall_timeout; the hard cap is preserved (it still bounds
+            # genuinely-hung nodes that never report progress).
+            if _wall_max < stall_timeout:
+                _wall_max = stall_timeout
             while not task.done():
                 # #1079: Hard wall-clock timeout — kills the node regardless
                 # of stall/activity state. Prevents indefinite hangs when all
