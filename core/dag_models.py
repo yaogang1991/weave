@@ -140,6 +140,21 @@ class DAGNode(BaseModel):
     owned_files: list[str] = Field(
         default_factory=list,
     )  # Files this node exclusively creates (#272)
+    input_products: list[str] = Field(
+        default_factory=list,
+        description=(
+            "#1133: Logical product names this node consumes from "
+            "upstream. Drives deterministic edge derivation via exact "
+            "product-name matching, overriding unreliable LLM topology."
+        ),
+    )
+    output_products: list[str] = Field(
+        default_factory=list,
+        description=(
+            "#1133: Logical product names this node produces. Each "
+            "product must have exactly one producer node."
+        ),
+    )
     started_at: datetime | None = None
     completed_at: datetime | None = None
     token_usage: dict[str, int] = Field(
@@ -511,6 +526,20 @@ class DAGNodeModel(BaseModel):
     backend: str | None = Field(
         default=None,
         description="Backend name; None = use default_agent_backend",
+    )
+    input_products: list[str] = Field(
+        default_factory=list,
+        description=(
+            "#1133: Logical product names this node consumes. Matched "
+            "against other nodes' output_products to derive edges."
+        ),
+    )
+    output_products: list[str] = Field(
+        default_factory=list,
+        description=(
+            "#1133: Logical product names this node produces. Each "
+            "product must have a single producer."
+        ),
     )
 
 

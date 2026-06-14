@@ -273,6 +273,8 @@ class Planner:
                         "task_description": node.task_description,
                         "dependencies": node.dependencies,
                         "backend": node.backend,
+                        "input_products": node.input_products,
+                        "output_products": node.output_products,
                     }
                     for node in dag_model.nodes
                 ],
@@ -381,6 +383,8 @@ class Planner:
                 success_criteria=node_def.get("success_criteria", []),
                 owned_files=node_def.get("owned_files", []),
                 backend=node_def.get("backend"),
+                input_products=node_def.get("input_products", []),
+                output_products=node_def.get("output_products", []),
             )
             dag = dag.add_node(node)
 

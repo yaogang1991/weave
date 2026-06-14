@@ -159,6 +159,12 @@ class PlanValidator:
         self._check_feature_complexity(nodes)
         # Parallel write conflict detection (#272)
         self._check_parallel_write_conflicts(nodes, edges)
+        # #1133: Product-driven edge derivation. When nodes declare
+        # input/output products, derive deterministic dependency edges
+        # by exact product-name matching — more reliable than LLM
+        # topology. Supplements LLM edges (never removes).
+        edges, product_keys = self._derive_edges_from_products(nodes, edges)
+        plan_data["edges"] = edges
         # Foundation node dependency enforcement (#740)
         edges, auto_foundation_keys = self._check_foundation_dependencies(
             nodes, edges,
@@ -175,7 +181,11 @@ class PlanValidator:
         # Hub-and-spoke softening (#959)
         # NOTE: auto-added foundation edges (auto_foundation_keys) are
         # excluded from softening to avoid contradicting _check_foundation_dependencies (#1043).
-        edges = self._soften_hub_dependencies(nodes, edges, auto_foundation_keys)
+        # #1133: product-derived edges are genuine data dependencies too;
+        # exclude them as well so a high-fanout producer isn't softened.
+        edges = self._soften_hub_dependencies(
+            nodes, edges, auto_foundation_keys | product_keys,
+        )
         plan_data["edges"] = edges
 
         # AgentSpec integration checks (M7.4)
@@ -532,6 +542,92 @@ class PlanValidator:
             # Check if it explicitly depends on both nodes
             # (Heuristic: if it's in common descendants, it likely merges)
         return bool(common)
+
+    def _derive_edges_from_products(
+        self,
+        nodes: list[dict],
+        edges: list[dict],
+    ) -> tuple[list[dict], set[tuple[str, str]]]:
+        """Derive dependency edges from declared input/output products (#1133).
+
+        The LLM is unreliable at global DAG topology — e.g. it places a
+        terminal ``push_pr`` node at the same parallel level as the impl
+        nodes it must run AFTER. When nodes declare ``input_products`` /
+        ``output_products``, we deterministically match product names: if
+        node A outputs product X and node B consumes X, edge A→B is added.
+
+        Priority: products > LLM edges. This SUPPLEMENTS the LLM's edges
+        (never removes them), so terminal/merge nodes get pulled to the
+        correct level even when the LLM forgot the dependency. Backward
+        compatible: when no node declares products, returns edges unchanged.
+
+        Returns (updated_edges, derived_keys). derived_keys are excluded
+        from hub softening (#959) because product edges are genuine data
+        dependencies, not speculative fan-out.
+        """
+        # Build product → producers map; track whether anything was declared
+        producers: dict[str, list[str]] = {}
+        any_declared = False
+        for node in nodes:
+            nid = node.get("id")
+            outs = node.get("output_products") or []
+            if outs:
+                any_declared = True
+            for prod in outs:
+                producers.setdefault(prod, []).append(nid)
+
+        if not any_declared:
+            return edges, set()
+
+        # Defense 1 (#1133): a product claimed by >1 producer is ambiguous.
+        for prod, pnodes in producers.items():
+            if len(pnodes) > 1:
+                raise PlanValidationError(
+                    f"Duplicate output_product '{prod}' declared by "
+                    f"multiple nodes {sorted(pnodes)}. Each product must "
+                    f"have exactly one producer (#1133)."
+                )
+
+        existing: set[tuple[str, str]] = {
+            (e.get("from", ""), e.get("to", "")) for e in edges
+        }
+        derived_keys: set[tuple[str, str]] = set()
+        new_edges: list[dict] = []
+
+        for node in nodes:
+            nid = node.get("id")
+            for prod in (node.get("input_products") or []):
+                pnodes = producers.get(prod, [])
+                if not pnodes:
+                    # Defense 2 (#1133): unsatisfied input_product → warn
+                    self.warnings.append(
+                        f"Node '{nid}' declares input_product '{prod}' "
+                        f"with no producer — unsatisfied dependency (#1133)."
+                    )
+                    continue
+                producer = pnodes[0]
+                if producer == nid:
+                    continue  # self-dependency, skip
+                key = (producer, nid)
+                if key in existing:
+                    continue
+                new_edges.append({
+                    "from": producer,
+                    "to": nid,
+                    "dependency_type": "hard",
+                })
+                existing.add(key)
+                derived_keys.add(key)
+
+        if new_edges:
+            edges = list(edges) + new_edges
+            self.warnings.append(
+                f"Derived {len(new_edges)} edge(s) from product matching "
+                f"(#1133): "
+                + ", ".join(f"{e['from']}→{e['to']}" for e in new_edges)
+            )
+
+        return edges, derived_keys
 
     # Keywords that identify a foundation/base node in task descriptions (#740).
     _FOUNDATION_KEYWORDS = (

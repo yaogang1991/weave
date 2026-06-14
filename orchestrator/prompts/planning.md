@@ -123,6 +123,28 @@ Your job: Analyze the user's requirement and produce an execution plan (DAG).
     d. Adjust your DAG to be a completion plan, not a full rebuild
     Example: If 8 of 12 planned files already exist, only create 4 generator
     nodes for the remaining files plus an evaluator.
+20. **Declare data products for reliable topology (#1133)**: The LLM is
+    unreliable at global DAG topology — it often places terminal nodes
+    (e.g. `push_pr`, `report`) at the same parallel level as the impl
+    nodes they must come AFTER. To make edges deterministic, declare each
+    node's logical data products instead of hand-authoring fragile edges:
+    a. Add an `output_products` array naming the logical artifacts a node
+       produces (e.g. `["impl_fix_result"]`, `["eval_report"]`).
+    b. Add an `input_products` array naming the products a node CONSUMES
+       from upstream (e.g. `["impl_fix_result", "impl_tests_result", "eval_report"]`).
+    c. Edges are then derived by EXACT product-name matching: a node runs
+       only after ALL its input_products' producers finish. This OVERRIDES
+       topology mistakes — even if you omit an explicit edge, the system
+       adds it from the product match.
+    d. Each product name must have EXACTLY ONE producer node; declaring the
+       same output_product on two nodes is an error that triggers replan.
+    e. This is the PREFERRED way to express terminal / merge-node ordering.
+       Example terminal node:
+       {{
+         "id": "push_pr", "agent_type": "generator",
+         "input_products": ["impl_fix_result", "impl_tests_result", "eval_report"],
+         "output_products": ["pull_request"]
+       }}
 
 ## Output Format
 
