@@ -216,6 +216,7 @@ class ExecutionFactory:
             )
             cc_config = ClaudeCodeRuntimeConfig.from_core_config(
                 _cfg.claude_code,
+                non_interactive=self._non_interactive,
             )
             backend_registry.register(
                 "claude_code", ClaudeCodeBackend(config=cc_config),

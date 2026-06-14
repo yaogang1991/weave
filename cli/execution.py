@@ -346,6 +346,14 @@ def _build_runtime(
     from agent.backends.registry import BackendRegistry
     backend_registry = BackendRegistry.from_pool(pool=pool, session_id=session_id)
 
+    # #1125/#1136: non-interactive runs need bypassPermissions or the Claude
+    # CLI cannot write files (it has no tty to prompt). Computed once and
+    # passed to both backend-registration branches below.
+    _cc_non_interactive = bool(
+        getattr(args, "non_interactive", False)
+        or _get_non_interactive_env().lower() in ("true", "1", "yes")
+    )
+
     # M4.1: Register ClaudeCodeBackend if enabled, requested, or CLI available
     backend_name = getattr(args, "backend", None)
     if backend_name == "claude_code" or config.claude_code.enabled:
@@ -353,7 +361,9 @@ def _build_runtime(
             ClaudeCodeBackend,
             ClaudeCodeRuntimeConfig as RuntimeConfig,
         )
-        cc_config = RuntimeConfig.from_core_config(config.claude_code)
+        cc_config = RuntimeConfig.from_core_config(
+            config.claude_code, non_interactive=_cc_non_interactive,
+        )
         cc_backend = ClaudeCodeBackend(config=cc_config)
         backend_registry.register("claude_code", cc_backend)
     elif backend_name != "builtin":
@@ -364,7 +374,9 @@ def _build_runtime(
                 ClaudeCodeBackend,
                 ClaudeCodeRuntimeConfig as RuntimeConfig,
             )
-            cc_config = RuntimeConfig.from_core_config(config.claude_code)
+            cc_config = RuntimeConfig.from_core_config(
+            config.claude_code, non_interactive=_cc_non_interactive,
+        )
             cc_backend = ClaudeCodeBackend(config=cc_config)
             backend_registry.register("claude_code", cc_backend)
             import logging as _logging
