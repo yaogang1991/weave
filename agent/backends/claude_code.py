@@ -48,6 +48,42 @@ VALID_PERMISSION_MODES = {"default", "plan", "bypassPermissions"}
 
 __all__ = ["ClaudeCodeBackend", "ClaudeCodeRuntimeConfig"]
 
+# Module-level semaphore serializing Claude CLI invocations (#992, #1127).
+# Lazily initialized on first use so the permit count can be read from the
+# environment inside an active event loop.
+_cli_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_cli_semaphore() -> asyncio.Semaphore:
+    """Return the shared semaphore gating concurrent Claude CLI processes.
+
+    Concurrent Claude CLI processes share state in ``~/.claude/`` and, on
+    Windows, hang due to file-lock contention, so CLI calls are serialized
+    by default (#992). The permit count is configurable via the
+    ``WEAVE_CLI_MAX_CONCURRENT`` environment variable so that, when every
+    node runs in an isolated workspace (e.g. a git worktree with its own
+    ``CLAUDE_CONFIG_DIR``), parallel DAG levels are no longer serialized
+    and nodes are not killed by the wall-clock timeout while queued for a
+    slot (#1127). Default 1 preserves the historical serialization.
+    """
+    global _cli_semaphore
+    if _cli_semaphore is None:
+        try:
+            permits = int(os.getenv("WEAVE_CLI_MAX_CONCURRENT", "1"))
+        except ValueError:
+            permits = 1
+        permits = max(1, permits)
+        _cli_semaphore = asyncio.Semaphore(permits)
+        if permits > 1:
+            logger.info(
+                "Claude CLI semaphore allows %d concurrent invocations "
+                "(WEAVE_CLI_MAX_CONCURRENT) — ensure each node has an "
+                "isolated workspace to avoid ~/.claude/ contention "
+                "(#992, #1127)",
+                permits,
+            )
+    return _cli_semaphore
+
 
 class ClaudeCodeRuntimeConfig:
     """Immutable runtime configuration for ClaudeCodeBackend.
@@ -175,9 +211,9 @@ class ClaudeCodeBackend(AgentBackend):
 
     BACKEND_NAME = "claude_code"
 
-    # Serialize CLI invocations — concurrent Claude CLI processes share
-    # ~/.claude/ state and hang on Windows due to file-lock contention (#992).
-    _cli_semaphore = asyncio.Semaphore(1)
+    # CLI invocations are serialized by a module-level semaphore whose
+    # permit count is configurable via WEAVE_CLI_MAX_CONCURRENT (#1127).
+    # See _get_cli_semaphore() for the #992 rationale.
 
     def __init__(self, config: ClaudeCodeRuntimeConfig) -> None:
         self._config = config
@@ -343,7 +379,7 @@ class ClaudeCodeBackend(AgentBackend):
         """Execute via claude CLI subprocess with stream-json output."""
         cwd = context.workspace_path or "."
 
-        async with self._cli_semaphore:
+        async with _get_cli_semaphore():
             return await self._execute_via_cli_inner(context, prompt, cwd)
 
     async def _execute_via_cli_inner(
