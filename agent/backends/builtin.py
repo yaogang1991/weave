@@ -1,6 +1,8 @@
 """BuiltinBackend -- wraps AgentPool or LightweightLLMCaller for node execution."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import logging
 import platform
@@ -30,6 +32,12 @@ class BuiltinBackend(AgentBackend):
     For generator nodes, the pool-based path is always used because
     generators need the full tool loop (read/write/edit/bash/glob/grep/git).
     """
+
+    # #1122: Interval between heartbeats emitted while awaiting an LLM
+    # response in the lightweight path. Must stay well below the node's
+    # stall_timeout (default ~120s) so the StallDetector does not kill
+    # planner/evaluator nodes during long LLM calls.
+    _HEARTBEAT_INTERVAL_SEC = 15.0
 
     def __init__(
         self,
@@ -120,18 +128,52 @@ class BuiltinBackend(AgentBackend):
 
         return "\n".join(parts)
 
+    def _start_heartbeat(self, context: BackendContext) -> asyncio.Task | None:
+        """Start a periodic heartbeat task tied to the node's progress_callback.
+
+        #1122: The lightweight path awaits a single LLM call that can take
+        longer than ``stall_timeout`` on non-native APIs. Without periodic
+        heartbeats the StallDetector force-kills the node before the
+        response completes (evidence: ``input_tokens=0, output_tokens=0``).
+
+        Returns ``None`` when no ``progress_callback`` is wired (backward
+        compat), leaving behavior unchanged for callers that don't supply one.
+        """
+        cb = context.progress_callback
+        if cb is None:
+            return None
+
+        async def _loop():
+            while True:
+                await asyncio.sleep(self._HEARTBEAT_INTERVAL_SEC)
+                try:
+                    cb()
+                except Exception:
+                    logger.debug("Heartbeat callback failed", exc_info=True)
+
+        return asyncio.create_task(_loop())
+
     async def _execute_lightweight(self, context: BackendContext) -> BackendResult:
         """Execute via LightweightLLMCaller -- single-shot LLM call."""
         system_prompt = self._get_system_prompt(context.node.agent_type)
         user_message = self._build_user_message(context)
 
-        response_text = await self._lightweight_caller.call(
-            system_prompt=system_prompt,
-            user_message=user_message,
-            session_id=self._session_id or context.session_id,
-            cancel_event=context.cancel_event,
-            agent_type=context.node.agent_type,
-        )
+        # #1122: keep the StallDetector alive across long LLM calls by
+        # emitting periodic heartbeats via the node's progress_callback.
+        heartbeat_task = self._start_heartbeat(context)
+        try:
+            response_text = await self._lightweight_caller.call(
+                system_prompt=system_prompt,
+                user_message=user_message,
+                session_id=self._session_id or context.session_id,
+                cancel_event=context.cancel_event,
+                agent_type=context.node.agent_type,
+            )
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
         if not response_text:
             logger.warning(
