@@ -38,6 +38,12 @@ _FILENAME_HINT_PATTERNS: list[re.Pattern] = [
 # Minimum character length to consider extraction worthwhile
 _MIN_TEXT_LENGTH = 200
 
+# A level-2-or-deeper ATX heading (``## Section``). Used to recognize an
+# unfenced markdown document: real READMEs almost always have section
+# headings, while source code (Python/shell comments use a single ``#``)
+# virtually never starts a line with ``##`` at column zero (#1137 track 3).
+_MARKDOWN_DOC_HEADING_RE = re.compile(r"^#{2,6}\s+\S", re.MULTILINE)
+
 # Language tag to file extension mapping
 _LANG_TO_EXT: dict[str, str] = {
     "python": ".py", "py": ".py",
@@ -97,7 +103,13 @@ def extract_artifacts_from_text(
 
     blocks = _parse_code_blocks(text)
     if not blocks:
-        return []
+        # No fenced code blocks. Some models (notably GLM-5.2) emit a README
+        # or docs as plain markdown prose with no fence; recover it so the
+        # generator node does not fast-fail with zero_output_artifacts
+        # (#1137 track 3). Conservative: only fires when the text shows
+        # clear document structure (section headings), never for arbitrary
+        # plain text or source code emitted without fences.
+        return _recover_unfenced_markdown(text, workspace_path)
 
     # Filter out trivially short blocks (e.g. inline examples)
     meaningful_blocks = [
@@ -281,3 +293,75 @@ def _write_artifact_safely(
         except OSError:
             pass
         return None
+
+
+def _looks_like_markdown_document(text: str) -> bool:
+    """Heuristic: does this text read as a markdown document?
+
+    Requires at least one level-2-or-deeper ATX heading (``## Section``).
+    Real documentation almost always uses section headings, while source
+    code comments (single ``#``) do not match this pattern. This keeps the
+    unfenced recovery from mislabeling raw source code as ``README.md``
+    (#1137 track 3).
+    """
+    return bool(_MARKDOWN_DOC_HEADING_RE.search(text))
+
+
+def _unique_doc_filename(
+    workspace_path: str, base: str, content: str,
+) -> str:
+    """Pick a non-clobbering filename for a recovered document.
+
+    Prefers ``base`` (e.g. ``README.md``). If it already exists with the
+    same content, the name is reused (idempotent). If it exists with
+    different content, falls back to ``README_1.md``, ``README_2.md`` ...
+    so a pre-existing README is never silently overwritten.
+    """
+    root, ext = os.path.splitext(base)
+    candidate = base
+    index = 1
+    while index < 1000:
+        full = os.path.join(workspace_path, candidate)
+        if not os.path.isfile(full):
+            return candidate
+        try:
+            with open(full, "r", encoding="utf-8") as f:
+                if f.read() == content:
+                    return candidate
+        except (OSError, UnicodeDecodeError):
+            # Treat unreadable as "free" and let safe-write handle it.
+            return candidate
+        candidate = f"{root}_{index}{ext}"
+        index += 1
+    return base
+
+
+def _recover_unfenced_markdown(
+    text: str,
+    workspace_path: str,
+) -> list[str]:
+    """Recover a markdown document emitted as plain prose (#1137 track 3).
+
+    When no fenced code block is found but the generator's whole text
+    output is a markdown document (README/docs), write it as ``README.md``
+    so the node produces an artifact instead of fast-failing with
+    ``zero_output_artifacts``.
+
+    Conservative by design:
+        - Only fires after fenced-block extraction returned nothing.
+        - Only when the text has clear markdown structure (section headings).
+        - Never overwrites a pre-existing, differing README.
+    """
+    body = text.strip()
+    if not body or not _looks_like_markdown_document(body):
+        return []
+
+    filename = _unique_doc_filename(workspace_path, "README.md", body)
+    rel_path = _write_artifact_safely(workspace_path, filename, body)
+    if rel_path:
+        logger.info(
+            "Recovered unfenced markdown document as %s (#1137 track 3)",
+            rel_path,
+        )
+        return [rel_path]
+    return []
