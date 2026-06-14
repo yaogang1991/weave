@@ -28,8 +28,16 @@ class StreamMessage(BaseModel):
 class StreamParser:
     """Incremental NDJSON line parser for CLI event streams."""
 
+    # Event types that indicate productive model output — receiving one
+    # resets the thinking-token streak (#1137).
+    _PRODUCTIVE_TYPES: set[str] = {
+        "assistant", "user", "result", "tool_use", "tool_result",
+    }
+
     def __init__(self) -> None:
         self._messages: list[StreamMessage] = []
+        # #1137: consecutive thinking-token events with no productive output.
+        self._thinking_streak = 0
 
     # All known stream-json event types from Claude CLI.
     _KNOWN_TYPES: set[str] = {
@@ -55,7 +63,25 @@ class StreamParser:
             return None
         msg = StreamMessage(raw_type=raw_type, data=data)
         self._messages.append(msg)
+        # #1137: track thinking-token floods for fast-fail detection.
+        if self._is_thinking_tokens(msg):
+            self._thinking_streak += 1
+        elif msg.raw_type in self._PRODUCTIVE_TYPES:
+            self._thinking_streak = 0
         return msg
+
+    @staticmethod
+    def _is_thinking_tokens(msg: StreamMessage) -> bool:
+        """A system event carrying the thinking_tokens subtype."""
+        return (
+            msg.raw_type == "system"
+            and msg.data.get("subtype") == "thinking_tokens"
+        )
+
+    @property
+    def thinking_streak(self) -> int:
+        """Consecutive thinking-token events since last productive output (#1137)."""
+        return self._thinking_streak
 
     @property
     def messages(self) -> list[StreamMessage]:

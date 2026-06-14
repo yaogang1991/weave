@@ -43,6 +43,7 @@ from core.models import (
 from core.exceptions import PendingApprovalError
 from core.exceptions import RateLimitError
 from core.exceptions import NodeTimeoutError
+from core.exceptions import ThinkingFloodError
 from core.exceptions import BudgetExhaustedError
 from core.exceptions import GuardrailBlockedException
 from core.backend_models import BackendContext
@@ -258,6 +259,7 @@ class NodeExecutor:
                     PendingApprovalError,
                     RateLimitError,
                     NodeTimeoutError,
+                    ThinkingFloodError,
                     BudgetExhaustedError,
                     GuardrailBlockedException,
                 ):
@@ -321,12 +323,16 @@ class NodeExecutor:
             ))
             raise
 
-        except (RateLimitError, NodeTimeoutError) as e:
-            reason = (
-                "rate_limit" if isinstance(e, RateLimitError) else "timeout"
-            )
-            # Do NOT increment retry_count — timeout/rate-limit are
-            # infrastructure errors, not code quality failures (#432).
+        except (RateLimitError, NodeTimeoutError, ThinkingFloodError) as e:
+            if isinstance(e, RateLimitError):
+                reason = "rate_limit"
+            elif isinstance(e, ThinkingFloodError):
+                reason = "thinking_flood"
+            else:
+                reason = "timeout"
+            # Do NOT increment retry_count — timeout/rate-limit/thinking-flood
+            # are infrastructure/model-behavior errors, not code quality
+            # failures (#432, #1137).
             # Infinite retry protection comes from max_replans and the
             # failure_handler (which may return skip/abort).
             dag.update_node(
@@ -552,8 +558,9 @@ class NodeExecutor:
         )
         dag.update_node(node_id, error=error_str)
 
-        # #831: NodeTimeoutError/RateLimitError should not consume retry budget.
-        no_budget = isinstance(exc, (NodeTimeoutError, RateLimitError))
+        # #831/#1137: NodeTimeoutError/RateLimitError/ThinkingFloodError should
+        # not consume retry budget (infrastructure / model-behavior errors).
+        no_budget = isinstance(exc, (NodeTimeoutError, RateLimitError, ThinkingFloodError))
         new_count = node.retry_count if no_budget else node.retry_count + 1
         node = dag.update_node(
             node_id, retry_count=new_count,

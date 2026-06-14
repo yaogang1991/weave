@@ -115,6 +115,41 @@ class NodeTimeoutError(ExecutionError):
         )
 
 
+class ThinkingFloodError(ExecutionError):
+    """Raised when a model emits N consecutive thinking-token stream events
+    with no productive output, indicating it is stuck in a thinking loop.
+
+    Fail-fast instead of burning the wall-clock budget waiting for a timeout
+    (#1137, track 2). Treated as a model-behavior / infrastructure error:
+    it does NOT consume retry budget (like NodeTimeoutError), letting the
+    orchestrator replan (e.g. split the task) rather than retry the same
+    stuck call.
+
+    Propagation chain:
+        ClaudeCodeBackend._stream_cli_output() — streak >= threshold
+          -> raises ThinkingFloodError
+        -> _execute_via_cli_inner() — propagates (not a TimeoutError)
+        -> NodeExecutor._execute_single_node() — marks FAILED, may replan
+    """
+
+    def __init__(
+        self,
+        node_id: str,
+        agent_type: str,
+        streak: int,
+        threshold: int,
+    ) -> None:
+        self.node_id = node_id
+        self.agent_type = agent_type
+        self.streak = streak
+        self.threshold = threshold
+        super().__init__(
+            f"Node {node_id} ({agent_type}): {streak} consecutive "
+            f"thinking-token events with no productive output "
+            f"(threshold {threshold}) — model stuck in a thinking loop (#1137)."
+        )
+
+
 class HardTimeoutError(NodeTimeoutError, TimeoutError):
     """Hard wall-clock timeout or cancel_event — NOT transient, do not retry (#674).
 
