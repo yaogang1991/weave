@@ -1,24 +1,28 @@
 """Tests for #992: CLI subprocess serialization via semaphore.
 
-ClaudeCodeBackend uses a class-level asyncio.Semaphore(1) to serialize
-CLI invocations, preventing concurrent processes from hanging on Windows
-due to ~/.claude/ file-lock contention.
+ClaudeCodeBackend serializes CLI invocations through a module-level
+``asyncio.Semaphore`` so concurrent processes do not hang on Windows due
+to ~/.claude/ file-lock contention. The permit count is configurable via
+``WEAVE_CLI_MAX_CONCURRENT`` (default 1) — see #1127.
 """
 import asyncio
 import inspect
 
+from agent.backends import claude_code as cc
 from agent.backends.claude_code import ClaudeCodeBackend, ClaudeCodeRuntimeConfig
 
 
 class TestCLISemaphore:
     """CLI semaphore serializes concurrent invocations."""
 
-    def test_semaphore_is_class_level(self):
-        """All instances share the same semaphore."""
+    def test_semaphore_is_shared(self, monkeypatch):
+        """All instances share the same module-level semaphore (#992)."""
+        monkeypatch.setattr(cc, "_cli_semaphore", None)
         cfg = ClaudeCodeRuntimeConfig()
-        b1 = ClaudeCodeBackend(config=cfg)
-        b2 = ClaudeCodeBackend(config=cfg)
-        assert b1._cli_semaphore is b2._cli_semaphore
+        ClaudeCodeBackend(config=cfg)
+        ClaudeCodeBackend(config=cfg)
+        # The semaphore is a module-level singleton shared across instances.
+        assert cc._get_cli_semaphore() is cc._get_cli_semaphore()
 
     def test_semaphore_initial_value_is_one(self):
         """Semaphore capacity is 1 — only one CLI at a time."""
@@ -31,7 +35,7 @@ class TestCLISemaphore:
         cfg = ClaudeCodeRuntimeConfig()
         backend = ClaudeCodeBackend(config=cfg)
         source = inspect.getsource(backend._execute_via_cli)
-        assert "_cli_semaphore" in source
+        assert "_get_cli_semaphore" in source
         assert "async with" in source
 
     def test_execute_via_cli_delegates_to_inner(self):

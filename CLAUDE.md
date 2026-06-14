@@ -76,7 +76,7 @@ flake8 --max-line-length=100
 python -m pytest --cov=. --cov-report=term-missing
 ```
 
-Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `WEAVE_MODEL` (optional, default: claude-sonnet-4-6), `WEAVE_DEFAULT_BACKEND` (optional: local|worktree), `WEAVE_NON_INTERACTIVE` (optional: true|false).
+Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `WEAVE_MODEL` (optional, default: claude-sonnet-4-6), `WEAVE_DEFAULT_BACKEND` (optional: local|worktree), `WEAVE_NON_INTERACTIVE` (optional: true|false), `WEAVE_CLI_MAX_CONCURRENT` (optional, default: 1 — max concurrent Claude CLI processes; raise when every node runs in an isolated workspace, e.g. git worktree, to parallelize DAG levels instead of queueing behind the single permit, #1127).
 
 ## Architecture
 
