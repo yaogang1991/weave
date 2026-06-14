@@ -201,13 +201,20 @@ class Planner:
                 plan_data = extract_json(response.get("content", ""))
                 if plan_data is None:
                     raise
-                # Retry derivation with corrected plan
+                # Retry derivation with corrected plan. If it still fails
+                # (LLM repeated the duplicate, or introduced a cycle), fall
+                # back to the LLM's own edges instead of crashing (#1134).
                 if _has_products(plan_data.get("nodes", [])):
-                    derived_edges = derive_edges_from_products(
-                        plan_data["nodes"], plan_data.get("edges"),
-                    )
-                    if derived_edges:
+                    try:
+                        derived_edges = derive_edges_from_products(
+                            plan_data["nodes"], plan_data.get("edges"),
+                        )
                         plan_data["edges"] = derived_edges
+                    except PlanValidationError as retry_err:
+                        logger.warning(
+                            "Product derivation failed after retry, falling "
+                            "back to LLM edges: %s", retry_err,
+                        )
 
         plan = OrchestratorPlan(**plan_data)
         self._validate_agents(plan)
@@ -497,7 +504,17 @@ def derive_edges_from_products(
     product_producer: dict[str, str] = {}
     for node in nodes:
         nid = node.get("id", "")
-        for product in node.get("output_products", []):
+        outputs = node.get("output_products") or []
+        if not isinstance(outputs, list):
+            # Guard against LLM returning a string/scalar in free-text mode
+            # (OrchestratorPlan.nodes is list[dict[str, Any]], untyped) —
+            # iterating a string would split it into chars (#1134).
+            logger.warning(
+                "Node '%s' output_products is %s, expected list — ignoring",
+                nid, type(outputs).__name__,
+            )
+            outputs = []
+        for product in outputs:
             if product in product_producer:
                 raise PlanValidationError(
                     f"Duplicate output product '{product}' declared by "
@@ -508,12 +525,23 @@ def derive_edges_from_products(
 
     # 2. Derive primary edges from input_products -> output_products matching
     node_ids = {n.get("id", "") for n in nodes}
+    # agent_type lookup reused for orphan detection and root-node warnings
+    node_agent_types: dict[str, str] = {
+        n.get("id", ""): n.get("agent_type", "") for n in nodes
+    }
     edge_set: set[tuple[str, str]] = set()
     edges: list[dict] = []
 
     for node in nodes:
         nid = node.get("id", "")
-        for product in node.get("input_products", []):
+        inputs = node.get("input_products") or []
+        if not isinstance(inputs, list):
+            logger.warning(
+                "Node '%s' input_products is %s, expected list — ignoring",
+                nid, type(inputs).__name__,
+            )
+            inputs = []
+        for product in inputs:
             producer = product_producer.get(product)
             if producer is None:
                 logger.debug(
@@ -536,11 +564,6 @@ def derive_edges_from_products(
         nodes_with_incoming = {e["to"] for e in edges}
         orphaned = node_ids - nodes_with_incoming
         # Exclude planner nodes (they naturally have no incoming edges)
-        # Pre-build agent_type lookup for O(1) access instead of O(n²) scan
-        node_agent_types: dict[str, str] = {
-            n.get("id", ""): n.get("agent_type", "")
-            for n in nodes
-        }
         orphaned_non_planner = {
             nid for nid in orphaned
             if node_agent_types.get(nid) != "planner"
@@ -569,7 +592,60 @@ def derive_edges_from_products(
             len(edges) - soft_count,
             soft_count,
         )
+
+    # Detect cycles in the derived edges — product matching can produce a
+    # mutual dependency (A outputs X needing Y; B outputs Y needing X). Raise
+    # so plan()/replan() can retry or fall back, instead of crashing later in
+    # topological sort (#1134).
+    _raise_on_edge_cycle(node_ids, edges)
+
+    # Surface non-planner nodes that ended up with no incoming edge. They run
+    # as roots and may execute before a real upstream dependency when the LLM
+    # under-declared input_products. Warn so the topology isn't wrong silently.
+    roots = node_ids - {e["to"] for e in edges}
+    for nid in roots:
+        if node_agent_types.get(nid) != "planner":
+            logger.warning(
+                "Node '%s' has no incoming edge after product-driven "
+                "derivation; verify its input_products or it may run before "
+                "its real upstream dependency",
+                nid,
+            )
+
     return edges
+
+
+def _raise_on_edge_cycle(node_ids: set[str], edges: list[dict]) -> None:
+    """Raise PlanValidationError if the given edges form a cycle.
+
+    Mirrors PlanValidator._detect_cycle (#754) but module-level so
+    derive_edges_from_products can call it without an instance. Product-driven
+    edges are otherwise never cycle-checked on the replan path (#1134).
+    """
+    adj: dict[str, list[str]] = {nid: [] for nid in node_ids}
+    for edge in edges:
+        adj.setdefault(edge["from"], []).append(edge["to"])
+
+    visited: set[str] = set()
+    in_stack: set[str] = set()
+
+    def has_cycle(node_id: str) -> bool:
+        visited.add(node_id)
+        in_stack.add(node_id)
+        for neighbor in adj.get(node_id, []):
+            if neighbor in in_stack:
+                return True
+            if neighbor not in visited and has_cycle(neighbor):
+                return True
+        in_stack.remove(node_id)
+        return False
+
+    for nid in node_ids:
+        if nid not in visited and has_cycle(nid):
+            raise PlanValidationError(
+                "Product-derived edges form a cycle — likely mutual "
+                "input_products/output_products between two nodes"
+            )
 
 
 def _infer_fallback_edges(dag: DAG) -> DAG:

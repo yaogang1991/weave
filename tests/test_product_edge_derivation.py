@@ -189,6 +189,36 @@ class TestDeriveEdgesFromProducts:
         assert ("plan", "impl_tests") in edge_set
         assert len(edges) == 7
 
+    def test_cycle_in_product_edges_raises(self):
+        """Mutual product dependency (A needs Y / produces X; B needs X /
+        produces Y) forms a cycle -> PlanValidationError (#1134)."""
+        nodes = [
+            {"id": "a", "input_products": ["y"], "output_products": ["x"]},
+            {"id": "b", "input_products": ["x"], "output_products": ["y"]},
+        ]
+        with pytest.raises(PlanValidationError, match="cycle"):
+            derive_edges_from_products(nodes)
+
+    def test_non_list_output_products_ignored(self):
+        """output_products as a string (LLM free-text mistake) must NOT be
+        iterated char-by-char; treated as empty instead (#1134)."""
+        nodes = [
+            {"id": "a", "output_products": "source_code"},  # str, not list
+            {"id": "b", "input_products": ["source_code"]},
+        ]
+        edges = derive_edges_from_products(nodes)
+        # 'source_code' was never registered as a product -> no edges
+        assert edges == []
+
+    def test_non_list_input_products_ignored(self):
+        """input_products as a string must NOT be iterated char-by-char."""
+        nodes = [
+            {"id": "a", "output_products": ["x"]},
+            {"id": "b", "input_products": "x"},  # str, not list
+        ]
+        edges = derive_edges_from_products(nodes)
+        assert edges == []
+
 
 # ---------------------------------------------------------------------------
 # Supplement from LLM edges (orphaned node soft deps)
