@@ -175,6 +175,11 @@ Examples:
         "--allow-self-modify", action="store_true",
         help="Allow agents to modify the weave source tree (NOT recommended)",
     )
+    submit_parser.add_argument(
+        "--non-interactive", action="store_true",
+        help="Auto-approve all tool calls; for the claude_code backend this "
+             "propagates to the worker as --permission-mode bypassPermissions",
+    )
     submit_parser.set_defaults(func=cmd_submit)
 
     status_parser = subparsers.add_parser("status", help="Get job status")

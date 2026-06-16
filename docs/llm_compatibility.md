@@ -1,6 +1,6 @@
 # 第三方 LLM 兼容性矩阵
 
-> **最后更新:** 2026-06-14
+> **最后更新:** 2026-06-16
 
 Weave 的 `claude_code` 后端通过 Claude CLI（`claude -p`）执行节点，`builtin` 后端直接调用 LLM API（无工具循环）。两者对第三方 LLM 的兼容性差异较大，尤其在 Anthropic 直连受限、需要走第三方 Anthropic 兼容代理（如 bigmodel/GLM、Kimi）的部署场景下。
 
@@ -23,6 +23,14 @@ Weave 的 `claude_code` 后端通过 Claude CLI（`claude -p`）执行节点，`
 2. **思维 token 洪水**：长时间持续发送 `{"type":"system","subtype":"thinking_tokens"}` 事件而无任何 `assistant`/`tool_use` 产出 → wall-clock 预算被耗尽后才超时。
 
 **根因（未完全定位）**：差异不在模型本身，而在 weave 组装的复合 prompt（`## Task` 标记、`--session-id`、额外系统上下文等）。详见 #1137。
+
+## #1136 修复：非交互模式权限提升
+
+`run` / `execute` / `submit` / `worker` 的 `--non-interactive` 标志（以及 `WEAVE_NON_INTERACTIVE` 环境变量）现可将 `claude_code` 后端的 Claude CLI 权限模式从 `default` 提升为 `bypassPermissions`（#1125），避免非交互场景下文件写入被静默拒绝。
+
+- **同步命令**（`run` / `execute`）：标志经 `add_execution_args` 注册，直接传入 `ClaudeCodeRuntimeConfig.from_core_config`。
+- **异步命令**（`submit`）：意图写入 `job.metadata["non_interactive"]`，worker 执行该 job 时合并覆盖工厂构造期的默认值（`ExecutionFactory.create_execution_engine` 的 `non_interactive_override`）——即使 worker 未带 `--non-interactive`，该 job 仍按非交互执行。
+- **边界**：权限提升只解决“写入被拒绝”，不解决第三方 LLM“工具不被调用”（那是 #1137）。
 
 ## 已实施的缓解（#1137）
 

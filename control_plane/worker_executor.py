@@ -133,8 +133,15 @@ async def execute_job_core(
     _json_log("INFO", "Starting job execution", job_id=job_id, status="running")
 
     try:
-        # 1. Non-interactive: expire old approval tickets before execution
-        if non_interactive:
+        # 1. Non-interactive: expire old approval tickets before execution.
+        # #1136: a job submitted with --non-interactive (persisted in
+        # metadata) also needs its tickets expired even if the worker
+        # itself wasn't started with --non-interactive.
+        job = await asyncio.to_thread(repository.get_job, job_id)
+        job_non_interactive = bool(
+            job.metadata.get("non_interactive", False) if job else False
+        )
+        if non_interactive or job_non_interactive:
             approval_repo = getattr(run_service, "approval_repo", None)
             if approval_repo is not None:
                 approval_repo.expire_tickets()
