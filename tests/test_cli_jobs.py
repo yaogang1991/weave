@@ -110,6 +110,7 @@ class TestCmdSubmit:
             project_path="/tmp/project",
             timeout=1800,
             max_attempts=3,
+            non_interactive=False,
         )
 
     @patch("cli.jobs._write_error")

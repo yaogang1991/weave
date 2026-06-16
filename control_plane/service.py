@@ -303,6 +303,7 @@ class RunService:
         project_path: str | None = None,
         timeout: int = 1800,
         max_attempts: int = 3,
+        non_interactive: bool = False,
     ) -> Job:
         """
         Create and persist a new job, returning it immediately.
@@ -312,6 +313,8 @@ class RunService:
             project_path: Optional path to the project directory.
             timeout: Maximum wall-clock seconds for a single *run* attempt.
             max_attempts: Maximum retry attempts (embedded in RetryPolicy).
+            non_interactive: Persist non-interactive intent so the worker
+                promotes the claude_code backend to bypassPermissions (#1136).
         """
         retry_policy = RetryPolicy(max_attempts=max_attempts, backoff_sec=5)
         job = self.repository.create_job(
@@ -321,6 +324,10 @@ class RunService:
         )
         # Store the per-run timeout in job metadata so run_job can read it
         job.metadata["run_timeout_sec"] = timeout
+        # #1136: persist non-interactive intent for the worker (submit and
+        # worker are separate processes; the flag must survive in metadata).
+        if non_interactive:
+            job.metadata["non_interactive"] = True
         self.repository.update_job(job)
         return job
 
@@ -358,6 +365,8 @@ class RunService:
         run = self.repository.create_run(job_id, session_id)
         work_dir: str | None = None
         timeout: int = job.metadata.get("run_timeout_sec", 1800)
+        # #1136: per-job non-interactive intent (submit --non-interactive).
+        job_non_interactive = bool(job.metadata.get("non_interactive", False))
 
         outcome = "failed"
         result_dag: DAG | None = None
@@ -384,7 +393,7 @@ class RunService:
                     risk_level=job.metadata.get("risk_level"),
                 )
 
-                if self.non_interactive and self.approval_repo is not None:
+                if (self.non_interactive or job_non_interactive) and self.approval_repo is not None:
                     self.approval_repo.expire_tickets()
 
                 hooks = _BLS.load_project_hooks(job.project_path)
@@ -605,6 +614,7 @@ class RunService:
             run_id=run_id,
             backend_manager=backend_manager,
             project_dir=job.project_path,
+            non_interactive_override=bool(job.metadata.get("non_interactive", False)) or None,
         )
         result_dag = await engine.execute(dag)
 

@@ -112,9 +112,18 @@ class ExecutionFactory:
         run_id: str | None = None,
         backend_manager: Any | None = None,
         project_dir: str | None = None,
+        non_interactive_override: bool | None = None,
     ) -> DAGExecutionEngine:
         """Build a DAGExecutionEngine with agent pool, failure handler,
         and optional replan handler."""
+        # #1136: a per-job override (submit --non-interactive) takes
+        # precedence over the factory's constructor-level value so the
+        # worker can run an interactive default but still honour a job that
+        # was submitted non-interactively.
+        effective_non_interactive = (
+            self._non_interactive if non_interactive_override is None
+            else bool(non_interactive_override)
+        )
         registry = AgentRegistry()
 
         # Wire sandbox through SyncSandboxAdapter if backend_manager
@@ -134,7 +143,7 @@ class ExecutionFactory:
             policy = self._policy
         else:
             project_guardrails = self.load_project_guardrails(work_dir)
-            if self._non_interactive:
+            if effective_non_interactive:
                 default_mode = PermissionMode.DONT_ASK
                 default_allowed = ["read", "write", "edit", "bash", "glob", "grep", "git"]
             else:
@@ -153,7 +162,7 @@ class ExecutionFactory:
             guardrails = PersonalGuardrails(
                 policy,
                 tool_registry,
-                non_interactive=self._non_interactive,
+                non_interactive=effective_non_interactive,
                 approval_repo=self._approval_repo,
                 project_dir=project_dir,
             )
@@ -216,7 +225,7 @@ class ExecutionFactory:
             )
             cc_config = ClaudeCodeRuntimeConfig.from_core_config(
                 _cfg.claude_code,
-                non_interactive=self._non_interactive,
+                non_interactive=effective_non_interactive,
             )
             backend_registry.register(
                 "claude_code", ClaudeCodeBackend(config=cc_config),

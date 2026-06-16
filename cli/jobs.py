@@ -33,6 +33,7 @@ async def cmd_submit(args):
             project_path=project,
             timeout=args.timeout,
             max_attempts=args.max_attempts,
+            non_interactive=getattr(args, "non_interactive", False),
         )
     except Exception as exc:
         _write_error("E_SUBMIT_FAILED", f"Failed to submit job: {exc}")
