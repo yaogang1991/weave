@@ -147,7 +147,7 @@ class LearningInsight(BaseModel):
 
 ### Imports From
 - `core/models.py` — LearningInsight, LearningCategory, InsightType, MemoryEntry, MemoryScope, MemoryType
-- `core/config.py` — LearningConfig
+- `core/config/` (domains.py) — LearningConfig
 - `memory/manager.py` — MemoryManager, _extract_keywords
 - `monitoring/metrics.py` — MetricsCollector
 

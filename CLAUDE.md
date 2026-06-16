@@ -8,7 +8,7 @@ Self-hosted unattended software development system based on [Anthropic Managed A
 
 Python 3.11+, Pydantic models, async/await throughout.
 
-**Current version:** M6.9 (OTEL trace propagation to CLI subprocess). See `docs/roadmap.md` for milestone history.
+**Current version:** M8.6 (Weave UI dashboard — DAG visualization & live execution progress). Recent milestones: M7.4 (five-core AgentSpec unified model), M7.2 (architecture cleanup & tech-debt paydown). See `docs/roadmap.md` for milestone history.
 
 ## Commands
 
@@ -63,6 +63,24 @@ python main.py impact-predict "Fix bug in DAG engine" --project .
 python main.py impact-graph --project .
 python main.py impact-history
 
+# Agent memory (M3.2)
+python main.py memory-search "auth pattern" --agent generator
+python main.py memory-list --scope global
+python main.py memory-add "Prefer dataclasses over dicts" --type preference
+python main.py memory-stats
+python main.py memory-cleanup
+
+# Self-learning (M3.3)
+python main.py learning-analyze
+python main.py learning-insights --limit 20
+python main.py learning-status
+
+# MCP Server mode (#512)
+python main.py serve
+
+# Web console (M2.3)
+python main.py console --port 8080
+
 # With project-specific agents
 python main.py run "Add OAuth2 support" --project ./my-project --max-parallel 5
 
@@ -76,7 +94,7 @@ flake8 --max-line-length=100
 python -m pytest --cov=. --cov-report=term-missing
 ```
 
-Environment variables: `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` (required), `WEAVE_MODEL` (optional, default: claude-sonnet-4-6), `WEAVE_DEFAULT_BACKEND` (optional: local|worktree), `WEAVE_NON_INTERACTIVE` (optional: true|false), `WEAVE_LLM_TIMEOUT` (optional, default: 120 — per-call HTTP timeout in seconds for LLM API requests; raise for slow third-party APIs), `WEAVE_CLI_MAX_CONCURRENT` (optional, default: 1 — max concurrent Claude CLI processes; raise when every node runs in an isolated workspace, e.g. git worktree, to parallelize DAG levels instead of queueing behind the single permit, #1127).
+Environment variables: `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN` fallback) or `OPENAI_API_KEY` (required), `WEAVE_MODEL` (optional, default: claude-sonnet-4-6), `WEAVE_DEFAULT_BACKEND` (optional: local|worktree), `WEAVE_NON_INTERACTIVE` (optional: true|false), `WEAVE_LLM_TIMEOUT` (optional, default: 120 — per-call HTTP timeout in seconds for LLM API requests; raise for slow third-party APIs), `WEAVE_CLI_MAX_CONCURRENT` (optional, default: 1 — max concurrent Claude CLI processes; raise when every node runs in an isolated workspace, e.g. git worktree, to parallelize DAG levels instead of queueing behind the single permit, #1127). See `docs/config_reference.md` for the full list (node/stall/watchdog timeouts, budget, backend, observability).
 
 ## Architecture
 
@@ -110,8 +128,11 @@ Execution Layer (Backend abstraction, Sandbox, Git, Reporter)
 - `core/mcp_models.py` — MCPToolInfo, MCPServerStatus
 - `core/artifact_handoff.py` — HandoffArtifact, artifact collection/transfer
 - `core/exceptions.py` — Custom exception hierarchy
-- `core/config.py` — WeaveConfig, LLMConfig, SandboxConfig, MemoryConfig, LearningConfig, ImpactConfig, NodeTimeoutConfig (stall_timeout with dynamic complexity scaling)
+- `core/config/` — Configuration package (split from the former single `core/config.py`, #917): `WeaveConfig` aggregates `LLMConfig`, `SandboxConfig`, `MCPConfig`, `MemoryConfig`, `LearningConfig`, `ImpactConfig`, `BudgetConfig`, `ClaudeCodeConfig`, `CodexBackendConfig`, `ObservabilityConfig`, `TokenEstimationConfig`, `NodeTimeoutConfig` (stall_timeout with dynamic complexity scaling), `WatchdogConfig`, `ModelRoutingConfig`. `from core.config import X` still works via `__init__.py` re-exports
 - `core/agent_registry.py` — Agent capability registry (defaults: planner/generator/evaluator; extensible via `.weave/agents.yaml`)
+- `core/agent_spec.py` — M7.4: Five-core AgentSpec unified model (canonical agent definition)
+- `core/dag_replan.py` — DAG replan logic (supersede replaced failed nodes during replan, #1108)
+- `core/protocols.py` — `typing.Protocol` interfaces (structural subtyping, #920)
 - `core/dag_engine.py` — Topological sort, parallel execution with `asyncio.gather`, failure callback
 - `core/node_executor.py` — 3-stage node execution pipeline: prepare → execute → evaluate (ADR-0015)
 - `core/evaluation_pipeline.py` — Post-execution evaluation: token recording, artifacts, zero-output, evaluator, quality gate (ADR-0015)

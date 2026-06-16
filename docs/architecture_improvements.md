@@ -23,7 +23,7 @@
 - `backend/local.py`, `backend/worktree.py` — `backend_type` → `workspace_type`
 - `backend/docker_stub.py` — 更新引用
 - `backend/__init__.py` — 更新导出
-- `core/config.py` — `default_backend` → `workspace_isolation` + `execution_sandbox`
+- `core/config/` (root.py) — `default_backend` → `workspace_isolation` + `execution_sandbox`
 
 ## 改动 2: 项目级配置文件
 

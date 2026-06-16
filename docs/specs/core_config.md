@@ -1,8 +1,10 @@
-# SPEC: core/config.py
+# SPEC: core/config/ (package)
+
+> **Note:** Configuration was split from a single `core/config.py` into the `core/config/` package (#917). This SPEC predates the split and reflects the older single-file structure; for the current, complete configuration reference see [`docs/config_reference.md`](../config_reference.md). Sub-configs now live in: `env.py`, `llm.py`, `timeout.py`, `domains.py` (Memory/Learning/Impact/Sandbox/MCP/Budget/TokenEstimation/ClaudeCode/Codex/Observability), `root.py` (WeaveConfig). `from core.config import X` still works via `__init__.py` re-exports.
 
 ## Purpose
 
-Centralizes all configuration for the Weave. Defines `WeaveConfig` (top-level) and its sub-configs (`LLMConfig`, `SandboxConfig`, `MCPConfig`). Supports loading from YAML files, environment variables, and the `~/.claude/settings-kimi.json` fallback file.
+Centralizes all configuration for the Weave. Defines `WeaveConfig` (top-level) and its sub-configs (`LLMConfig`, `SandboxConfig`, `MCPConfig`). Supports loading from YAML files, environment variables, and a local Claude settings fallback file.
 
 ## Public Interfaces
 
@@ -11,7 +13,7 @@ Centralizes all configuration for the Weave. Defines `WeaveConfig` (top-level) a
 ```python
 def _load_claude_settings() -> dict[str, str]
 ```
-Loads environment variables from `~/.claude/settings-kimi.json` if present. Returns the `env` key from that JSON, or `{}` on any failure. Cached in module-level `_CLAUDE_ENV`.
+Loads environment variables from a local Claude settings file if present. Returns the `env` key from that JSON, or `{}` on any failure. Cached in module-level `_CLAUDE_ENV`.
 
 ### `LLMConfig(BaseModel)`
 
@@ -30,7 +32,7 @@ Loads environment variables from `~/.claude/settings-kimi.json` if present. Retu
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `bool` | `True` | Whether sandboxing is active |
-| `runtime` | `str` | `"docker"` | Sandbox runtime: `"docker"`, `"bubblewrap"`, `"direct"` |
+| `runtime` | `str` | `"local"` | Sandbox runtime: `"local"` or `"docker"` (docker not yet implemented) |
 | `image` | `str` | `"python:3.11-slim"` | Docker image |
 | `network_mode` | `str` | `"none"` | Network mode: `"none"` or `"bridge"` |
 | `memory_limit` | `str` | `"512m"` | Container memory limit |
@@ -42,8 +44,9 @@ Loads environment variables from `~/.claude/settings-kimi.json` if present. Retu
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `servers` | `list[dict[str, Any]]` | `[]` | MCP server definitions |
+| `servers` | `list[MCPServerConfig]` | `[]` | MCP server definitions |
 | `auto_discover` | `bool` | `False` | Whether to auto-discover MCP servers |
+| `connection_timeout` | `int` | `30` | Seconds to wait for server startup |
 
 ### `WeaveConfig(BaseModel)`
 
@@ -67,12 +70,12 @@ Loads environment variables from `~/.claude/settings-kimi.json` if present. Retu
 
 Class methods:
 - `from_yaml(path: str | Path) -> WeaveConfig` -- Load from YAML file.
-- `from_env() -> WeaveConfig` -- Create from environment variables with `settings-kimi.json` fallback.
+- `from_env() -> WeaveConfig` -- Create from environment variables with `local settings file` fallback.
 
 ## Data Flow
 
 ```
-~/.claude/settings-kimi.json (fallback)
+Local Claude settings file (fallback)
   + Environment variables (ANTHROPIC_API_KEY, WEAVE_MODEL, etc.)
   + YAML config file (optional)
   -> WeaveConfig.from_env() / WeaveConfig.from_yaml()
@@ -100,14 +103,14 @@ No numeric error codes. Errors are standard Python exceptions:
 
 | Variable | Field | Default |
 |----------|-------|---------|
-| `ANTHROPIC_API_KEY` | `LLMConfig.api_key` | Falls back to `ANTHROPIC_AUTH_TOKEN`, then `settings-kimi.json` |
-| `ANTHROPIC_AUTH_TOKEN` | `LLMConfig.api_key` | Falls back to `settings-kimi.json` |
-| `ANTHROPIC_BASE_URL` | `LLMConfig.base_url` | Falls back to `settings-kimi.json` |
+| `ANTHROPIC_API_KEY` | `LLMConfig.api_key` | Falls back to `ANTHROPIC_AUTH_TOKEN`, then `local settings file` |
+| `ANTHROPIC_AUTH_TOKEN` | `LLMConfig.api_key` | Falls back to `local settings file` |
+| `ANTHROPIC_BASE_URL` | `LLMConfig.base_url` | Falls back to `local settings file` |
 | `WEAVE_MODEL` | `LLMConfig.model` | Falls back to `ANTHROPIC_DEFAULT_SONNET_MODEL`, then `"claude-sonnet-4-6"` |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `LLMConfig.model` | Falls back to `settings-kimi.json` |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `LLMConfig.model` | Falls back to `local settings file` |
 | `WEAVE_EVENT_STORE` | `WeaveConfig.event_store_path` | `"./data/events"` |
 | `WEAVE_ARTIFACT_PATH` | `WeaveConfig.artifact_path` | `"./data/artifacts"` |
-| `WEAVE_AGENT_TIMEOUT` | `WeaveConfig.agent_timeout` | `"120"` |
+| `WEAVE_AGENT_TIMEOUT` | `WeaveConfig.agent_timeout` | `"300"` |
 | `WEAVE_MAX_CONTEXT_TOKENS` | `WeaveConfig.max_context_tokens` | `"100000"` |
 | `WEAVE_DEFAULT_BACKEND` | `WeaveConfig.default_backend` | `"local"` |
 | `WEAVE_BACKEND_BASE_PATH` | `WeaveConfig.backend_base_path` | `"./data/backends"` |
@@ -118,7 +121,7 @@ No numeric error codes. Errors are standard Python exceptions:
 | `WEAVE_NON_INTERACTIVE` | `WeaveConfig.non_interactive` | `""` (false) |
 | `WEAVE_APPROVAL_TIMEOUT_SEC` | `WeaveConfig.approval_timeout_sec` | `"300"` |
 
-### Fallback File: `~/.claude/settings-kimi.json`
+### Fallback File: Local Claude settings
 
 ```json
 {

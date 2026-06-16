@@ -177,12 +177,15 @@ For the full architecture document, see [ARCHITECTURE.md](ARCHITECTURE.md).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | -- | Anthropic API key (required) |
+| `ANTHROPIC_AUTH_TOKEN` | -- | Alternative auth token (used when `ANTHROPIC_API_KEY` is absent) |
 | `OPENAI_API_KEY` | -- | OpenAI API key (alternative) |
 | `WEAVE_MODEL` | `claude-sonnet-4-6` | Default LLM model |
 | `WEAVE_DEFAULT_BACKEND` | `claude_code` | Execution backend (`claude_code`/`codex`/`builtin`/`local`/`worktree`) |
 | `WEAVE_NON_INTERACTIVE` | `false` | Disable interactive prompts |
 | `WEAVE_PLANNER_MODEL` | -- | Override model for planner agent |
 | `WEAVE_GENERATOR_MODEL` | -- | Override model for generator agent |
+| `WEAVE_LLM_TIMEOUT` | `120` | Per-call LLM HTTP timeout in seconds (#1121) |
+| `WEAVE_CLI_MAX_CONCURRENT` | `1` | Max concurrent Claude CLI processes (#1127) |
 
 ### Project Configuration
 
@@ -233,7 +236,7 @@ The orchestrator discovers these automatically and assigns them during planning.
 | `learning/` | Execution pattern analysis and optimization |
 | `templates/` | Reusable DAG templates (YAML + variables) |
 | `analysis/` | Dependency graph, impact prediction, change verification |
-| `visualizer/` | Web console (FastAPI + WebSocket) |
+| `weave_ui/` | Web console / Weave UI dashboard (Vue 3 SPA + FastAPI + WebSocket) |
 | `backend/` | Execution backend (local/worktree) + sandbox providers |
 | `control_plane/` | Job queue, worker, execution hooks, approval tickets |
 | `mcp/` | Model Context Protocol client (stdio transport) |

@@ -208,7 +208,7 @@ frequency_bonus  = 1.0 + min(access_count, 10) × 0.1
 
 ### Imports From
 - `core/models.py` — MemoryEntry, MemoryScope, MemoryType, EventType
-- `core/config.py` — MemoryConfig
+- `core/config/` (domains.py) — MemoryConfig
 
 ### Imported By
 - `agent/agent_pool.py` — Memory injection and extraction hooks

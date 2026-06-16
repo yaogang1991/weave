@@ -40,7 +40,10 @@ Complete reference for all environment variables, configuration options, and CLI
 |----------|---------|-------------|
 | `WEAVE_EVENT_STORE` | `./data/events` | Path to event log directory |
 | `WEAVE_ARTIFACT_PATH` | `./data/artifacts` | Path to artifacts directory |
-| `WEAVE_AGENT_TIMEOUT` | `120` | Timeout per agent execution in seconds |
+| `WEAVE_AGENT_TIMEOUT` | `300` | Timeout per agent/node execution in seconds (legacy; prefer `WEAVE_NODE_TIMEOUT`) |
+| `WEAVE_NODE_TIMEOUT` | `300` | Default node execution timeout in seconds |
+| `WEAVE_LLM_TIMEOUT` | `120` | Per-call LLM HTTP timeout in seconds (#1121) |
+| `WEAVE_CLI_MAX_CONCURRENT` | `1` | Max concurrent Claude CLI processes (#1127) |
 | `WEAVE_MAX_CONTEXT_TOKENS` | `100000` | Token threshold for context truncation |
 
 ### Multi-Model Routing (M3.1)
@@ -80,11 +83,13 @@ Complete reference for all environment variables, configuration options, and CLI
 
 ### External Config
 
-The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`.
+The system also reads from a local Claude settings file (if present) as a fallback for `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL`.
 
 ---
 
-## Configuration Models (`core/config.py`)
+## Configuration Models (`core/config/` package)
+
+> Configuration was split from a single `core/config.py` into the `core/config/` package (#917): `__init__.py` (re-exports), `env.py`, `llm.py`, `timeout.py`, `domains.py`, `root.py`. `from core.config import X` continues to work unchanged.
 
 ### LLMConfig
 
@@ -96,14 +101,15 @@ The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANT
 | `base_url` | `str` | `""` | Custom API base URL |
 | `max_tokens` | `int` | `4096` | Max tokens per response |
 | `temperature` | `float` | `0.3` | Sampling temperature |
-| `timeout` | `int` | `120` | Request timeout in seconds |
+| `timeout` | `int` | `120` | Request timeout in seconds (`WEAVE_LLM_TIMEOUT`, #1121) |
+| `max_concurrent_api` | `int` | `0` | Max concurrent API calls across parallel nodes (`WEAVE_MAX_CONCURRENT_API`; 0 = unlimited) |
 
 ### SandboxConfig
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | `bool` | `True` | Enable sandbox |
-| `runtime` | `str` | `"docker"` | Runtime: `docker`, `bubblewrap`, `direct` |
+| `runtime` | `str` | `"local"` | Runtime: `local` or `docker` (docker not yet implemented) |
 | `image` | `str` | `"python:3.11-slim"` | Docker image |
 | `network_mode` | `str` | `"none"` | Network mode: `none` or `bridge` |
 | `memory_limit` | `str` | `"512m"` | Memory limit |
@@ -115,8 +121,9 @@ The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANT
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `servers` | `list[dict]` | `[]` | MCP server configurations |
-| `auto_discover` | `bool` | `False` | Auto-discover MCP servers |
+| `servers` | `list[MCPServerConfig]` | `[]` | MCP server configurations |
+| `auto_discover` | `bool` | `False` | Auto-discover MCP servers (`WEAVE_MCP_AUTO_DISCOVER`) |
+| `connection_timeout` | `int` | `30` | Seconds to wait for server startup (`WEAVE_MCP_CONNECTION_TIMEOUT`) |
 
 ### WeaveConfig
 
@@ -137,10 +144,22 @@ The system also reads from `~/.claude/settings-kimi.json` as a fallback for `ANT
 | `risk_backend_map` | `dict` | *(see env vars)* | Risk level → backend mapping |
 | `non_interactive` | `bool` | `False` | Non-interactive mode |
 | `approval_timeout_sec` | `int` | `300` | Approval ticket timeout |
+| `cleanup_policy` | `str` | `"on_success"` | Worktree cleanup: `on_success`/`always`/`never` (`WEAVE_CLEANUP_POLICY`) |
 | `model_routing` | `ModelRoutingConfig` | *(see below)* | M3.1: Multi-model routing |
 | `memory` | `MemoryConfig` | *(see below)* | M3.2: Agent memory |
 | `learning` | `LearningConfig` | *(see below)* | M3.3: Self-learning |
 | `impact` | `ImpactConfig` | *(see below)* | M3.5: Impact analysis |
+| `node_timeout` | `NodeTimeoutConfig` | *(see below)* | Per-agent-type node/stall/activity timeouts |
+| `budget` | `BudgetConfig` | *(see below)* | M4.2: Token budget control |
+| `token_estimation` | `TokenEstimationConfig` | *(see below)* | M4.6: Pre-execution token estimation |
+| `codex` | `CodexBackendConfig` | *(see below)* | M4.4: Codex CLI backend |
+| `claude_code` | `ClaudeCodeConfig` | *(see below)* | M4.1: Claude Code backend |
+| `observability` | `ObservabilityConfig` | *(see below)* | M5.1: OTel tracing |
+| `watchdog` | `WatchdogConfig` | *(see below)* | M2.0: Heartbeat watchdog |
+| `default_agent_backend` | `str` | `"claude_code"` | Default agent backend (`WEAVE_DEFAULT_AGENT_BACKEND`) |
+| `pass_threshold` | `float` | `7.0` | Default evaluation pass threshold (`WEAVE_PASS_THRESHOLD`, 0–10) |
+| `run_timeout_sec` | `int` | `1800` | Per-run wall-clock timeout (`WEAVE_RUN_TIMEOUT_SEC`) |
+| `auto_format_before_eval` | `bool` | `False` | Auto-format before lint (`WEAVE_AUTO_FORMAT_BEFORE_EVAL`) |
 
 ### ModelRoutingConfig (M3.1)
 
@@ -176,6 +195,8 @@ model_routing:
 | `retrieval_limit` | `int` | `10` | Max memories per prompt (≥1) |
 | `decay_half_life_days` | `float` | `30.0` | Relevance decay half-life (≥1.0) |
 | `auto_store` | `bool` | `True` | Auto-extract learnings after task |
+| `embedding_provider` | `str` | `"local"` | Embedding provider: `local` or `openai` (#508) |
+| `semantic_search_enabled` | `bool` | `True` | Use semantic search for retrieval (#508) |
 
 ### LearningConfig (M3.3)
 
@@ -197,6 +218,70 @@ model_routing:
 | `max_predicted_files` | `int` | `50` | Max predicted files (≥1) |
 | `confidence_threshold` | `float` | `0.5` | Min confidence threshold (0.0–1.0) |
 | `base_path` | `str` | `"./data/impact"` | Analysis data directory |
+
+### NodeTimeoutConfig (M6.2 / M4.5)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `default_timeout` | `int` | `300` | Default node timeout in seconds (`WEAVE_NODE_TIMEOUT`, falls back to `WEAVE_AGENT_TIMEOUT`) |
+| `overrides` | `dict[str, int]` | `{generator: 600, evaluator: 480}` | Per-agent-type timeout (`WEAVE_NODE_TIMEOUT_GENERATOR` / `WEAVE_NODE_TIMEOUT_EVALUATOR`) |
+| `stall_timeout` | `int` | `120` | Kill node if no progress for N seconds (`WEAVE_STALL_TIMEOUT`) |
+| `activity_timeout` | `int` | `600` | Semantic inactivity timeout for CLI backends (`WEAVE_ACTIVITY_TIMEOUT`) |
+| `backend_stall_multipliers` | `dict[str, float]` | `{claude_code: 2.5}` | Per-backend stall multiplier for slow third-party APIs (`WEAVE_BACKEND_STALL_MULTIPLIER_CLAUDE_CODE`, must be ≥1.0, #1106) |
+| `eval_scale` | `EvalTimeoutScaleConfig` | *(see code)* | Dynamic evaluator timeout scaling (`WEAVE_EVAL_TIMEOUT_*`) |
+
+### WatchdogConfig (M2.0)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable watchdog (`WEAVE_WATCHDOG_ENABLED`) |
+| `heartbeat_interval_sec` | `float` | `30.0` | Heartbeat interval (`WEAVE_WATCHDOG_INTERVAL`) |
+| `heartbeat_miss_threshold` | `int` | `12` | Misses before unhealthy (`WEAVE_WATCHDOG_THRESHOLD`) |
+| `alert_threshold_fraction` | `float` | `0.5` | Fraction at which `heartbeat_missed` fires (`WEAVE_WATCHDOG_ALERT_FRACTION`) |
+
+### BudgetConfig (M4.2)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable budget control (`WEAVE_BUDGET_ENABLED`) |
+| `total_tokens` | `int` | `0` | Total token budget per run; 0 = unlimited (`WEAVE_BUDGET_TOKENS`) |
+| `warning_threshold` | `float` | `0.8` | Emit warning at this fraction (`WEAVE_BUDGET_WARNING_THRESHOLD`) |
+| `per_node_token_limit` | `int` | `0` | Per-node token limit; 0 = unlimited (`WEAVE_BUDGET_PER_NODE_TOKENS`) |
+
+### ClaudeCodeConfig (M4.1 / M6.1)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `False` | Enable Claude Code backend (`WEAVE_CLAUDE_CODE_ENABLED`) |
+| `cli_path` | `str` | `"claude"` | Path to claude CLI binary (`WEAVE_CLAUDE_CODE_PATH`) |
+| `permission_mode` | `str` | `"default"` | `default` / `plan` / `bypassPermissions` |
+| `max_budget_usd` | `float` | `0.0` | Max USD budget per node (0 = unlimited) |
+| `timeout_override` | `int` | `0` | Per-node timeout override in seconds (0 = use node_timeout) |
+
+### CodexBackendConfig (M4.4)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `False` | Enable Codex backend (`WEAVE_CODEX_ENABLED`) |
+| `binary_path` | `str` | `"codex"` | Path to codex binary (`WEAVE_CODEX_BINARY_PATH`) |
+| `model` | `str` | `"codex-mini"` | Codex model (`WEAVE_CODEX_MODEL`) |
+| `sandbox_mode` | `str` | `"workspace-write"` | Sandbox mode (`WEAVE_CODEX_SANDBOX`) |
+| `timeout` | `int` | `600` | Per-invocation timeout in seconds |
+
+### ObservabilityConfig (M5.1)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable OTel tracing (`WEAVE_OBSERVABILITY_ENABLED`) |
+| `otlp_endpoint` | `str \| None` | `None` | OTLP collector endpoint (`WEAVE_OTLP_ENDPOINT`) |
+
+### TokenEstimationConfig (M4.6)
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Use Anthropic `count_tokens()` API for estimation |
+| `fallback_to_heuristic` | `bool` | `True` | Fall back to char/3.5 heuristic on API failure |
+| `target_budget` | `int` | `8192` | Default token budget per node |
 
 ### Config Loading
 
@@ -231,6 +316,7 @@ config = WeaveConfig(llm=LLMConfig(model="gpt-4", provider="openai"))
 | `execute` | `plan_file` | `--viz`, `--visualize`, `--no-browser` | Execute a saved plan |
 | `run` | `requirement` | `--project`, `--viz`, `--visualize`, `--no-browser` | Plan + execute in one step |
 | `viz` | — | `--host`, `--port`, `--no-browser` | Launch web visualizer |
+| `serve` | — | — | Start MCP server (stdio transport, #512) |
 
 ### Control Plane Commands
 
@@ -289,7 +375,7 @@ python main.py plan "Fix bug" --template fix_bug --var bug="null pointer"
 |---------|-----------|---------|-------------|
 | `impact-predict` | `requirement` | `--project` | Predict impact of a requirement |
 | `impact-graph` | — | `--project` | Show project dependency graph |
-| `impact-history` | — | `--limit` | List past impact predictions |
+| `impact-history` | — | — | List past impact predictions |
 
 ### Skills Commands (M3.6)
 

@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **M7.4: AgentSpec five-core unified model** — single Pydantic object replaces scattered agent_type config: `ContractSpec` / `BrainSpec`(+`QualityTier`) / `CapabilitySpec`(+`AgentDependency`) / `BoundarySpec`(+`ResourceBudget`+`TerminationConditions`) / `LifecycleSpec`(+`ErrorPolicy`/`ErrorStrategy`) + `InvocationOverrides`; `core/agent_spec.py`; AgentRegistry `register_spec`/`get_spec`/`list_specs`/`invoke` + `load_from_yaml()` (legacy & 5-core autodetect); `LLMRouter.get_client_for_spec()` (#1120)
+- **M8: Weave UI dashboard** — `visualizer/` renamed to `weave_ui/`; Vue 3.5 + Naive UI + Vite + Pinia SPA; core pages + APIs (#1104, #1105), browser notifications + history search (#1117), task templates + summary + annotations + replay (#1118), integration/E2E tests + Docker one-click deploy + docs (#1119), DAG visualization + live execution progress (#1130)
+- Product-output-driven DAG edge inference (#1134)
+- `core/protocols.py` — `typing.Protocol` interfaces (#920)
+- `core/dag_replan.py` — DAG replan logic extracted from `dag_engine.py`
+
+### Changed
+
+- **M7.2: Architecture cleanup & tech-debt paydown** — split `dag_engine.py` into `dag_replan.py`; removed deprecated `guarded_execute`; fixed DAGNode/DAG immutability & `core/` layering violations; ~50 test files updated for immutable `DAG.add_node/add_edge` API (#1116)
+- `AgentSpec` replaces (does not wrap) `AgentCapability`; `AgentCapability.id` → `AgentSpec.name`; `input/output_schema` `list[str]` → `dict` JSON Schema; `NodeExecutor`/`EvaluationPipeline`/`plan_validator` wired to AgentSpec (#1120)
+- Monolithic `core/config.py` split into the `core/config/` package (`env.py`, `llm.py`, `timeout.py`, `domains.py`, `root.py`, `__init__.py`); `from core.config import X` still works via re-exports (#917)
+- `visualizer/` → `weave_ui/`; updated cli imports & test mocks; removed legacy static HTML templates (#1104)
+
+### Fixed
+
+- Backend-specific stall-timeout multiplier for claude_code (slow third-party LLM APIs) (#1106, #1131)
+- Extract code artifacts from LLM text output (#1123, #1124)
+- Resolve SHARED workspace to work_dir so backends run in the target project (#1138)
+- Supersede replaced failed nodes during DAG replan (#1108, #1142)
+- Emit heartbeats during BuiltinBackend lightweight LLM calls (#1122, #1141)
+- Enforce `--timeout` wall-clock ceiling on run/execute (#1135, #1143)
+- Make `LLMConfig.timeout` configurable via `WEAVE_LLM_TIMEOUT` (#1121, #1144)
+- Make Claude CLI semaphore permit count configurable via `WEAVE_CLI_MAX_CONCURRENT` (#1127, #1145)
+- Fast-fail on thinking-token floods instead of burning wall-clock budget (#1137 track 2, #1146)
+- Recover unfenced markdown prose as README artifact (#1137 track 3, #1147)
+- Diagnostics + LLM-backend compatibility matrix for #1137 (tracks 3b & 4, #1148)
+- Promote `claude_code` permission to `bypassPermissions` in non-interactive runs (#1125, #1136, #1139)
+- `EventTimeline.vue` undefined crash — null-safety (#1130)
+- M8 code-review findings — path traversal, Event objects, state transitions, WebSocket, notifications, concurrency, types, Docker
+
+### Removed
+
+- *(Planned, not yet merged)* **M7.2.5** — design doc + 10-task implementation plan merged to main (b37650f, 1ae5716), but the actual ~1718-line deletion of M6 deprecated code (`agent/agent_pool.py`, `agent/worker.py`, `guardrails/output_monitor.py`, `core/stuck_detector.py`) remains on an unmerged worktree; the four files still exist on main.
+
 ## [0.4.0] - 2026-05-29
 
 ### Added
@@ -204,6 +242,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI interface with plan/execute/run commands
 - Reporter and audit logging
 
+[Unreleased]: https://github.com/yaogang1991/weave/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/yaogang1991/weave/compare/v0.3.7...v0.4.0
 [0.3.7]: https://github.com/yaogang1991/weave/compare/v0.3.6...v0.3.7
 [0.3.6]: https://github.com/yaogang1991/weave/compare/v0.3.5...v0.3.6

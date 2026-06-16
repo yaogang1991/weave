@@ -2,8 +2,8 @@
 
 ---
 
-**最后更新:** 2026-05-29
-**当前版本:** M6.9 (OTEL trace propagation to CLI subprocess)
+**最后更新:** 2026-06-16
+**当前版本:** M8.6 (Weave UI dashboard — DAG visualization & live execution progress)
 
 ---
 
@@ -38,6 +38,15 @@
 | **M6.7** | Session Resume + BackendResult 扩展 + bidirectional comms | ✅ 已完成 | 2026-05-29 |
 | **M6.8** | MCP Config 传递到外部 Backend | ✅ 已完成 | 2026-05-29 |
 | **M6.9** | OTEL trace propagation to CLI subprocess | ✅ 已完成 | 2026-05-29 |
+| **M7.2** | 架构清理与技术债务偿还（dag_engine 拆分、不可变 DAG API、core/ 层级修复） | ✅ 已完成 | 2026-06 |
+| **M7.2.5** | 安全移除 M6 废弃代码（~1718 行） | 🔲 规划中（设计/计划已合入，代码删除未合并） | — |
+| **M7.4** | 五核心 AgentSpec 统一模型 | ✅ 已完成 | 2026-06 |
+| **M8.1** | visualizer → weave_ui 重命名 + Vue 3 前端初始化 | ✅ 已完成 | 2026-06 |
+| **M8.2** | 核心页面 + 补充 API（任务提交/仪表盘/详情） | ✅ 已完成 | 2026-06 |
+| **M8.3** | 浏览器通知 + 历史全文搜索 | ✅ 已完成 | 2026-06 |
+| **M8.4** | 任务模板库 + 摘要 + 标注 + 执行回放 | ✅ 已完成 | 2026-06 |
+| **M8.5** | 集成/E2E 测试 + Docker 一键部署 + 用户文档 | ✅ 已完成 | 2026-06 |
+| **M8.6** | DAG 可视化 + 实时执行进度 | ✅ 已完成 | 2026-06 |
 
 ---
 
@@ -169,7 +178,7 @@ MemoryType:  FACT | EXPERIENCE | PREFERENCE | CONTEXT
 ### 核心模块
 
 - ✅ `core/models.py` — MemoryEntry, MemoryScope, MemoryType 模型 + EventType 扩展
-- ✅ `core/config.py` — MemoryConfig 配置（TTL、容量、检索限制）
+- ✅ `core/config/` — MemoryConfig 配置（TTL、容量、检索限制）
 - ✅ `memory/store.py` — 原子写入持久化存储（文件级别隔离）
   - 目录布局: global/agents/{type}/sessions/{id}/
   - CRUD: store/get/update/delete
@@ -222,7 +231,7 @@ DAG 节点间: share_with_downstream() → 上游记忆共享给下游 Agent
 ### 核心模块
 
 - ✅ `core/models.py` — LearningInsight, LearningCategory, InsightType 模型 + EventType 扩展
-- ✅ `core/config.py` — LearningConfig 配置（分析间隔、置信度阈值、最大洞察数）
+- ✅ `core/config/` — LearningConfig 配置（分析间隔、置信度阈值、最大洞察数）
 - ✅ `learning/analyzer.py` — 执行模式分析引擎
   - 失败模式分析（高频错误类别、低成功率 Agent）
   - 成功模式分析（有效策略识别）
@@ -306,7 +315,7 @@ python main.py run "Build API" --template build_api --var feature=Todo
 ### 核心模块
 
 - ✅ `core/models.py` — ImpactRiskLevel, ImpactScope, VerificationResult 模型 + EventType 扩展
-- ✅ `core/config.py` — ImpactConfig 配置（覆盖率阈值、最大预测文件数）
+- ✅ `core/config/` — ImpactConfig 配置（覆盖率阈值、最大预测文件数）
 - ✅ `analysis/dependency_graph.py` — 文件级依赖图（ast 解析 Python import）
   - build() — 扫描项目构建双向依赖图
   - get_dependents()/get_dependencies() — 传递性依赖查询
@@ -400,7 +409,7 @@ python main.py impact-history
 
 - ✅ `core/node_executor.py` — pre_check/post_check 机制（从 tool-call 级提升到 node 级）
 - ✅ `agent/backends/stderr_tail.py` — StderrTail: 尾随 stderr 提取进度事件
-- ✅ `core/config.py` — NodeTimeoutConfig 增加动态复杂度缩放的 `stall_timeout`
+- ✅ `core/config/` — NodeTimeoutConfig 增加动态复杂度缩放的 `stall_timeout`
 
 ### M6.3 — LightweightLLMCaller + BackendRegistry 重构
 
@@ -453,7 +462,67 @@ python main.py impact-history
 
 ---
 
+## M7 — Architecture Cleanup & AgentSpec
+
+**目标:** 偿还技术债务、清理 M6 废弃代码，并引入统一的 AgentSpec 模型替代散落的 agent_type 配置。
+
+### M7.2 — Architecture Cleanup & Tech-Debt Payoff
+
+- ✅ `core/dag_replan.py` — 从 `dag_engine.py` 拆分 replan 逻辑
+- ✅ 移除废弃 `guarded_execute` 方法
+- ✅ 修复 DAGNode/DAG 不可变性违规与 core/ 层级违规
+- ✅ ~50 个测试文件适配不可变 `DAG.add_node/add_edge` API
+- ✅ 补齐 `_classify_failure` 等向后兼容 re-export (#1116)
+
+### M7.2.5 — Safely Remove M6 Deprecated Code（规划中）
+
+- 📄 设计文档与 10 任务实现计划已合入 main（b37650f, 1ae5716）
+- 🔲 实际代码删除（~1718 行：`agent/agent_pool.py`、`agent/worker.py`、`guardrails/output_monitor.py`、`core/stuck_detector.py`）仍在未合并 worktree，未开 GitHub PR
+- ⚠️ main 上这 4 个文件目前仍存在
+
+### M7.4 — Five-Core AgentSpec Unified Model
+
+- ✅ `core/agent_spec.py` — `AgentSpec` + 5 正交子模型：`ContractSpec` / `BrainSpec`(+`QualityTier`) / `CapabilitySpec`(+`AgentDependency`) / `BoundarySpec`(+`ResourceBudget`+`TerminationConditions`) / `LifecycleSpec`(+`ErrorPolicy`/`ErrorStrategy`) + `InvocationOverrides`
+- ✅ `AgentSpec` 替换（非包装）`AgentCapability`，提供 `to_capability()`/`from_capability()` 互操作
+- ✅ `AgentRegistry` 迁移为 AgentSpec 内部存储：`register_spec`/`get_spec`/`list_specs`/`invoke` + `load_from_yaml()`（自动识别 legacy-vs-5core 格式）
+- ✅ `LLMRouter.get_client_for_spec(spec)` 按 model_id / quality_tier 路由
+- ✅ `NodeExecutor`/`EvaluationPipeline`/`plan_validator` 接入 AgentSpec (#1120)
+
+---
+
+## M8 — Weave UI Dashboard
+
+**目标:** 为多 Agent 任务编排提供 Web 仪表盘。`visualizer/` 重命名为 `weave_ui/`，FastAPI 后端服务 Vue 3 SPA。
+
+### M8.1 — Rename & Frontend Init (#1104)
+- ✅ `visualizer/` → `weave_ui/`，更新 cli/main.py 导入与测试
+- ✅ 删除旧静态 HTML 模板，初始化 Vue 3.5 + Naive UI + Vite + Pinia SPA
+
+### M8.2 — Core Pages + APIs (#1105)
+- ✅ 后端：`POST /api/jobs`、`GET/POST /api/workspaces`、`GET /api/jobs/{id}/summary`
+- ✅ 前端：DashboardView / TasksView / JobDetailView + Pinia stores
+
+### M8.3 — Notifications + History Search (#1117)
+- ✅ 浏览器通知：`/api/notification-preferences` 配置矩阵 + STUCK 检测（15min 无事件）
+- ✅ 历史全文搜索：`GET /api/search` 内存过滤 job/session/annotation
+
+### M8.4 — Templates + Summary + Annotations + Replay (#1118)
+- ✅ 任务模板 CRUD（`/api/task-templates`，YAML + `{{variable}}`）
+- ✅ Markdown 摘要面板、任务标注（tags/notes/rating）、执行回放垂直时间线
+
+### M8.5 — Integration Tests + Docker + Docs (#1119)
+- ✅ pytest+httpx API 测试、可选 Playwright E2E、可选 Vitest 组件测试
+- ✅ 多阶段 Docker 一键部署 + Makefile ui-dev/ui-build/ui-start + `docs/weave-ui.md`
+
+### M8.6 — DAG Visualization + Live Progress (#1130)
+- ✅ `GET /api/sessions/{id}/dag` + `_build_dag_response`
+- ✅ `DagView.vue` 纯 CSS+SVG 拓扑分层 DAG，边按状态着色，WebSocket 实时节点更新
+
+---
+
 ## 完整文件清单
+
+> **注:** 以下清单为 M6 时期快照；M7/M8 新增模块（`core/agent_spec.py`、`core/dag_replan.py`、`core/config/` 包、`weave_ui/` 等）见上文 M7/M8 章节。
 
 ```
 weave/

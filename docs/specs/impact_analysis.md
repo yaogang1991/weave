@@ -177,7 +177,7 @@ class VerificationResult(BaseModel):
 
 ### Imports From
 - `core/models.py` — ImpactRiskLevel, ImpactScope, VerificationResult
-- `core/config.py` — ImpactConfig
+- `core/config/` (domains.py) — ImpactConfig
 - `memory/manager.py` — Historical prediction lookup
 
 ### Imported By
