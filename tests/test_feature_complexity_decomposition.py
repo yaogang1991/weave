@@ -68,13 +68,13 @@ class TestReplanPromptHasSplitGuidance:
 
 class TestGeneratorPromptHasEarlyOutputRule:
     def test_contains_early_file_output_guidance(self):
-        from agent.agent_pool import WorkerAgent
-        prompt = WorkerAgent.SYSTEM_PROMPTS["generator"]
+        from agent.prompts import SYSTEM_PROMPTS
+        prompt = SYSTEM_PROMPTS["generator"]
         assert "early" in prompt.lower() and "file" in prompt.lower()
 
     def test_guidance_about_incremental_writes(self):
-        from agent.agent_pool import WorkerAgent
-        prompt = WorkerAgent.SYSTEM_PROMPTS["generator"]
+        from agent.prompts import SYSTEM_PROMPTS
+        prompt = SYSTEM_PROMPTS["generator"]
         # Should mention writing files incrementally/per-feature, not waiting
         prompt_lower = prompt.lower()
         assert ("write" in prompt_lower and

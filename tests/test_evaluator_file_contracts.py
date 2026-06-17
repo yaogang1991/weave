@@ -7,8 +7,6 @@ Covers:
 - Planner prompt includes file_pattern description
 - Generator prompt includes file path contract rule
 """
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -181,8 +179,8 @@ class TestPromptUpdates:
         assert "file_exists vs file_pattern" in prompt or "file_exists" in prompt
 
     def test_generator_prompt_has_path_contract(self):
-        from agent.agent_pool import WorkerAgent
-        gen_prompt = WorkerAgent.SYSTEM_PROMPTS["generator"]
+        from agent.prompts import SYSTEM_PROMPTS
+        gen_prompt = SYSTEM_PROMPTS["generator"]
         assert "FILE PATH CONTRACT" in gen_prompt
         assert "EXACT path" in gen_prompt
 

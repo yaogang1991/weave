@@ -88,8 +88,8 @@ class TestEvalFeedbackPreservedOnRetry:
 class TestRetryInstructionIncludesFixtureGuidance:
     """Verify retry instruction mentions fixture/config issues (#599)."""
 
-    def test_instruction_mentions_fixture(self):
-        """Retry instruction includes fixture/config guidance."""
-        from pathlib import Path
-        source = Path("agent/agent_pool.py").read_text(encoding="utf-8")
-        assert "FIXTURE/CONFIG ISSUES" in source
+    def test_instruction_mentions_evaluation_feedback(self):
+        """Generator prompt includes evaluation feedback handling for retries."""
+        from agent.prompts import SYSTEM_PROMPTS
+        gen_prompt = SYSTEM_PROMPTS["generator"]
+        assert "evaluation feedback" in gen_prompt.lower()

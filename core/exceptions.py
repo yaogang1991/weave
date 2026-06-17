@@ -254,8 +254,8 @@ class RateLimitError(InfrastructureError):
     Propagation chain:
         llm_client.call() — retries exhausted under rate-limit
           -> raises RateLimitError
-        -> AgentWorker.run() — propagates
-        -> agent_pool._run_with_tools() — propagates
+        -> backend.execute() — propagates
+        -> LLM call loop — propagates
         -> DAGEngine._execute_single_node() — marks FAILED without retry cost
         -> RunService.run_job() — classifies as "rate_limit"
     """
@@ -345,7 +345,7 @@ class PendingApprovalError(WorkflowError):
     """Raised when a tool call requires human approval before execution.
 
     Propagation chain:
-        WorkerAgent._execute_tool()
+        tool execution
           -> Guardrails.check_and_execute() creates ticket
           -> raises PendingApprovalError
         -> DAGEngine._execute_single_node() (transparent, no retry)

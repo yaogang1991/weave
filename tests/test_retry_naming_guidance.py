@@ -11,20 +11,18 @@ from __future__ import annotations
 
 def test_generator_prompt_has_import_verification_rule():
     """Generator system prompt should include import verification rule."""
-    from agent.agent_pool import WorkerAgent
+    from agent.prompts import SYSTEM_PROMPTS
 
-    prompts = WorkerAgent.SYSTEM_PROMPTS
-    gen_prompt = prompts["generator"]
+    gen_prompt = SYSTEM_PROMPTS["generator"]
     assert "IMPORT VERIFICATION" in gen_prompt
     assert "from mylib.module import ClassName" in gen_prompt
 
 
 def test_generator_prompt_has_async_rule():
     """Generator system prompt should include async awareness rule."""
-    from agent.agent_pool import WorkerAgent
+    from agent.prompts import SYSTEM_PROMPTS
 
-    prompts = WorkerAgent.SYSTEM_PROMPTS
-    gen_prompt = prompts["generator"]
+    gen_prompt = SYSTEM_PROMPTS["generator"]
     assert "ASYNC AWARENESS" in gen_prompt
     assert "asyncio.run" in gen_prompt
 

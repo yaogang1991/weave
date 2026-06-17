@@ -6,7 +6,7 @@ a compromised node from propagating injection payloads to downstream nodes.
 
 This is the third defense layer:
 1. Input layer: detect injection in user input (guardrails/injection.py)
-2. Output layer: detect injection in tool output (guardrails/output_monitor.py)
+2. Output layer: detect injection in tool output
 3. Isolation layer: detect injection in inter-node handoffs (this module)
 
 When injection is detected in a handoff artifact:

@@ -61,20 +61,23 @@ async def test_orchestrator_generates_valid_dag():
 
 @pytest.mark.asyncio
 async def test_shortest_dag_path_executes():
-    """Execute a simple DAG with real LLM: planner → generator."""
+    """Execute a simple DAG with real LLM: planner -> generator."""
+    import uuid
+
     from core.config import WeaveConfig
     from core.agent_registry import AgentRegistry
+    from core.exceptions import AgentExecutionError
+    from core.models import FailureDecision
     from session.store import SessionStore
     from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
     from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
-    from agent.agent_pool import AgentPool
-    from core.models import FailureDecision
-    from tools.registry import ToolRegistry
+    from agent.backends.builtin import BuiltinBackend
+    from agent.backends.registry import BackendRegistry
+    from agent.lightweight_llm_caller import LightweightLLMCaller
 
     config = WeaveConfig.from_env()
     store = SessionStore(config.event_store_path)
     registry = AgentRegistry()
-    tool_registry = ToolRegistry()
 
     orchestrator = IntelligentOrchestrator(
         llm_config=config.llm,
@@ -84,29 +87,40 @@ async def test_shortest_dag_path_executes():
 
     dag = await orchestrator.plan("Write a Python one-liner: print('hi')")
 
-    # Build engine with real agent pool
-    import uuid
-
     session_id = str(uuid.uuid4())[:8]
-    pool = AgentPool(
-        llm_config=config.llm,
+
+    # M7.2.5: Build backend stack instead of removed AgentPool.
+    lightweight_caller = LightweightLLMCaller(
+        config=config.llm,
         session_store=store,
-        agent_registry=registry,
-        tool_registry=tool_registry,
-        max_iterations=3,
     )
+    builtin_backend = BuiltinBackend(
+        lightweight_caller=lightweight_caller,
+        session_store=store,
+        session_id=session_id,
+    )
+    backend_registry = BackendRegistry(builtin=builtin_backend)
+
+    # Stub for the removed AgentPool.get_executor() path -- should never
+    # be reached because backend_registry is provided.
+    async def _removed_agent_executor(node, artifacts, **kwargs):
+        raise AgentExecutionError(
+            "Legacy agent_executor called after M7.2.5 removal."
+        )
 
     async def abort_handler(dag, node_id, error):
         return FailureDecision(action="abort", reasoning="integration test")
 
     engine = DAGExecutionEngine(
-        agent_executor=pool.get_executor(session_id),
+        agent_executor=_removed_agent_executor,
         failure_handler=abort_handler,
         session_id=session_id,
         config=DAGEngineConfig(
             max_parallel=2,
             artifact_path=config.artifact_path,
+            default_agent_backend="builtin",
         ),
+        backend_registry=backend_registry,
     )
 
     result = await engine.execute(dag)

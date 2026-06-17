@@ -6,6 +6,7 @@ import pytest
 
 from core.backend_models import BackendContext, BackendStatus
 from core.dag_models import DAGNode
+from agent.backends.builtin import BuiltinBackend
 from agent.backends.registry import BackendRegistry
 
 
@@ -19,15 +20,11 @@ def _make_node(**kwargs) -> DAGNode:
     return DAGNode(**defaults)
 
 
-def _make_pool_mock() -> MagicMock:
-    pool = MagicMock()
-    executor = AsyncMock(return_value={
-        "summary": "builtin result",
-        "artifacts": ["main.py"],
-        "output": "done",
-    })
-    pool.get_executor = MagicMock(return_value=executor)
-    return pool
+def _make_builtin_backend() -> BuiltinBackend:
+    mock_caller = MagicMock()
+    mock_caller.call = AsyncMock(return_value="builtin result")
+    mock_caller.token_usage = {"input_tokens": 0, "output_tokens": 0}
+    return BuiltinBackend(lightweight_caller=mock_caller, session_id="s1")
 
 
 class TestClaudeCodeBackendRegistryIntegration:
@@ -38,8 +35,8 @@ class TestClaudeCodeBackendRegistryIntegration:
             ClaudeCodeRuntimeConfig,
         )
 
-        pool = _make_pool_mock()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        builtin = _make_builtin_backend()
+        registry = BackendRegistry(builtin=builtin)
         config = ClaudeCodeRuntimeConfig()
         backend = ClaudeCodeBackend(config=config)
         registry.register("claude_code", backend)
@@ -87,8 +84,8 @@ class TestClaudeCodeBackendRegistryIntegration:
             ClaudeCodeRuntimeConfig,
         )
 
-        pool = _make_pool_mock()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        builtin = _make_builtin_backend()
+        registry = BackendRegistry(builtin=builtin)
         config = ClaudeCodeRuntimeConfig(cli_path="/nonexistent/claude")
         backend = ClaudeCodeBackend(config=config)
         backend._sdk_available = False
@@ -105,8 +102,8 @@ class TestClaudeCodeBackendRegistryIntegration:
 
     @pytest.mark.asyncio
     async def test_unknown_backend_falls_back_to_builtin(self):
-        pool = _make_pool_mock()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        builtin = _make_builtin_backend()
+        registry = BackendRegistry(builtin=builtin)
 
         node = _make_node()
         ctx = BackendContext(node=node, session_id="s1")

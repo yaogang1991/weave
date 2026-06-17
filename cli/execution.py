@@ -15,11 +15,9 @@ from core.config import WeaveConfig, _get_non_interactive_env
 from core.models import DAG, DAGNode, EventType
 from core.exceptions import PendingApprovalError
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
-from agent.agent_pool import AgentPool
 from session.store import SessionStore
 from tools.registry import ToolRegistry
 from guardrails.policy import Guardrails, GuardrailPolicy, PermissionMode
-from control_plane.approval import ApprovalRepository
 
 from cli.utils import (
     _resolve_project_path,
@@ -306,23 +304,6 @@ def _build_runtime(
         except Exception:
             pass
 
-    # Agent pool
-    approval_repo = ApprovalRepository()
-    pool = AgentPool(
-        llm_config=config.llm,
-        session_store=store,
-        agent_registry=registry,
-        tool_registry=tool_registry,
-        guardrails=guardrails,
-        max_iterations=args.max_iterations,
-        timeout=config.agent_timeout,
-        max_context_tokens=config.max_context_tokens,
-        llm_router=llm_router,
-        memory_manager=memory_manager,
-        job_id=f"cli_{session_id}",
-        approval_repo=approval_repo,
-    )
-
     # Orchestrator
     orchestrator = IntelligentOrchestrator(
         config.llm, store, registry,
@@ -347,7 +328,20 @@ def _build_runtime(
     wd_cfg = config.watchdog
     from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
     from agent.backends.registry import BackendRegistry
-    backend_registry = BackendRegistry.from_pool(pool=pool, session_id=session_id)
+    from agent.backends.builtin import BuiltinBackend
+    from agent.lightweight_llm_caller import LightweightLLMCaller
+    lightweight_caller = LightweightLLMCaller(
+        config=config.llm,
+        session_store=store,
+        llm_router=llm_router,
+    )
+    backend_registry = BackendRegistry(
+        builtin=BuiltinBackend(
+            lightweight_caller=lightweight_caller,
+            session_store=store,
+            session_id=session_id,
+        )
+    )
 
     # #1125/#1136: non-interactive runs need bypassPermissions or the Claude
     # CLI cannot write files (it has no tty to prompt). Computed once and
@@ -397,7 +391,7 @@ def _build_runtime(
         budget_manager = BudgetManager(BudgetConfig(total_tokens=budget_tokens))
 
     engine = DAGExecutionEngine(
-        agent_executor=pool.get_executor(session_id),
+        agent_executor=None,  # M7.2.5: node execution via BackendRegistry
         failure_handler=orchestrator.adapt_to_failure,
         replan_handler=lambda dag_ref, failed_id: orchestrator.replan(
             dag_ref, failed_id,
@@ -433,7 +427,6 @@ def _build_runtime(
 
     return {
         "engine": engine,
-        "pool": pool,
         "orchestrator": orchestrator,
         "evaluator": evaluator,
     }

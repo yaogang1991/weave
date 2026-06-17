@@ -1,4 +1,4 @@
-"""BuiltinBackend -- wraps AgentPool or LightweightLLMCaller for node execution."""
+"""BuiltinBackend -- wraps LightweightLLMCaller for single-shot node execution."""
 from __future__ import annotations
 
 import asyncio
@@ -8,7 +8,7 @@ import logging
 import platform
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core.backend_models import BackendContext, BackendResult, BackendStatus
 from core.exceptions import AgentExecutionError
@@ -22,21 +22,21 @@ _UNSET = object()
 
 
 class BuiltinBackend(AgentBackend):
-    """Agent backend that can use either LightweightLLMCaller or AgentPool.
+    """Agent backend that uses LightweightLLMCaller for single-shot node execution.
 
-    When a ``lightweight_caller`` is provided, uses single-shot LLM calls
-    for planner/evaluator nodes (no tool loop). Falls back to the legacy
-    AgentPool executor closure when ``lightweight_caller`` is not provided,
-    preserving full backward compatibility.
-
-    For generator nodes, the pool-based path is always used because
-    generators need the full tool loop (read/write/edit/bash/glob/grep/git).
+    Since M7.2.5 the BuiltinBackend is lightweight-only: planner/evaluator
+    nodes run via single-shot LLM calls (no tool loop). Generator nodes
+    execute through external backends (claude_code/codex) via the
+    BackendRegistry; when an external backend is unavailable the registry
+    falls back here, where the lightweight path produces a text response
+    (no file writes). NodeExecutor's quality gate (zero-output detection)
+    and DAGEngine's ``adapt_to_failure()`` recover from that degraded path.
     """
 
     # #1122: Interval between heartbeats emitted while awaiting an LLM
     # response in the lightweight path. Must stay well below the node's
     # stall_timeout (default ~120s) so the StallDetector does not kill
-    # planner/evaluator nodes during long LLM calls.
+    # planner/annotator/evaluator nodes during long LLM calls.
     _HEARTBEAT_INTERVAL_SEC = 15.0
 
     def __init__(
@@ -44,24 +44,10 @@ class BuiltinBackend(AgentBackend):
         lightweight_caller: Any = _UNSET,
         session_store: Any = None,
         session_id: str = "",
-        pool: Any = None,
     ) -> None:
         self._lightweight_caller = lightweight_caller
         self._session_store = session_store
         self._session_id = session_id
-        self._pool = pool
-        self._executor_closure: Callable | None = None
-
-    def _ensure_closure(self) -> Callable:
-        """Lazily create the executor closure from AgentPool."""
-        if self._executor_closure is None:
-            if self._pool is None:
-                raise AgentExecutionError(
-                    "BuiltinBackend: no pool available for executor closure. "
-                    "Provide either lightweight_caller or pool."
-                )
-            self._executor_closure = self._pool.get_executor(self._session_id)
-        return self._executor_closure
 
     def _get_system_prompt(self, agent_type: str) -> str:
         """Resolve the system prompt for a given agent type."""
@@ -188,48 +174,26 @@ class BuiltinBackend(AgentBackend):
             metadata={"token_usage": dict(self._lightweight_caller.token_usage)},
         )
 
-    async def _execute_pool(self, context: BackendContext) -> BackendResult:
-        """Execute via the built-in AgentPool executor closure."""
-        closure = self._ensure_closure()
-
-        result_dict = await closure(
-            context.node,
-            context.artifacts,
-            cancel_event=context.cancel_event,
-            progress_callback=context.progress_callback,
-            workspace_path=context.workspace_path,
-        )
-        if not result_dict:
-            result_dict = {}
-        return BackendResult(
-            status=BackendStatus.COMPLETED,
-            summary=result_dict.get("summary", ""),
-            artifacts=result_dict.get("artifacts", []),
-            output=result_dict.get("output", ""),
-        )
-
     async def execute(self, context: BackendContext) -> BackendResult:
-        """Execute via LightweightLLMCaller or AgentPool.
+        """Execute via LightweightLLMCaller (single-shot LLM call).
 
-        Uses LightweightLLMCaller when available and the node type is suited
-        for single-shot execution (planner, evaluator). Falls back to the
-        pool-based executor for generator nodes (which need the full tool
-        loop) or when no lightweight_caller was provided.
+        BuiltinBackend is lightweight-only since M7.2.5: planner/evaluator
+        nodes run via single-shot LLM calls; generator nodes execute through
+        external backends (claude_code/codex) via the BackendRegistry. When an
+        external backend is unavailable the registry degrades to this backend,
+        where the lightweight path produces a text response for the node.
 
         Re-raises exceptions (PendingApprovalError, RateLimitError, etc.)
         so NodeExecutor's retry/timeout/cancellation logic works unchanged.
         """
-        # Determine whether to use lightweight or pool path
-        use_lightweight = (
-            self._lightweight_caller is not _UNSET
-            and self._lightweight_caller is not None
-            and context.node.agent_type in ("planner", "evaluator")
-        )
-
-        if use_lightweight:
-            return await self._execute_lightweight(context)
-
-        return await self._execute_pool(context)
+        if self._lightweight_caller is _UNSET or self._lightweight_caller is None:
+            raise AgentExecutionError(
+                "BuiltinBackend: no lightweight_caller configured. "
+                "Generator nodes require an external backend (claude_code/codex) "
+                "via BackendRegistry; planner/evaluator nodes require a "
+                "LightweightLLMCaller."
+            )
+        return await self._execute_lightweight(context)
 
     async def health_check(self) -> bool:
         """Builtin backend is always available."""

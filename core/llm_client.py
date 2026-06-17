@@ -1,9 +1,9 @@
 """
 LLMClient: Unified LLM API wrapper for Anthropic and OpenAI providers.
 
-Extracted from AgentWorker so that both AgentWorker and IntelligentOrchestrator
+Shared LLM client used by both BuiltinBackend and IntelligentOrchestrator
 can share the same LLM calling logic without the orchestrator depending on
-AgentWorker internals.
+the agent execution path.
 
 Includes built-in retry with exponential backoff for transient errors
 (rate limits, timeouts, connection issues) — transparent to all callers.

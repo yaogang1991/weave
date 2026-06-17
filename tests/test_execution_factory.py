@@ -2,8 +2,8 @@
 Comprehensive tests for control_plane/execution_factory.py.
 
 ExecutionFactory builds the object graph for DAG execution:
-IntelligentOrchestrator, DAGExecutionEngine, AgentPool, Guardrails,
-ToolRegistry, EvaluatorEngine, and BackendRegistry.
+IntelligentOrchestrator, DAGExecutionEngine, BuiltinBackend,
+BackendRegistry, and EvaluatorEngine.
 
 All external dependencies are mocked. Tests cover:
 - Factory construction (defaults and custom parameters)
@@ -32,7 +32,6 @@ from core.config.timeout import WatchdogConfig
 from core.guardrail_models import (
     GuardrailPolicy,
     PermissionMode,
-    PersonalGuardrailPolicy,
 )
 from session.store import SessionStore
 
@@ -487,12 +486,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_returns_engine_instance(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -506,7 +503,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         mock_engine = MagicMock()
         MockEngine.return_value = mock_engine
 
@@ -525,191 +521,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
-    @patch("control_plane.execution_factory.inject_token_estimator", create=True)
-    def test_non_interactive_uses_dont_ask_mode(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
-        MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
-        MockEval, MockConfig,
-    ):
-        """In non-interactive mode, default permission mode is DONT_ASK."""
-        MockConfig.from_env.return_value = MagicMock(
-            pass_threshold=7.0,
-            auto_format_before_eval=False,
-            node_timeout=MagicMock(),
-            default_agent_backend="builtin",
-            claude_code=MagicMock(enabled=False),
-            codex=MagicMock(enabled=False),
-        )
-        MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
-        MockEngine.return_value = MagicMock()
-
-        factory = _make_factory(non_interactive=True, policy=None)
-        store = MagicMock(spec=SessionStore)
-
-        # Capture the Guardrails/PersonalGuardrails constructor args
-        with patch("control_plane.execution_factory.Guardrails") as MockGuardrails:
-            MockGuardrails.return_value = MagicMock()
-            with patch("control_plane.execution_factory.PersonalGuardrails"):
-                factory.create_execution_engine(
-                    session_id="sess-2",
-                    store=store,
-                    work_dir=Path("/tmp/work"),
-                )
-            # Find the GuardrailPolicy arg in Guardrails call
-            guardrails_call = MockGuardrails.call_args
-            policy_arg = guardrails_call[0][0]
-            assert policy_arg.mode == PermissionMode.DONT_ASK
-
-    @patch("control_plane.execution_factory.WeaveConfig")
-    @patch("control_plane.execution_factory.EvaluatorEngine")
-    @patch("control_plane.execution_factory.DAGExecutionEngine")
-    @patch("control_plane.execution_factory.LightweightLLMCaller")
-    @patch("control_plane.execution_factory.BuiltinBackend")
-    @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
-    @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
-    @patch("control_plane.execution_factory.inject_token_estimator", create=True)
-    def test_interactive_uses_accept_edits_mode(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
-        MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
-        MockEval, MockConfig,
-    ):
-        """In interactive mode, default permission mode is ACCEPT_EDITS."""
-        MockConfig.from_env.return_value = MagicMock(
-            pass_threshold=7.0,
-            auto_format_before_eval=False,
-            node_timeout=MagicMock(),
-            default_agent_backend="builtin",
-            claude_code=MagicMock(enabled=False),
-            codex=MagicMock(enabled=False),
-        )
-        MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
-        MockEngine.return_value = MagicMock()
-
-        factory = _make_factory(non_interactive=False, policy=None)
-        store = MagicMock(spec=SessionStore)
-
-        with patch("control_plane.execution_factory.Guardrails") as MockGuardrails:
-            MockGuardrails.return_value = MagicMock()
-            with patch("control_plane.execution_factory.PersonalGuardrails"):
-                factory.create_execution_engine(
-                    session_id="sess-3",
-                    store=store,
-                    work_dir=Path("/tmp/work"),
-                )
-            policy_arg = MockGuardrails.call_args[0][0]
-            assert policy_arg.mode == PermissionMode.ACCEPT_EDITS
-
-    @patch("control_plane.execution_factory.WeaveConfig")
-    @patch("control_plane.execution_factory.EvaluatorEngine")
-    @patch("control_plane.execution_factory.DAGExecutionEngine")
-    @patch("control_plane.execution_factory.LightweightLLMCaller")
-    @patch("control_plane.execution_factory.BuiltinBackend")
-    @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
-    @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
-    @patch("control_plane.execution_factory.inject_token_estimator", create=True)
-    def test_custom_policy_overrides_default(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
-        MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
-        MockEval, MockConfig,
-    ):
-        """Explicitly provided policy takes precedence over defaults."""
-        MockConfig.from_env.return_value = MagicMock(
-            pass_threshold=7.0,
-            auto_format_before_eval=False,
-            node_timeout=MagicMock(),
-            default_agent_backend="builtin",
-            claude_code=MagicMock(enabled=False),
-            codex=MagicMock(enabled=False),
-        )
-        MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
-        MockEngine.return_value = MagicMock()
-
-        custom_policy = GuardrailPolicy(mode=PermissionMode.AUTO, max_iterations=99)
-        factory = _make_factory(policy=custom_policy)
-        store = MagicMock(spec=SessionStore)
-
-        with patch("control_plane.execution_factory.Guardrails") as MockGuardrails:
-            MockGuardrails.return_value = MagicMock()
-            with patch("control_plane.execution_factory.PersonalGuardrails"):
-                factory.create_execution_engine(
-                    session_id="sess-4",
-                    store=store,
-                    work_dir=Path("/tmp/work"),
-                )
-            policy_arg = MockGuardrails.call_args[0][0]
-            assert policy_arg is custom_policy
-            assert policy_arg.mode == PermissionMode.AUTO
-
-    @patch("control_plane.execution_factory.WeaveConfig")
-    @patch("control_plane.execution_factory.EvaluatorEngine")
-    @patch("control_plane.execution_factory.DAGExecutionEngine")
-    @patch("control_plane.execution_factory.LightweightLLMCaller")
-    @patch("control_plane.execution_factory.BuiltinBackend")
-    @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
-    @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
-    @patch("control_plane.execution_factory.inject_token_estimator", create=True)
-    def test_personal_guardrail_policy_uses_personal_guardrails(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
-        MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
-        MockEval, MockConfig,
-    ):
-        """PersonalGuardrailPolicy triggers PersonalGuardrails instead of Guardrails."""
-        MockConfig.from_env.return_value = MagicMock(
-            pass_threshold=7.0,
-            auto_format_before_eval=False,
-            node_timeout=MagicMock(),
-            default_agent_backend="builtin",
-            claude_code=MagicMock(enabled=False),
-            codex=MagicMock(enabled=False),
-        )
-        MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
-        MockEngine.return_value = MagicMock()
-
-        personal_policy = PersonalGuardrailPolicy(mode=PermissionMode.DEFAULT)
-        factory = _make_factory(policy=personal_policy, approval_repo=MagicMock())
-        store = MagicMock(spec=SessionStore)
-
-        with patch("control_plane.execution_factory.Guardrails") as MockGuardrails:
-            with patch("control_plane.execution_factory.PersonalGuardrails") as MockPersonal:
-                MockPersonal.return_value = MagicMock()
-                factory.create_execution_engine(
-                    session_id="sess-5",
-                    store=store,
-                    work_dir=Path("/tmp/work"),
-                    project_dir="/tmp/project",
-                )
-                MockGuardrails.assert_not_called()
-                MockPersonal.assert_called_once()
-                call_kwargs = MockPersonal.call_args
-                assert call_kwargs[0][0] is personal_policy
-                assert call_kwargs[1]["non_interactive"] is False
-                assert call_kwargs[1]["project_dir"] == "/tmp/project"
-
-    @patch("control_plane.execution_factory.WeaveConfig")
-    @patch("control_plane.execution_factory.EvaluatorEngine")
-    @patch("control_plane.execution_factory.DAGExecutionEngine")
-    @patch("control_plane.execution_factory.LightweightLLMCaller")
-    @patch("control_plane.execution_factory.BuiltinBackend")
-    @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
-    @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_event_handler_registered_on_engine(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -723,7 +538,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         mock_engine = MagicMock()
         MockEngine.return_value = mock_engine
 
@@ -743,12 +557,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_work_dir_passed_as_string_to_engine(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -762,7 +574,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         MockEngine.return_value = MagicMock()
 
         factory = _make_factory()
@@ -782,12 +593,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_no_work_dir_passes_none(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -801,7 +610,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         MockEngine.return_value = MagicMock()
 
         factory = _make_factory()
@@ -820,12 +628,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_budget_manager_forwarded_to_engine(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -839,7 +645,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         MockEngine.return_value = MagicMock()
 
         bm = MagicMock()
@@ -858,12 +663,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_watchdog_config_reflected_in_engine_config(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -877,7 +680,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         MockEngine.return_value = MagicMock()
 
         wc = _make_watchdog_config(
@@ -903,12 +705,10 @@ class TestCreateExecutionEngine:
     @patch("control_plane.execution_factory.LightweightLLMCaller")
     @patch("control_plane.execution_factory.BuiltinBackend")
     @patch("control_plane.execution_factory.BackendRegistry")
-    @patch("control_plane.execution_factory.AgentPool")
     @patch("control_plane.execution_factory.IntelligentOrchestrator")
-    @patch("control_plane.execution_factory.ToolRegistry")
     @patch("control_plane.execution_factory.inject_token_estimator", create=True)
     def test_claude_code_backend_registered_when_enabled(
-        self, mock_inject, MockToolReg, MockOrch, MockPool,
+        self, mock_inject, MockOrch,
         MockBackendReg, MockBuiltin, MockLWCaller, MockEngine,
         MockEval, MockConfig,
     ):
@@ -934,7 +734,6 @@ class TestCreateExecutionEngine:
             codex=MagicMock(enabled=False),
         )
         MockOrch.return_value = MagicMock()
-        MockPool.return_value.get_executor.return_value = MagicMock()
         mock_backend_reg = MagicMock()
         MockBackendReg.return_value = mock_backend_reg
         MockEngine.return_value = MagicMock()
@@ -975,16 +774,13 @@ def _extract_event_handler(factory, store):
                 with patch("control_plane.execution_factory.LightweightLLMCaller", return_value=MagicMock()):
                     with patch("control_plane.execution_factory.BuiltinBackend", return_value=MagicMock()):
                         with patch("control_plane.execution_factory.BackendRegistry", return_value=MagicMock()):
-                            with patch("control_plane.execution_factory.AgentPool") as MockPool:
-                                MockPool.return_value.get_executor.return_value = MagicMock()
-                                with patch("control_plane.execution_factory.IntelligentOrchestrator", return_value=MagicMock()):
-                                    with patch("control_plane.execution_factory.ToolRegistry", return_value=MagicMock()):
-                                        factory.create_execution_engine(
-                                            session_id="sess-ev",
-                                            store=store,
-                                        )
-                                        handler = MockEngine.return_value.on_event.call_args[0][0]
-                                        return handler
+                            with patch("control_plane.execution_factory.IntelligentOrchestrator", return_value=MagicMock()):
+                                factory.create_execution_engine(
+                                    session_id="sess-ev",
+                                    store=store,
+                                )
+                                handler = MockEngine.return_value.on_event.call_args[0][0]
+                                return handler
 
 
 class TestSessionEventHandler:

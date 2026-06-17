@@ -129,7 +129,7 @@ class DAGExecutionEngine:
 
     def __init__(
         self,
-        agent_executor: Callable[[DAGNode, list[HandoffArtifact]], Awaitable[dict]],
+        agent_executor: Callable[[DAGNode, list[HandoffArtifact]], Awaitable[dict]] | None,
         failure_handler: Callable[[DAG, str, str], Awaitable[FailureDecision]],
         # #915: Tunable config grouped into DAGEngineConfig
         config: DAGEngineConfig | None = None,

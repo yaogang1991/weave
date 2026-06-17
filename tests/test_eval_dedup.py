@@ -167,13 +167,13 @@ class TestEvaluatorPrompt:
     """Evaluator agent prompt includes supplementary review guidance."""
 
     def test_prompt_mentions_automated_results(self):
-        from agent.agent_pool import WorkerAgent
-        prompt = WorkerAgent.SYSTEM_PROMPTS.get("evaluator", "")
+        from agent.prompts import SYSTEM_PROMPTS
+        prompt = SYSTEM_PROMPTS.get("evaluator", "")
         assert "AUTOMATED EVALUATION RESULTS" in prompt
 
     def test_prompt_guides_supplementary_review(self):
-        from agent.agent_pool import WorkerAgent
-        prompt = WorkerAgent.SYSTEM_PROMPTS.get("evaluator", "")
+        from agent.prompts import SYSTEM_PROMPTS
+        prompt = SYSTEM_PROMPTS.get("evaluator", "")
         assert "architecture" in prompt.lower() or "Architecture" in prompt
         # Should mention NOT blindly re-running
         assert "do not" in prompt.lower() or "Do NOT" in prompt

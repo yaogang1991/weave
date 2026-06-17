@@ -7,10 +7,6 @@ Covers:
 - Generator prompt includes trust tool results rule
 - Write tool output also mentions trust
 """
-import sys
-from pathlib import Path
-
-
 
 from tools.registry import ToolRegistry  # noqa: E402
 
@@ -117,12 +113,12 @@ class TestGeneratorPromptTrustRule:
     """Generator prompt includes Rule 15: trust tool results."""
 
     def test_generator_prompt_has_trust_rule(self):
-        from agent.agent_pool import WorkerAgent
-        prompt = WorkerAgent.SYSTEM_PROMPTS["generator"]
+        from agent.prompts import SYSTEM_PROMPTS
+        prompt = SYSTEM_PROMPTS["generator"]
         assert "TRUST TOOL RESULTS" in prompt
         assert "re-read" in prompt.lower()
 
     def test_generator_prompt_mentions_prefer_tests(self):
-        from agent.agent_pool import WorkerAgent
-        prompt = WorkerAgent.SYSTEM_PROMPTS["generator"]
+        from agent.prompts import SYSTEM_PROMPTS
+        prompt = SYSTEM_PROMPTS["generator"]
         assert "tests or lint over re-reading" in prompt

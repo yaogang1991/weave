@@ -2,7 +2,7 @@
 
 Tracks "last meaningful event" timestamps to detect when a stream-json event
 flow (e.g. from a CLI backend) has gone silent.  This generalises the concept
-from ``core/stuck_detector.py`` (tool-call-pattern stuck detection) and
+tool-call-pattern stuck detection (formerly a standalone module) and
 ``core/progress.py`` StallDetector (progress-report timestamp tracking) into a
 single, reusable component suitable for any event-driven backend.
 """

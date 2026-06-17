@@ -76,7 +76,7 @@ class BackendContext(BaseModel):
     leaking internal details like SandboxProvider or ToolRegistry.
     """
     # Full DAGNode — typed as Any to avoid core <-> agent circular import.
-    # BuiltinBackend passes it through to the AgentPool executor closure.
+    # BuiltinBackend uses it for lightweight single-shot LLM calls.
     node: Any
     artifacts: list[HandoffArtifact] = Field(default_factory=list)
     session_id: str = ""
