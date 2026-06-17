@@ -1,6 +1,6 @@
-"""Agent system prompts and tool allowlists.
+"""Agent system prompts.
 
-Extracted from agent/agent_pool.py for maintainability (#446).
+Retained for BuiltinBackend (planner/evaluator single-shot LLM calls).
 
 Note (M6.4): External backends (ClaudeCodeBackend) manage their own prompts.
 These prompts are retained for BuiltinBackend backward compat and will be
@@ -188,10 +188,4 @@ If NO automated evaluation results are provided, perform full evaluation:
 - Check code quality, architecture alignment
 - Verify edge cases are handled
 """,
-}
-
-TOOL_ALLOWLIST: dict[str, set[str]] = {
-    "planner": {"read", "glob", "grep"},
-    "generator": {"read", "write", "edit", "bash", "glob", "grep", "git"},
-    "evaluator": {"read", "bash", "glob", "grep"},
 }

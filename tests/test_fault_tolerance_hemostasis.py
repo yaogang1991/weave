@@ -253,63 +253,6 @@ class TestNodeTimeoutInDagEngine:
         assert dag.nodes["slow_node"].status == NodeStatus.FAILED
 
 
-class TestCooperativeCancellation:
-    def test_cancel_event_stops_worker(self):
-        """threading.Event causes worker loop to exit at iteration boundary."""
-        import threading
-
-        from core.config import LLMConfig
-        from core.llm_client import LLMClient  # noqa: F401
-        from session.store import SessionStore
-        from agent.worker import AgentWorker
-
-        cancel = threading.Event()
-        call_count = 0
-
-        config = LLMConfig(api_key="test-key")
-        store = SessionStore("./data/events")
-        worker = AgentWorker(config, store)
-
-        # Mock LLM to return a tool call every time
-        def mock_call(messages, tools, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            return {
-                "role": "assistant",
-                "content": "",
-                "tool_calls": [{
-                    "id": f"tc_{call_count}",
-                    "name": "bash",
-                    "arguments": {"command": "echo hi"},
-                }],
-            }
-
-        # Mock tool executor
-        from core.models import ToolResult
-
-        class FakeExecutor:
-            def execute(self, name, args):
-                # Set cancel after 2 tool executions
-                if call_count >= 2:
-                    cancel.set()
-                return ToolResult(tool_call_id="", success=True, output="ok")
-
-        worker.llm.call = mock_call
-
-        list(worker.run(  # noqa: F841
-            session_id="test",
-            system_prompt="test",
-            user_message="test",
-            tools=[],
-            tool_executor=FakeExecutor(),
-            max_iterations=50,
-            cancel_event=cancel,
-        ))
-
-        # Should have stopped before 50 iterations
-        assert call_count <= 5, f"Expected early exit but ran {call_count} iterations"
-
-
 class TestNodeTimeoutConfig:
     def test_default_timeout(self):
         from core.config import NodeTimeoutConfig

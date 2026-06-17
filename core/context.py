@@ -5,7 +5,7 @@ When the context window exceeds a threshold, summarises early messages via
 LLM and replaces them with a compact summary, preserving recent tool
 exchanges for continuity.
 
-Integrates with AgentWorker._truncate_messages (#480).
+Token-aware message truncation (#480).
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _KEEP_TOOL_RESULTS = 5
 class ContextManager:
     """Manage context window via proactive compaction (#480).
 
-    Replaces the simple truncation in AgentWorker._truncate_messages with:
+    Token-aware truncation for context window management:
     1. LLM-generated summary of early conversation
     2. Stale tool result clearing
     3. Threshold-based triggering (60% of max_tokens)
@@ -50,7 +50,7 @@ class ContextManager:
     def estimate_tokens(self, messages: list[dict]) -> int:
         """Estimate token count with CJK-aware character counting.
 
-        Delegates to AgentWorker._estimate_tokens for consistency,
+        Delegates to the tokenizer for consistency,
         but duplicated here to avoid circular imports.
         """
         total_tokens = 0

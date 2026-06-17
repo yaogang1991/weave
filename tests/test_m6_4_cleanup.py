@@ -78,20 +78,15 @@ class TestCoreM6Modules:
 # --- Deprecation annotations ---
 
 class TestDeprecationAnnotations:
-    """Verify deprecated modules still import cleanly (not deleted)."""
+    """Verify retained modules still import cleanly.
 
-    def test_import_output_monitor(self):
-        from guardrails.output_monitor import OutputMonitor
-        assert OutputMonitor is not None
-
-    def test_import_stuck_detector(self):
-        from core.stuck_detector import StuckDetector
-        assert StuckDetector is not None
+    M7.2.5 removed the deprecated modules (output_monitor, stuck_detector,
+    agent_pool/worker). Only the still-live imports are asserted here.
+    """
 
     def test_import_agent_prompts(self):
-        from agent.prompts import SYSTEM_PROMPTS, TOOL_ALLOWLIST
+        from agent.prompts import SYSTEM_PROMPTS
         assert "generator" in SYSTEM_PROMPTS
-        assert "generator" in TOOL_ALLOWLIST
 
     def test_import_tool_registry(self):
         from tools.registry import ToolRegistry

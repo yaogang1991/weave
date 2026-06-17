@@ -113,7 +113,8 @@ class NodeExecutor:
         self,
         agent_executor: Callable[
             [DAGNode, list[HandoffArtifact]], Coroutine[Any, Any, dict]
-        ],
+        ]
+        | None,
         emit_func: Callable[[ExecutionEvent], Coroutine[Any, Any, None]],
         watchdog: WatchdogService,
         config: NodeExecutorConfig | None = None,
@@ -725,7 +726,7 @@ class NodeExecutor:
 
         if self._backend_registry is not None:
             # backend_name already resolved above for stall timeout (#1106).
-            # BuiltinBackend has its own memory injection via agent_pool/worker;
+            # BuiltinBackend has its own memory injection via the lightweight caller;
             # only inject into BackendContext for external backends.
 
             # M6.2: Pre-check guardrail for external backends

@@ -2,7 +2,7 @@
 ExecutionFactory — extracted from RunService (#177 PR3).
 
 Builds the object graph for DAG execution: IntelligentOrchestrator,
-DAGExecutionEngine, AgentPool, Guardrails, ToolRegistry, EvaluatorEngine.
+DAGExecutionEngine, BuiltinBackend, Guardrails, ToolRegistry, EvaluatorEngine.
 """
 from __future__ import annotations
 
@@ -14,19 +14,15 @@ from core.config import WeaveConfig, LLMConfig, WatchdogConfig
 from core.dag_engine import DAGExecutionEngine, DAGEngineConfig
 from core.project_config import ProjectConfig
 from core.agent_registry import AgentRegistry
-from core.models import EventType, PersonalGuardrailPolicy
+from core.models import EventType
 from orchestrator.intelligent_orchestrator import IntelligentOrchestrator
-from agent.agent_pool import AgentPool
 from agent.backends.builtin import BuiltinBackend
 from agent.backends.registry import BackendRegistry
 from agent.lightweight_llm_caller import LightweightLLMCaller
 from session.store import SessionStore
-from tools.registry import ToolRegistry
 from guardrails.policy import (
-    Guardrails,
     GuardrailPolicy,
     PermissionMode,
-    PersonalGuardrails,
 )
 from evaluator.engine import EvaluatorEngine
 
@@ -113,68 +109,9 @@ class ExecutionFactory:
         backend_manager: Any | None = None,
         project_dir: str | None = None,
     ) -> DAGExecutionEngine:
-        """Build a DAGExecutionEngine with agent pool, failure handler,
+        """Build a DAGExecutionEngine with BackendRegistry, failure handler,
         and optional replan handler."""
         registry = AgentRegistry()
-
-        # Wire sandbox through SyncSandboxAdapter if backend_manager
-        # is available (#179 PR3)
-        sandbox_runner = None
-        if backend_manager is not None and getattr(backend_manager, "sandbox", None) is not None:
-            from tools.command_runner import SyncSandboxAdapter
-            sandbox_runner = SyncSandboxAdapter(backend_manager.sandbox)
-
-        tool_registry = ToolRegistry(
-            base_cwd=str(work_dir) if work_dir is not None else None,
-            sandbox_runner=sandbox_runner,
-        )
-
-        # Default guardrails: non-interactive → DONT_ASK + built-in tool whitelist
-        if self._policy is not None:
-            policy = self._policy
-        else:
-            project_guardrails = self.load_project_guardrails(work_dir)
-            if self._non_interactive:
-                default_mode = PermissionMode.DONT_ASK
-                default_allowed = ["read", "write", "edit", "bash", "glob", "grep", "git"]
-            else:
-                default_mode = PermissionMode.ACCEPT_EDITS
-                default_allowed = []
-            policy = GuardrailPolicy(
-                mode=project_guardrails.get("permission_mode", default_mode),
-                auto_approve_read=project_guardrails.get("auto_approve_read", True),
-                allowed_tools=project_guardrails.get("allowed_tools", default_allowed),
-                denied_commands=project_guardrails.get("denied_commands", []),
-                max_iterations=self._max_iterations,
-            )
-
-        # If policy is PersonalGuardrailPolicy, use PersonalGuardrails
-        if isinstance(policy, PersonalGuardrailPolicy):
-            guardrails = PersonalGuardrails(
-                policy,
-                tool_registry,
-                non_interactive=self._non_interactive,
-                approval_repo=self._approval_repo,
-                project_dir=project_dir,
-            )
-        else:
-            guardrails = Guardrails(policy, tool_registry, project_dir=project_dir)
-
-        pool = AgentPool(
-            llm_config=self._llm_config,
-            session_store=store,
-            agent_registry=registry,
-            tool_registry=tool_registry,
-            guardrails=guardrails,
-            max_iterations=self._max_iterations,
-            timeout=self._agent_timeout,
-            max_context_tokens=self._max_context_tokens,
-            llm_router=getattr(self, "_llm_router", None),
-            memory_manager=memory_manager,
-            job_id=job_id,
-            approval_repo=approval_repo,
-            run_id=run_id,
-        )
 
         # Orchestrator for failure handling
         orchestrator = self.create_orchestrator(store)
@@ -194,14 +131,14 @@ class ExecutionFactory:
             llm_router=getattr(self, "_llm_router", None),
         )
 
-        # M6.3: Create BuiltinBackend with both lightweight caller and pool
-        # Lightweight path handles planner/evaluator nodes; pool path handles
-        # generator nodes (which need the full tool loop).
+        # M7.2.5: BuiltinBackend is lightweight-only (pool-based execution
+        # removed). Generator nodes execute via external backends
+        # (claude_code/codex) registered below; planner/evaluator nodes use
+        # the lightweight path.
         builtin_backend = BuiltinBackend(
             lightweight_caller=lightweight_caller,
             session_store=store,
             session_id=session_id,
-            pool=pool,
         )
         backend_registry = BackendRegistry(builtin=builtin_backend)
 
@@ -234,7 +171,7 @@ class ExecutionFactory:
                 )
 
         engine = DAGExecutionEngine(
-            agent_executor=pool.get_executor(session_id),
+            agent_executor=None,  # M7.2.5: node execution via BackendRegistry
             failure_handler=orchestrator.adapt_to_failure,
             replan_handler=replan_handler,
             config=DAGEngineConfig(

@@ -18,6 +18,9 @@ def _make_node(task_description="test task", backend="codex"):
     node = MagicMock()
     node.task_description = task_description
     node.backend = backend
+    node.agent_type = "generator"
+    node.auto_eval_result = None
+    node.eval_feedback = None
     return node
 
 
@@ -324,10 +327,16 @@ class TestCodexExecute:
 
 
 class TestCodexRegistryIntegration:
+    def _make_builtin_backend(self):
+        from agent.backends.builtin import BuiltinBackend
+        mock_caller = MagicMock()
+        mock_caller.call = AsyncMock(return_value="fallback result")
+        mock_caller.token_usage = {"input_tokens": 0, "output_tokens": 0}
+        return BuiltinBackend(lightweight_caller=mock_caller, session_id="s1")
+
     @pytest.mark.asyncio
     async def test_register_and_execute(self):
-        pool = MagicMock()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
 
         backend = CodexBackend()
         registry.register("codex", backend)
@@ -348,20 +357,17 @@ class TestCodexRegistryIntegration:
 
     @pytest.mark.asyncio
     async def test_fallback_when_unhealthy(self):
-        pool = MagicMock()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
 
         with patch("agent.backends.codex.shutil.which", return_value=None):
             backend = CodexBackend()
             registry.register("codex", backend)
 
-        # Fallback to builtin — which requires a working pool executor.
-        # Just verify the registry doesn't crash and logs the fallback.
         ctx = _make_context()
-        with pytest.raises((TypeError, AttributeError)):
-            # BuiltinBackend will fail because pool is a MagicMock,
-            # but that's expected — the important thing is the fallback happens.
-            await registry.execute_for_node("codex", ctx)
+        result = await registry.execute_for_node("codex", ctx)
+
+        # Fallback to builtin — should succeed with the mock caller
+        assert result.status == BackendStatus.COMPLETED
 
 
 class TestCodexName:

@@ -128,35 +128,28 @@ class TestDAGNodeModelBackend:
 
 
 class TestBuiltinBackend:
-    def _make_pool(self, return_value=None):
-        closure = AsyncMock(return_value=return_value or {
-            "status": "completed",
-            "summary": "test done",
-            "artifacts": ["a.py"],
-            "output": "ok",
-        })
-        pool = MagicMock()
-        pool.get_executor.return_value = closure
-        return pool, closure
+    def _make_caller(self, return_value="test output"):
+        caller = MagicMock()
+        caller.call = AsyncMock(return_value=return_value)
+        caller.token_usage = {"input_tokens": 10, "output_tokens": 5}
+        return caller
 
     @pytest.mark.asyncio
     async def test_execute_returns_result(self):
-        pool, closure = self._make_pool()
-        backend = BuiltinBackend(pool=pool, session_id="s1")
+        caller = self._make_caller("test done")
+        backend = BuiltinBackend(lightweight_caller=caller, session_id="s1")
 
         node = DAGNode(id="n1", agent_type="generator", task_description="test")
         ctx = BackendContext(node=node, artifacts=[])
 
         result = await backend.execute(ctx)
         assert result.status == BackendStatus.COMPLETED
-        assert result.summary == "test done"
-        assert result.artifacts == ["a.py"]
-        assert result.output == "ok"
+        assert result.output == "test done"
 
     @pytest.mark.asyncio
-    async def test_execute_passes_context_to_closure(self):
-        pool, closure = self._make_pool()
-        backend = BuiltinBackend(pool=pool, session_id="s1")
+    async def test_execute_passes_context_to_caller(self):
+        caller = self._make_caller("ok")
+        backend = BuiltinBackend(lightweight_caller=caller, session_id="s1")
 
         node = DAGNode(id="n1", agent_type="generator", task_description="test")
         event = threading.Event()
@@ -170,20 +163,17 @@ class TestBuiltinBackend:
         )
 
         await backend.execute(ctx)
-        closure.assert_called_once_with(
-            node,
-            [],
-            cancel_event=event,
-            progress_callback=callback,
-            workspace_path="/tmp/ws",
-        )
+        caller.call.assert_called_once()
+        call_kwargs = caller.call.call_args[1]
+        assert call_kwargs["cancel_event"] is event
+        assert call_kwargs["session_id"] == "s1"
 
     @pytest.mark.asyncio
     async def test_execute_reraises_exceptions(self):
         from core.exceptions import PendingApprovalError
-        pool, closure = self._make_pool()
-        closure.side_effect = PendingApprovalError("need approval")
-        backend = BuiltinBackend(pool=pool, session_id="s1")
+        caller = self._make_caller()
+        caller.call = AsyncMock(side_effect=PendingApprovalError("need approval"))
+        backend = BuiltinBackend(lightweight_caller=caller, session_id="s1")
 
         node = DAGNode(id="n1", agent_type="generator", task_description="test")
         ctx = BackendContext(node=node, artifacts=[])
@@ -193,57 +183,43 @@ class TestBuiltinBackend:
 
     @pytest.mark.asyncio
     async def test_health_check_always_true(self):
-        pool, _ = self._make_pool()
-        backend = BuiltinBackend(pool=pool, session_id="s1")
+        caller = self._make_caller()
+        backend = BuiltinBackend(lightweight_caller=caller, session_id="s1")
         assert await backend.health_check() is True
 
     def test_get_capabilities_returns_empty(self):
-        pool, _ = self._make_pool()
-        backend = BuiltinBackend(pool=pool, session_id="s1")
+        caller = self._make_caller()
+        backend = BuiltinBackend(lightweight_caller=caller, session_id="s1")
         assert backend.get_capabilities() == []
 
     def test_name_property(self):
-        pool, _ = self._make_pool()
-        backend = BuiltinBackend(pool=pool, session_id="s1")
+        caller = self._make_caller()
+        backend = BuiltinBackend(lightweight_caller=caller, session_id="s1")
         assert backend.name == "builtin"
-
-    def test_lazy_closure_creation(self):
-        pool, closure = self._make_pool()
-        backend = BuiltinBackend(pool=pool, session_id="s1")
-        pool.get_executor.assert_not_called()
-        backend._ensure_closure()
-        pool.get_executor.assert_called_once_with("s1")
-        backend._ensure_closure()
-        pool.get_executor.assert_called_once()
 
 
 # -- BackendRegistry tests --
 
 
 class TestBackendRegistry:
-    def _make_pool(self):
-        closure = AsyncMock(return_value={
-            "status": "completed",
-            "summary": "ok",
-            "artifacts": [],
-            "output": "",
-        })
-        pool = MagicMock()
-        pool.get_executor.return_value = closure
-        return pool
+    def _make_builtin_backend(self) -> BuiltinBackend:
+        mock_caller = MagicMock()
+        mock_caller.call = AsyncMock(return_value="test output")
+        mock_caller.token_usage = {"input_tokens": 0, "output_tokens": 0}
+        return BuiltinBackend(lightweight_caller=mock_caller, session_id="s1")
 
     def test_builtin_always_registered(self):
-        registry = BackendRegistry.from_pool(pool=self._make_pool(), session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
         backend = registry.get_backend("builtin")
         assert isinstance(backend, BuiltinBackend)
 
     def test_fallback_on_missing_backend(self):
-        registry = BackendRegistry.from_pool(pool=self._make_pool(), session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
         backend = registry.get_backend("nonexistent")
         assert isinstance(backend, BuiltinBackend)
 
     def test_register_and_get_backend(self):
-        registry = BackendRegistry.from_pool(pool=self._make_pool(), session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(return_value=True)
         registry.register("external", mock_backend)
@@ -251,8 +227,7 @@ class TestBackendRegistry:
 
     @pytest.mark.asyncio
     async def test_execute_for_node_builtin(self):
-        pool = self._make_pool()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
         node = DAGNode(id="n1", agent_type="generator", task_description="test")
         ctx = BackendContext(node=node, artifacts=[])
 
@@ -261,8 +236,7 @@ class TestBackendRegistry:
 
     @pytest.mark.asyncio
     async def test_execute_for_node_external_healthy(self):
-        pool = self._make_pool()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
 
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(return_value=True)
@@ -281,8 +255,7 @@ class TestBackendRegistry:
 
     @pytest.mark.asyncio
     async def test_execute_for_node_external_unhealthy(self):
-        pool = self._make_pool()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
 
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(return_value=False)
@@ -297,8 +270,7 @@ class TestBackendRegistry:
 
     @pytest.mark.asyncio
     async def test_execute_for_node_health_check_exception(self):
-        pool = self._make_pool()
-        registry = BackendRegistry.from_pool(pool=pool, session_id="s1")
+        registry = BackendRegistry(builtin=self._make_builtin_backend())
 
         mock_backend = MagicMock(spec=AgentBackend)
         mock_backend.health_check = AsyncMock(side_effect=ConnectionError("unreachable"))

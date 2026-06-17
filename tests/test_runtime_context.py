@@ -9,7 +9,6 @@ Covers:
 """
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 
 from tools.registry import ToolRegistry  # noqa: E402
@@ -17,103 +16,6 @@ from tools.registry import ToolRegistry  # noqa: E402
 
 # =============================================================================
 # _build_runtime_context
-# =============================================================================
-
-
-class TestBuildRuntimeContext:
-    """Runtime context includes OS, CWD, PROJECT_ROOT, PYTHON."""
-
-    def _make_agent(self, base_cwd: str | None = None):
-        from agent.agent_pool import WorkerAgent
-        from core.config import LLMConfig
-        from session.store import SessionStore
-
-        store = MagicMock(spec=SessionStore)
-        tool_reg = ToolRegistry(base_cwd=base_cwd)
-        with patch("agent.worker.LLMClient"):
-            agent = WorkerAgent(
-                capability=MagicMock(system_prompt=""),
-                llm_config=MagicMock(spec=LLMConfig),
-                session_store=store,
-                tool_registry=tool_reg,
-                guardrails=MagicMock(),
-            )
-        return agent
-
-    def test_includes_os(self):
-        import platform
-        agent = self._make_agent()
-        ctx = agent._build_runtime_context()
-        assert platform.system() in ctx
-
-    def test_includes_cwd(self):
-        agent = self._make_agent()
-        ctx = agent._build_runtime_context()
-        assert "CWD:" in ctx
-
-    def test_includes_project_root(self):
-        agent = self._make_agent(base_cwd="/tmp/my-project")
-        ctx = agent._build_runtime_context()
-        assert "PROJECT_ROOT:" in ctx
-        assert "my-project" in ctx
-
-    def test_includes_python(self):
-        agent = self._make_agent()
-        ctx = agent._build_runtime_context()
-        assert "PYTHON:" in ctx
-
-    def test_includes_path_rules(self):
-        agent = self._make_agent()
-        ctx = agent._build_runtime_context()
-        assert "relative paths" in ctx.lower()
-        assert "PROJECT_ROOT" in ctx
-
-    def test_project_root_falls_back_to_cwd(self):
-        agent = self._make_agent(base_cwd=None)
-        ctx = agent._build_runtime_context()
-        assert "PROJECT_ROOT:" in ctx
-
-    def test_runtime_env_appears_exactly_once_in_prompt(self):
-        """## Runtime Environment must appear exactly once in the final prompt
-        built by _execute_inner (no duplicate method definitions or calls).
-        """
-        import asyncio
-
-        agent = self._make_agent(base_cwd="/tmp/project")
-
-        # Monkey-patch _run_with_tools to capture the prompt instead of
-        # actually running the LLM loop.
-        captured_prompt: dict[str, str] = {}
-
-        async def _fake_run(
-            prompt, session_id, context=None,
-            node_id="", cancel_event=None,
-            progress_callback=None
-        ):
-            captured_prompt["value"] = prompt
-            return {"status": "completed", "summary": "", "artifacts": [], "output": ""}
-
-        agent._run_with_tools = _fake_run
-
-        asyncio.run(
-            agent._execute_inner(
-                task="do something",
-                input_artifacts=[],
-                session_id="test-session",
-                node_id="n1",
-            )
-        )
-
-        prompt = captured_prompt["value"]
-        count = prompt.count("## Runtime Environment")
-        assert count == 1, (
-            f"Expected exactly 1 '## Runtime Environment' in prompt, "
-            f"found {count}. Prompt:\n{prompt}"
-        )
-
-
-# =============================================================================
-# Bash tool schema and output
 # =============================================================================
 
 
